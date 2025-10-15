@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/antonovs105/project-management-system-go/internal/user"
 	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
@@ -36,6 +37,8 @@ func main() {
 
 	log.Println("DB connection successful")
 
+	_ = user.NewRepository(db)
+
 	// Dependency injection
 	server := &ApiServer{
 		db: db,
@@ -60,6 +63,7 @@ func (s *ApiServer) healthCheck(c echo.Context) error {
 	if err := s.db.Ping(); err != nil {
 		log.Printf("Health check failed: database ping error: %v", err)
 
+		// Returns error status if DB is unreacheble
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"status": "error",
 			"system": "database unreacheble",
