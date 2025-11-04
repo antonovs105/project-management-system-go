@@ -15,7 +15,8 @@ import (
 
 // Server structure
 type ApiServer struct {
-	db *sqlx.DB
+	db          *sqlx.DB
+	userService *user.Service
 }
 
 func main() {
@@ -37,11 +38,14 @@ func main() {
 
 	log.Println("DB connection successful")
 
-	_ = user.NewRepository(db)
+	userRepo := user.NewRepository(db)
+
+	userService := user.NewService(userRepo)
 
 	// Dependency injection
 	server := &ApiServer{
-		db: db,
+		db:          db,
+		userService: userService,
 	}
 
 	// New Echo
