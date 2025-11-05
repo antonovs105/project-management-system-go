@@ -16,7 +16,7 @@ import (
 // Server structure
 type ApiServer struct {
 	db          *sqlx.DB
-	userService *user.Service
+	userHandler *user.Handler
 }
 
 func main() {
@@ -42,10 +42,12 @@ func main() {
 
 	userService := user.NewService(userRepo)
 
+	userHandler := user.NewHandler(userService)
+
 	// Dependency injection
 	server := &ApiServer{
 		db:          db,
-		userService: userService,
+		userHandler: userHandler,
 	}
 
 	// New Echo
@@ -57,6 +59,8 @@ func main() {
 
 	// Routes
 	e.GET("/health", server.healthCheck)
+
+	e.POST("/register", server.userHandler.Register)
 
 	e.Logger.Fatal(e.Start(":8080"))
 }
