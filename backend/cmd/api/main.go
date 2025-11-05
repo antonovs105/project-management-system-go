@@ -7,6 +7,7 @@ import (
 
 	authMiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
 	"github.com/antonovs105/project-management-system-go/internal/project"
+	"github.com/antonovs105/project-management-system-go/internal/ticket"
 	"github.com/antonovs105/project-management-system-go/internal/user"
 	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
@@ -20,6 +21,7 @@ type ApiServer struct {
 	db             *sqlx.DB
 	userHandler    *user.Handler
 	projectHandler *project.Handler
+	ticketHandler  *ticket.Handler
 }
 
 func main() {
@@ -55,11 +57,17 @@ func main() {
 	projectService := project.NewService(projectRepo)
 	projectHandler := project.NewHandler(projectService)
 
+	// Ticket dependencies
+	ticketRepo := ticket.NewRepository(db)
+	ticketService := ticket.NewService(ticketRepo, projectService)
+	ticketHandler := ticket.NewHandler(ticketService)
+
 	// Dependency injection
 	server := &ApiServer{
 		db:             db,
 		userHandler:    userHandler,
 		projectHandler: projectHandler,
+		ticketHandler:  ticketHandler,
 	}
 
 	// New Echo
@@ -88,6 +96,8 @@ func main() {
 	api.GET("/projects", server.projectHandler.List)
 	api.PATCH("/projects/:id", server.projectHandler.Update)
 	api.DELETE("/projects/:id", server.projectHandler.Delete)
+	api.POST("/projects/:projectID/tickets", server.ticketHandler.Create)
+	api.GET("/projects/:projectID/tickets", server.ticketHandler.List)
 
 	e.Logger.Fatal(e.Start(":8080"))
 }
