@@ -59,3 +59,29 @@ func (s *Service) ListUserProjects(ctx context.Context, userID int64) ([]Project
 
 	return projects, nil
 }
+
+// UpdateProjectRequest struct for providing data for update
+type UpdateProjectRequest struct {
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
+}
+
+// UpdateProject logic for updating project
+func (s *Service) UpdateProject(ctx context.Context, projectID, userID int64, req UpdateProjectRequest) error {
+	// find project, check accwss
+	projectToUpdate, err := s.GetProjectByID(ctx, projectID, userID)
+	if err != nil {
+		return err
+	}
+
+	// update rows
+	if req.Name != nil {
+		projectToUpdate.Name = *req.Name
+	}
+	if req.Description != nil {
+		projectToUpdate.Description = *req.Description
+	}
+
+	// save changes
+	return s.repo.Update(ctx, projectToUpdate)
+}

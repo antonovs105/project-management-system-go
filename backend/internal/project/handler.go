@@ -70,3 +70,29 @@ func (h *Handler) List(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, projects)
 }
+
+// Update handler for PATCH /api/projects/:id
+func (h *Handler) Update(c echo.Context) error {
+	// get project id
+	projectIDStr := c.Param("id")
+	projectID, err := strconv.ParseInt(projectIDStr, 10, 64)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid project ID"})
+	}
+
+	// parsing request body
+	var req UpdateProjectRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+	}
+
+	userID := c.Get("userID").(int64)
+
+	// call service for update
+	err = h.service.UpdateProject(c.Request().Context(), projectID, userID, req)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	}
+
+	return c.NoContent(http.StatusNoContent)
+}

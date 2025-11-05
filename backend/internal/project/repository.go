@@ -62,3 +62,30 @@ func (r *Repository) ListByOwnerID(ctx context.Context, ownerID int64) ([]Projec
 
 	return projects, nil
 }
+
+// Update updates (how unexpectable) project data in DB
+func (r *Repository) Update(ctx context.Context, project *Project) error {
+	query := `
+		UPDATE projects 
+		SET 
+			name = :name,
+			description = :description,
+			updated_at = now()
+		WHERE id = :id`
+
+	result, err := r.db.NamedExecContext(ctx, query, project)
+	if err != nil {
+		return err
+	}
+
+	// Ckecking is it change enything
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return errors.New("no rows affected, project not found")
+	}
+
+	return nil
+}

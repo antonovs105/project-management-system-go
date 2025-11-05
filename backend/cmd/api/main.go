@@ -86,6 +86,7 @@ func main() {
 	api.POST("/projects", server.projectHandler.Create)
 	api.GET("/projects/:id", server.projectHandler.Get)
 	api.GET("/projects", server.projectHandler.List)
+	api.PATCH("/projects/:id", server.projectHandler.Update)
 
 	e.Logger.Fatal(e.Start(":8080"))
 }
