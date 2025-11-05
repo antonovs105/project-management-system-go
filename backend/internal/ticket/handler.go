@@ -67,3 +67,69 @@ func (h *Handler) List(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, tickets)
 }
+
+type updateTicketRequest struct {
+	Title       *string `json:"title"`
+	Description *string `json:"description"`
+	Status      *string `json:"status"`
+	Priority    *string `json:"priority"`
+	AssigneeID  **int64 `json:"assignee_id"`
+}
+
+// Get handler for GET /api/tickets/:id
+func (h *Handler) Get(c echo.Context) error {
+	ticketID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid ticket ID"})
+	}
+	userID := c.Get("userID").(int64)
+
+	ticket, err := h.service.GetTicketByID(c.Request().Context(), ticketID, userID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, ticket)
+}
+
+// Update handler for PATCH /api/tickets/:id
+func (h *Handler) Update(c echo.Context) error {
+	ticketID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid ticket ID"})
+	}
+	userID := c.Get("userID").(int64)
+
+	var req updateTicketRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+	}
+
+	serviceReq := UpdateTicketRequest{
+		Title:       req.Title,
+		Description: req.Description,
+		Status:      req.Status,
+		Priority:    req.Priority,
+		AssigneeID:  req.AssigneeID,
+	}
+
+	err = h.service.UpdateTicket(c.Request().Context(), serviceReq, ticketID, userID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+// Delete handler for DELETE /api/tickets/:id
+func (h *Handler) Delete(c echo.Context) error {
+	ticketID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid ticket ID"})
+	}
+	userID := c.Get("userID").(int64)
+
+	err = h.service.DeleteTicket(c.Request().Context(), ticketID, userID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	}
+	return c.NoContent(http.StatusNoContent)
+}

@@ -98,6 +98,9 @@ func main() {
 	api.DELETE("/projects/:id", server.projectHandler.Delete)
 	api.POST("/projects/:projectID/tickets", server.ticketHandler.Create)
 	api.GET("/projects/:projectID/tickets", server.ticketHandler.List)
+	api.GET("/tickets/:id", server.ticketHandler.Get)
+	api.PATCH("/tickets/:id", server.ticketHandler.Update)
+	api.DELETE("/tickets/:id", server.ticketHandler.Delete)
 
 	e.Logger.Fatal(e.Start(":8080"))
 }

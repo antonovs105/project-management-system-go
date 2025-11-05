@@ -2,6 +2,7 @@ package ticket
 
 import (
 	"context"
+	"errors"
 
 	"github.com/antonovs105/project-management-system-go/internal/project"
 )
@@ -68,4 +69,71 @@ func (s *Service) ListTicketsInProject(ctx context.Context, projectID, userID in
 	}
 
 	return s.repo.ListByProjectID(ctx, projectID)
+}
+
+// GetTicketByID gogic to get single ticket
+func (s *Service) GetTicketByID(ctx context.Context, ticketID, userID int64) (*Ticket, error) {
+	ticket, err := s.repo.GetByID(ctx, ticketID)
+	if err != nil {
+		return nil, errors.New("ticket not found")
+	}
+
+	// check access
+	_, err = s.projectService.GetProjectByID(ctx, ticket.ProjectID, userID)
+	if err != nil {
+		return nil, errors.New("ticket not found or access denied")
+	}
+
+	return ticket, nil
+}
+
+// UpdateTicketRequest DTO for updating ticket
+type UpdateTicketRequest struct {
+	Title       *string `json:"title"`
+	Description *string `json:"description"`
+	Status      *string `json:"status"`
+	Priority    *string `json:"priority"`
+	AssigneeID  **int64 `json:"assignee_id"`
+}
+
+// UpdateTicket logic for update
+func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, ticketID, userID int64) error {
+	// find ticket, check access
+	ticketToUpdate, err := s.GetTicketByID(ctx, ticketID, userID)
+	if err != nil {
+		return err
+	}
+
+	// TODO: add more advanced check
+
+	// update rows
+	if req.Title != nil {
+		ticketToUpdate.Title = *req.Title
+	}
+	if req.Description != nil {
+		ticketToUpdate.Description = *req.Description
+	}
+	if req.Status != nil {
+		ticketToUpdate.Status = *req.Status
+	}
+	if req.Priority != nil {
+		ticketToUpdate.Priority = *req.Priority
+	}
+	// logic for AssigneeID
+	if req.AssigneeID != nil {
+		ticketToUpdate.AssigneeID = *req.AssigneeID
+	}
+
+	return s.repo.Update(ctx, ticketToUpdate)
+}
+
+// DeleteTicket logic for deleting
+func (s *Service) DeleteTicket(ctx context.Context, ticketID, userID int64) error {
+	// check access
+	_, err := s.GetTicketByID(ctx, ticketID, userID)
+	if err != nil {
+		return err
+	}
+
+	return s.repo.Delete(ctx, ticketID)
 }

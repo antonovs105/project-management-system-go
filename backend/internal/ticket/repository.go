@@ -45,3 +45,59 @@ func (r *Repository) ListByProjectID(ctx context.Context, projectID int64) ([]Ti
 	}
 	return tickets, nil
 }
+
+// GetByID finds single ticket by its id
+func (r *Repository) GetByID(ctx context.Context, id int64) (*Ticket, error) {
+	var t Ticket
+	query := `SELECT * FROM tickets WHERE id = $1`
+	err := r.db.GetContext(ctx, &t, query, id)
+	return &t, err
+}
+
+// Update renews (new synonym!) ticket data in DB
+func (r *Repository) Update(ctx context.Context, ticket *Ticket) error {
+	query := `
+		UPDATE tickets
+		SET
+			title = :title,
+			description = :description,
+			status = :status,
+			priority = :priority,
+			assignee_id = :assignee_id,
+			updated_at = now()
+		WHERE id = :id`
+
+	result, err := r.db.NamedExecContext(ctx, query, ticket)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return errors.New("ticket to update not found")
+	}
+
+	return nil
+}
+
+// Delete removes ticket from DB
+func (r *Repository) Delete(ctx context.Context, id int64) error {
+	query := `DELETE FROM tickets WHERE id = $1`
+	result, err := r.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return errors.New("ticket to delete not found")
+	}
+
+	return nil
+}
