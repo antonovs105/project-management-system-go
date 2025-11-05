@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 
+	authMiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
 	"github.com/antonovs105/project-management-system-go/internal/user"
 	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
@@ -68,6 +69,14 @@ func main() {
 
 	e.POST("/login", server.userHandler.Login)
 
+	// protected routes
+	api := e.Group("/api")
+
+	api.Use(authMiddleware.JWTMiddleware([]byte(jwtSecret)))
+
+	// routes that require auth
+	api.GET("/me", server.getProfile) // for test
+
 	e.Logger.Fatal(e.Start(":8080"))
 }
 
@@ -87,5 +96,16 @@ func (s *ApiServer) healthCheck(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{
 		"status": "ok",
 		"system": "working",
+	})
+}
+
+func (s *ApiServer) getProfile(c echo.Context) error {
+	// taking userID
+	userID := c.Get("userID").(int64)
+
+	// Return ID
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"message": "Welcome!",
+		"user_id": userID,
 	})
 }
