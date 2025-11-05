@@ -28,6 +28,10 @@ func main() {
 	if dbSource == "" {
 		log.Fatal("DB_SOURCE environment variable is not set")
 	}
+	jwtSecret := os.Getenv("JWT_SECRET_KEY")
+	if jwtSecret == "" {
+		log.Fatal("JWT_SECRET_KEY environment variable is not set")
+	}
 
 	// Connecting DB
 	db, err := sqlx.Connect("postgres", dbSource)
@@ -40,7 +44,7 @@ func main() {
 
 	userRepo := user.NewRepository(db)
 
-	userService := user.NewService(userRepo)
+	userService := user.NewService(userRepo, []byte(jwtSecret))
 
 	userHandler := user.NewHandler(userService)
 
@@ -61,6 +65,8 @@ func main() {
 	e.GET("/health", server.healthCheck)
 
 	e.POST("/register", server.userHandler.Register)
+
+	e.POST("/login", server.userHandler.Login)
 
 	e.Logger.Fatal(e.Start(":8080"))
 }

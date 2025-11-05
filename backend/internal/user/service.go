@@ -2,20 +2,27 @@ package user
 
 import (
 	"context"
+	"log"
 
+	"errors"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
 // Service incapsulates business logic for working with users
 // Depends on repository for data access
 type Service struct {
-	repo *Repository
+	repo         *Repository
+	jwtSecretKey []byte
 }
 
 // constructor for UserService.
-func NewService(repo *Repository) *Service {
+func NewService(repo *Repository, jwtSecret []byte) *Service {
 	return &Service{
-		repo: repo,
+		repo:         repo,
+		jwtSecretKey: jwtSecret,
 	}
 }
 
@@ -48,4 +55,48 @@ func (s *Service) RegisterUser(ctx context.Context, username, email, password st
 	newUser.PasswordHash = ""
 
 	return newUser, nil
+}
+
+// Login checks users and returns JWT
+func (s *Service) Login(ctx context.Context, email, password string) (string, error) {
+	// searching user in DB
+	user, err := s.repo.GetUserByEmail(ctx, email)
+	if err != nil {
+		log.Printf("[DEBUG] Login failed for email '%s'. Reason: user not found or DB error. Error: %v", email, err)
+		return "", errors.New("invalid credentials")
+	}
+
+	log.Println("---------------------------------")
+	log.Printf("[DEBUG] Attempting login for user ID: %d", user.ID)
+	log.Printf("[DEBUG] Email from request: '%s'", email)
+	log.Printf("[DEBUG] Password from request: '%s'", password)
+	log.Printf("[DEBUG] Hash from DB: '%s'", user.PasswordHash)
+	log.Println("---------------------------------")
+
+	// comparing hashes
+	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password))
+	if err != nil {
+		log.Printf("[DEBUG] Password comparison failed. Reason: %v", err)
+		return "", errors.New("invalid credentials")
+	}
+
+	log.Printf("[DEBUG] Password for user ID %d comparison successful!", user.ID)
+
+	// generating JWT
+	claims := jwt.MapClaims{
+		"sub":  user.ID,
+		"role": user.Role,
+		"exp":  time.Now().Add(time.Hour * 72).Unix(),
+	}
+
+	// creating new token
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	// Signing token
+	tokenString, err := token.SignedString(s.jwtSecretKey)
+	if err != nil {
+		return "", err
+	}
+
+	return tokenString, nil
 }

@@ -40,3 +40,18 @@ func (r *Repository) CreateUser(ctx context.Context, user *User) error {
 
 	return nil
 }
+
+// GetUserByEmail finds user by email
+func (r *Repository) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+
+	var user User
+
+	query := `SELECT * FROM users WHERE email = $1`
+
+	err := r.db.GetContext(ctx, &user, query, email)
+	if err != nil {
+		return nil, err
+	}
+
+	return &user, nil
+}

@@ -53,3 +53,29 @@ func (h *Handler) Register(c echo.Context) error {
 	// Success respond 201 Created
 	return c.JSON(http.StatusCreated, newUser)
 }
+
+// LoginRequest - структура для парсинга JSON-запроса на логин.
+type LoginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+// Login - обработчик для роута POST /login.
+func (h *Handler) Login(c echo.Context) error {
+	var req LoginRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request payload"})
+	}
+
+	// Вызываем сервис для проверки логина и пароля.
+	token, err := h.service.Login(c.Request().Context(), req.Email, req.Password)
+	if err != nil {
+		// Если сервис вернул ошибку (неверные данные), отправляем 401 Unauthorized.
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": err.Error()})
+	}
+
+	// Если все успешно, возвращаем токен клиенту.
+	return c.JSON(http.StatusOK, map[string]string{
+		"token": token,
+	})
+}
