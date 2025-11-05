@@ -87,6 +87,7 @@ func main() {
 	api.GET("/projects/:id", server.projectHandler.Get)
 	api.GET("/projects", server.projectHandler.List)
 	api.PATCH("/projects/:id", server.projectHandler.Update)
+	api.DELETE("/projects/:id", server.projectHandler.Delete)
 
 	e.Logger.Fatal(e.Start(":8080"))
 }

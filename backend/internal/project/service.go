@@ -85,3 +85,15 @@ func (s *Service) UpdateProject(ctx context.Context, projectID, userID int64, re
 	// save changes
 	return s.repo.Update(ctx, projectToUpdate)
 }
+
+// DeleteProject do i really need to write what it does?
+func (s *Service) DeleteProject(ctx context.Context, projectID, userID int64) error {
+	// Check is project exists and is it belongs to user
+	_, err := s.GetProjectByID(ctx, projectID, userID)
+	if err != nil {
+		return err
+	}
+
+	// deleting project
+	return s.repo.Delete(ctx, projectID)
+}

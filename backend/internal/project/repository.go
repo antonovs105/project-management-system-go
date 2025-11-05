@@ -89,3 +89,24 @@ func (r *Repository) Update(ctx context.Context, project *Project) error {
 
 	return nil
 }
+
+// Delete deletes (wow) project from DB
+func (r *Repository) Delete(ctx context.Context, id int64) error {
+	query := `DELETE FROM projects WHERE id = $1`
+
+	result, err := r.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return err
+	}
+
+	// check is it changed something
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return errors.New("project to delete not found")
+	}
+
+	return nil
+}

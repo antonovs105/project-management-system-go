@@ -96,3 +96,23 @@ func (h *Handler) Update(c echo.Context) error {
 
 	return c.NoContent(http.StatusNoContent)
 }
+
+// Delete handler of DELETE /api/projects/:id
+func (h *Handler) Delete(c echo.Context) error {
+	// get project id (i am repeating myself)
+	projectIDStr := c.Param("id")
+	projectID, err := strconv.ParseInt(projectIDStr, 10, 64)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid project ID"})
+	}
+
+	userID := c.Get("userID").(int64)
+
+	// call service for deleting
+	err = h.service.DeleteProject(c.Request().Context(), projectID, userID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	}
+
+	return c.NoContent(http.StatusNoContent)
+}
