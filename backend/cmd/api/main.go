@@ -6,6 +6,7 @@ import (
 	"os"
 
 	authMiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
+	"github.com/antonovs105/project-management-system-go/internal/project"
 	"github.com/antonovs105/project-management-system-go/internal/user"
 	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
@@ -16,8 +17,9 @@ import (
 
 // Server structure
 type ApiServer struct {
-	db          *sqlx.DB
-	userHandler *user.Handler
+	db             *sqlx.DB
+	userHandler    *user.Handler
+	projectHandler *project.Handler
 }
 
 func main() {
@@ -43,16 +45,21 @@ func main() {
 
 	log.Println("DB connection successful")
 
+	// User dependencies
 	userRepo := user.NewRepository(db)
-
 	userService := user.NewService(userRepo, []byte(jwtSecret))
-
 	userHandler := user.NewHandler(userService)
+
+	// Project dependencies
+	projectRepo := project.NewRepository(db)
+	projectService := project.NewService(projectRepo)
+	projectHandler := project.NewHandler(projectService)
 
 	// Dependency injection
 	server := &ApiServer{
-		db:          db,
-		userHandler: userHandler,
+		db:             db,
+		userHandler:    userHandler,
+		projectHandler: projectHandler,
 	}
 
 	// New Echo
@@ -76,6 +83,8 @@ func main() {
 
 	// routes that require auth
 	api.GET("/me", server.getProfile) // for test
+	api.POST("/projects", server.projectHandler.Create)
+	api.GET("/projects/:id", server.projectHandler.Get)
 
 	e.Logger.Fatal(e.Start(":8080"))
 }
