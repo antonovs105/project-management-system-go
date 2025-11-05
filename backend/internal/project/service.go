@@ -3,14 +3,26 @@ package project
 import (
 	"context"
 	"errors"
+	"log"
+
+	"github.com/antonovs105/project-management-system-go/internal/projectmember"
 )
 
-type Service struct {
-	repo *Repository
+type MemberAdder interface {
+	AddMember(ctx context.Context, userID, projectID int64, role string) (*projectmember.ProjectMember, error)
+	GetUserRole(ctx context.Context, userID, projectID int64) (string, error)
 }
 
-func NewService(repo *Repository) *Service {
-	return &Service{repo: repo}
+type Service struct {
+	repo                 *Repository
+	projectMemberService MemberAdder
+}
+
+func NewService(repo *Repository, pmService MemberAdder) *Service {
+	return &Service{
+		repo:                 repo,
+		projectMemberService: pmService,
+	}
 }
 
 // CreateProject is business logic for creating project
@@ -28,7 +40,12 @@ func (s *Service) CreateProject(ctx context.Context, name, description string, u
 		return nil, err
 	}
 
-	// TODO: after creating project need to add creator in table project_members as owner
+	// after creating project add creator in table project_members as owner
+	_, err = s.projectMemberService.AddMember(ctx, userID, p.ID, "owner")
+	if err != nil {
+		log.Printf("CRITICAL: project %d created, but failed to add owner role: %v", p.ID, err)
+		return nil, errors.New("failed to finalize project creation")
+	}
 
 	return p, nil
 }
@@ -40,10 +57,13 @@ func (s *Service) GetProjectByID(ctx context.Context, projectID, userID int64) (
 	}
 
 	// Checking access
-	// for now sim[le]
-	if project.OwnerID != userID {
+	role, err := s.projectMemberService.GetUserRole(ctx, userID, projectID)
+	if err != nil {
+		// Если `err` (особенно `sql.ErrNoRows`), значит пользователь не участник проекта.
 		return nil, errors.New("project not found or access denied")
 	}
+
+	log.Printf("User %d has role '%s' in project %d", userID, role, projectID)
 
 	return project, nil
 }
@@ -96,4 +116,25 @@ func (s *Service) DeleteProject(ctx context.Context, projectID, userID int64) er
 
 	// deleting project
 	return s.repo.Delete(ctx, projectID)
+}
+
+func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUserID, newUserID int64, role string) error {
+	// Check priviliges
+	currentUserRole, err := s.projectMemberService.GetUserRole(ctx, currentUserID, projectID)
+	if err != nil {
+		return errors.New("access denied: you are not a member of this project")
+	}
+
+	if currentUserRole != "owner" && currentUserRole != "manager" {
+		return errors.New("insufficient permissions: only owners or managers can add new members")
+	}
+
+	// If good, call projectMemberService to ad new user (newUserID).
+	_, err = s.projectMemberService.AddMember(ctx, newUserID, projectID, role)
+	if err != nil {
+		// TODO: add more clarity errors
+		return err
+	}
+
+	return nil
 }

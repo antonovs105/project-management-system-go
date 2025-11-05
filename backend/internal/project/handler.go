@@ -116,3 +116,34 @@ func (h *Handler) Delete(c echo.Context) error {
 
 	return c.NoContent(http.StatusNoContent)
 }
+
+// addMemberRequest struct for parsing JSON request
+type addMemberRequest struct {
+	UserID int64  `json:"user_id"`
+	Role   string `json:"role"`
+}
+
+// AddMember handler for POST /api/projects/:id/members
+func (h *Handler) AddMember(c echo.Context) error {
+	projectID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid project ID"})
+	}
+
+	currentUserID := c.Get("userID").(int64)
+
+	// parse request
+	var req addMemberRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
+	}
+
+	// call service logic
+	err = h.service.AddMemberToProject(c.Request().Context(), projectID, currentUserID, req.UserID, req.Role)
+	if err != nil {
+		// TODO: add more clarity errors
+		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+	}
+
+	return c.NoContent(http.StatusNoContent)
+}

@@ -7,6 +7,7 @@ import (
 
 	authMiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
 	"github.com/antonovs105/project-management-system-go/internal/project"
+	"github.com/antonovs105/project-management-system-go/internal/projectmember"
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
 	"github.com/antonovs105/project-management-system-go/internal/user"
 	"github.com/jmoiron/sqlx"
@@ -52,9 +53,13 @@ func main() {
 	userService := user.NewService(userRepo, []byte(jwtSecret))
 	userHandler := user.NewHandler(userService)
 
-	// Project dependencies
+	// projectmembers dependencies
+	projectMemberRepo := projectmember.NewRepository(db)
+	projectMemberService := projectmember.NewService(projectMemberRepo)
+
+	// project dependencies
 	projectRepo := project.NewRepository(db)
-	projectService := project.NewService(projectRepo)
+	projectService := project.NewService(projectRepo, projectMemberService)
 	projectHandler := project.NewHandler(projectService)
 
 	// Ticket dependencies
@@ -96,6 +101,7 @@ func main() {
 	api.GET("/projects", server.projectHandler.List)
 	api.PATCH("/projects/:id", server.projectHandler.Update)
 	api.DELETE("/projects/:id", server.projectHandler.Delete)
+	api.POST("/projects/:id/members", server.projectHandler.AddMember)
 	api.POST("/projects/:projectID/tickets", server.ticketHandler.Create)
 	api.GET("/projects/:projectID/tickets", server.ticketHandler.List)
 	api.GET("/tickets/:id", server.ticketHandler.Get)
