@@ -1,6 +1,7 @@
 package project
 
 import (
+	"log"
 	"net/http"
 	"strconv" // Для конвертации строки в число
 
@@ -54,4 +55,18 @@ func (h *Handler) Get(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, project)
+}
+
+// List handler of GET /api/projects
+func (h *Handler) List(c echo.Context) error {
+	userID := c.Get("userID").(int64)
+
+	// Call service for projects list
+	projects, err := h.service.ListUserProjects(c.Request().Context(), userID)
+	if err != nil {
+		log.Printf("Error listing user projects: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to retrieve projects"})
+	}
+
+	return c.JSON(http.StatusOK, projects)
 }

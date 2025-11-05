@@ -85,6 +85,7 @@ func main() {
 	api.GET("/me", server.getProfile) // for test
 	api.POST("/projects", server.projectHandler.Create)
 	api.GET("/projects/:id", server.projectHandler.Get)
+	api.GET("/projects", server.projectHandler.List)
 
 	e.Logger.Fatal(e.Start(":8080"))
 }

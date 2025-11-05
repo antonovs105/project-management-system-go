@@ -47,3 +47,15 @@ func (s *Service) GetProjectByID(ctx context.Context, projectID, userID int64) (
 
 	return project, nil
 }
+
+// ListUserProjects returns projects list of user
+// For now just calls repository
+func (s *Service) ListUserProjects(ctx context.Context, userID int64) ([]Project, error) {
+	// TODO: add logic for projects secondary roles
+	projects, err := s.repo.ListByOwnerID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	return projects, nil
+}

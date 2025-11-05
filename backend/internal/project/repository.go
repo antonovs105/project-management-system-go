@@ -48,3 +48,17 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (*Project, error) {
 	err := r.db.GetContext(ctx, &p, query, id)
 	return &p, err
 }
+
+// ListByOwnerID finds all prijects created by user
+func (r *Repository) ListByOwnerID(ctx context.Context, ownerID int64) ([]Project, error) {
+	var projects []Project
+
+	query := `SELECT * FROM projects WHERE owner_id = $1 ORDER BY created_at DESC`
+
+	err := r.db.SelectContext(ctx, &projects, query, ownerID)
+	if err != nil {
+		return nil, err
+	}
+
+	return projects, nil
+}
