@@ -5,7 +5,7 @@ import router from '@/router';
 export const useAuthStore = defineStore('auth', {
     state: () => ({
         token: localStorage.getItem('token') || null,
-        user: null // Здесь можно будет хранить информацию о пользователе
+        user: null // TODO: store user info
     }),
     getters: {
         isAuthenticated: (state) => !!state.token,
@@ -17,18 +17,18 @@ export const useAuthStore = defineStore('auth', {
                 const token = response.data.token;
                 this.token = token;
                 localStorage.setItem('token', token);
-                // После успешного входа перенаправляем на главную
+                // after successfl loging redirect to main page
                 router.push('/');
             } catch (error) {
                 console.error("Login failed:", error);
-                // Можно добавить обработку ошибок, например, показать сообщение пользователю
+                // TODO: error handling
                 throw error;
             }
         },
         async register(userData) {
             try {
                 await api.register(userData);
-                // После успешной регистрации перенаправляем на страницу входа
+                // after successfl reg redirect to login page
                 router.push('/login');
             } catch (error) {
                 console.error("Registration failed:", error);
@@ -41,7 +41,6 @@ export const useAuthStore = defineStore('auth', {
             localStorage.removeItem('token');
             router.push('/login');
         },
-        // Метод для инициализации состояния из localStorage при загрузке приложения
         initializeAuth() {
             const token = localStorage.getItem('token');
             if (token) {

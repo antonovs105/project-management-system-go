@@ -12,5 +12,5 @@ import AppNavbar from './components/AppNavbar.vue';
 </script>
 
 <style>
-/* Можно добавить глобальные стили здесь */
+/* global styles here */
 </style>

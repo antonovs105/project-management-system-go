@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { useAuthStore } from '@/stores/auth';
 
-// Создаем экземпляр axios с базовой конфигурацией
+// axios base config
 const apiClient = axios.create({
     baseURL: 'http://localhost:8080',
     headers: {
@@ -9,9 +9,9 @@ const apiClient = axios.create({
     }
 });
 
-// Добавляем interceptor для всех исходящих запросов
+// add interceptor 
 apiClient.interceptors.request.use(config => {
-    // Проверяем, является ли запрос защищенным (начинается с /api)
+    // check is protected
     if (config.url && config.url.startsWith('/api')) {
         const authStore = useAuthStore();
         const token = authStore.token;
@@ -25,7 +25,7 @@ apiClient.interceptors.request.use(config => {
 });
 
 export default {
-    // === AUTHENTICATION ===
+    // auth
     register(user) {
         return apiClient.post('/register', user);
     },
@@ -33,7 +33,7 @@ export default {
         return apiClient.post('/login', credentials);
     },
 
-    // === PROJECTS ===
+    // projects
     getProjects() {
         return apiClient.get('/api/projects');
     },
@@ -50,12 +50,12 @@ export default {
         return apiClient.delete(`/api/projects/${projectId}`);
     },
 
-    // === MEMBERS ===
+    // projectmembers
     addProjectMember(projectId, memberData) {
         return apiClient.post(`/api/projects/${projectId}/members`, memberData);
     },
     
-    // === TICKETS ===
+    // tickets
     getTickets(projectId) {
         return apiClient.get(`/api/projects/${projectId}/tickets`);
     },

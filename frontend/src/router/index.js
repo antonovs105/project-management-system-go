@@ -1,7 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth';
 
-// Импортируем представления (страницы)
 import LoginPage from '../views/LoginPage.vue'
 import RegisterPage from '../views/RegisterPage.vue'
 import DashboardPage from '../views/DashboardPage.vue'
@@ -24,7 +23,7 @@ const router = createRouter({
       path: '/',
       name: 'dashboard',
       component: DashboardPage,
-      meta: { requiresAuth: true } // Эта страница требует аутентификации
+      meta: { requiresAuth: true } 
     },
     {
       path: '/projects/:projectId',
@@ -32,7 +31,6 @@ const router = createRouter({
       component: ProjectPage,
       meta: { requiresAuth: true }
     },
-    // Редирект на логин, если путь не найден
     {
         path: '/:pathMatch(.*)*',
         redirect: '/login'
@@ -40,10 +38,8 @@ const router = createRouter({
   ]
 })
 
-// Навигационный страж (Navigation Guard)
 router.beforeEach((to, from, next) => {
   const authStore = useAuthStore();
-  // Инициализируем состояние, если оно еще не было
   if (!authStore.token) {
       authStore.initializeAuth();
   }
@@ -52,13 +48,12 @@ router.beforeEach((to, from, next) => {
   const requiresAuth = to.matched.some(record => record.meta.requiresAuth);
 
   if (requiresAuth && !isAuthenticated) {
-    // Если требуется аутентификация, а пользователь не залогинен, отправляем на /login
+    // якщо треба аутентифікація, а користувач не в обл. записі, то відправляємо на логін
     next({ name: 'login' });
   } else if ((to.name === 'login' || to.name === 'register') && isAuthenticated) {
-    // Если пользователь залогинен и пытается зайти на /login или /register, отправляем на главную
+    // якщо кор. залогінений, то не даєм йому ще раз логініться, бо нашо
     next({ name: 'dashboard' });
   } else {
-    // В остальных случаях просто продолжаем
     next();
   }
 });
