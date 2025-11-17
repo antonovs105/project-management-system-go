@@ -29,10 +29,18 @@
                 <h5 class="card-title">{{ ticket.Title }}</h5>
                 <p class="card-text">{{ ticket.Description }}</p>
                 <span :class="['badge', priorityVariant(ticket.Priority)]">{{ ticket.Priority }}</span>
-                <button class="btn btn-success btn-sm mt-2" @click="markTicketAsDone(ticket.ID)">
-                  Виконано
-                </button>
+                <div class="mt-2">
+                  <button class="btn btn-primary btn-sm me-1" @click="updateTicketStatus(ticket.ID, 'in_progress')">
+                    У роботу
+                  </button>
+                  <button class="btn btn-success btn-sm" @click="updateTicketStatus(ticket.ID, 'done')">
+                    Виконано
+                  </button>
+                </div>
               </div>
+            </div>
+            <div v-if="newTickets.length === 0" class="text-muted text-center p-3">
+              Немає тикетів
             </div>
           </div>
         </div>
@@ -46,10 +54,18 @@
                 <h5 class="card-title">{{ ticket.Title }}</h5>
                 <p class="card-text">{{ ticket.Description }}</p>
                 <span :class="['badge', priorityVariant(ticket.Priority)]">{{ ticket.Priority }}</span>
-                <button class="btn btn-success btn-sm mt-2" @click="markTicketAsDone(ticket.ID)">
-                  Виконано
-                </button>
+                <div class="mt-2">
+                  <button class="btn btn-secondary btn-sm me-1" @click="updateTicketStatus(ticket.ID, 'new')">
+                    Повернути
+                  </button>
+                  <button class="btn btn-success btn-sm" @click="updateTicketStatus(ticket.ID, 'done')">
+                    Виконано
+                  </button>
+                </div>
               </div>
+            </div>
+            <div v-if="inProgressTickets.length === 0" class="text-muted text-center p-3">
+              Немає тикетів
             </div>
           </div>
         </div>
@@ -63,14 +79,21 @@
                 <h5 class="card-title">{{ ticket.Title }}</h5>
                 <p class="card-text">{{ ticket.Description }}</p>
                 <span :class="['badge', priorityVariant(ticket.Priority)]">{{ ticket.Priority }}</span>
+                <div class="mt-2">
+                  <button class="btn btn-warning btn-sm" @click="updateTicketStatus(ticket.ID, 'in_progress')">
+                    Повернути у роботу
+                  </button>
+                </div>
               </div>
+            </div>
+            <div v-if="doneTickets.length === 0" class="text-muted text-center p-3">
+              Немає тикетів
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- ticket creatino modal window -->
     <div class="modal fade" id="createTicketModal" tabindex="-1">
       <div class="modal-dialog">
         <div class="modal-content">
@@ -80,10 +103,26 @@
           </div>
           <div class="modal-body">
             <form @submit.prevent="handleCreateTicket">
-                <div class="mb-3"><label class="form-label">Заголовок:</label><input class="form-control" v-model="newTicket.title" required></div>
-                <div class="mb-3"><label class="form-label">Опис:</label><textarea class="form-control" v-model="newTicket.description"></textarea></div>
-                <div class="mb-3"><label class="form-label">Пріоритет:</label><select class="form-select" v-model="newTicket.priority"><option>low</option><option>medium</option><option>high</option></select></div>
-                <div class="mb-3"><label class="form-label">Призначити на (ID):</label><input type="number" class="form-control" v-model.number="newTicket.assignee_id"></div>
+                <div class="mb-3">
+                  <label class="form-label">Заголовок:</label>
+                  <input class="form-control" v-model="newTicket.title" required>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Опис:</label>
+                  <textarea class="form-control" v-model="newTicket.description" rows="3"></textarea>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Пріоритет:</label>
+                  <select class="form-select" v-model="newTicket.priority">
+                    <option value="low">Низький</option>
+                    <option value="medium">Середній</option>
+                    <option value="high">Високий</option>
+                  </select>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Призначити на (ID):</label>
+                  <input type="number" class="form-control" v-model.number="newTicket.assignee_id" placeholder="Не обов'язково">
+                </div>
             </form>
           </div>
           <div class="modal-footer">
@@ -94,7 +133,6 @@
       </div>
     </div>
 
-    <!-- add member modal windoe -->
     <div class="modal fade" id="addMemberModal" tabindex="-1">
       <div class="modal-dialog">
         <div class="modal-content">
@@ -104,8 +142,17 @@
           </div>
           <div class="modal-body">
             <form @submit.prevent="handleAddMember">
-                <div class="mb-3"><label class="form-label">ID Користувача:</label><input type="number" class="form-control" v-model.number="newMember.user_id" required></div>
-                <div class="mb-3"><label class="form-label">Роль:</label><select class="form-select" v-model="newMember.role"><option>worker</option><option>manager</option></select></div>
+                <div class="mb-3">
+                  <label class="form-label">ID Користувача:</label>
+                  <input type="number" class="form-control" v-model.number="newMember.user_id" required>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Роль:</label>
+                  <select class="form-select" v-model="newMember.role">
+                    <option value="worker">Виконавець</option>
+                    <option value="manager">Менеджер</option>
+                  </select>
+                </div>
             </form>
           </div>
           <div class="modal-footer">
@@ -147,6 +194,7 @@ const fetchData = async () => {
     tickets.value = ticketsResponse.data || [];
   } catch (err) {
     error.value = 'Не вдалося завантажити дані проекта';
+    console.error('Помилка завантаження:', err);
   } finally {
     loading.value = false;
   }
@@ -162,14 +210,22 @@ const priorityVariant = (priority) => {
   return 'bg-info text-dark';
 };
 
-const markTicketAsDone = (ticketId) => {
-  const ticketToUpdate = tickets.value.find(t => t.ID === ticketId);
-  if (ticketToUpdate) {
-    ticketToUpdate.Status = 'done';
+// update ticket status
+const updateTicketStatus = async (ticketId, newStatus) => {
+  try {
+    await api.updateTicket(ticketId, { status: newStatus });
+    
+    const ticket = tickets.value.find(t => t.ID === ticketId);
+    if (ticket) {
+      ticket.Status = newStatus;
+    }
+  } catch (err) {
+    console.error('Помилка оновлення статусу:', err);
+    alert('Не вдалося оновити статус тикета');
   }
 };
 
-// Modal window controls
+// modal windows controls
 const openCreateTicketModal = () => {
   if (createTicketModalInstance) {
     createTicketModalInstance.show();
@@ -205,6 +261,7 @@ const handleCreateTicket = async () => {
         closeCreateTicketModal();
         await fetchData();
     } catch (err) { 
+      console.error('Помилка створення тикета:', err);
       alert('Помилка при створенні тикета'); 
     }
 };
@@ -220,6 +277,7 @@ const handleAddMember = async () => {
         closeAddMemberModal();
         alert('Учасника додано!');
     } catch (err) { 
+      console.error('Помилка додавання учасника:', err);
       alert('Помилка при призначенні учасника'); 
     }
 };
@@ -239,5 +297,18 @@ onMounted(() => {
   border-radius: 3px;
   padding: 8px;
   min-height: 400px;
+}
+
+.card {
+  transition: box-shadow 0.2s ease;
+}
+
+.card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.btn-sm {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.5rem;
 }
 </style>
