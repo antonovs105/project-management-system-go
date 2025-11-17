@@ -2,20 +2,12 @@
   <div>
     <div class="d-flex justify-content-between align-items-center mb-4">
       <h1>Мої проекти</h1>
-      <!-- modal window call button -->
-      <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createProjectModal">
+      <button type="button" class="btn btn-primary" @click="openCreateModal">
         Створити проект
       </button>
     </div>
 
     <div v-if="error" class="alert alert-danger">{{ error }}</div>
-    <!--
-    <div v-if="loading" class="text-center">
-      <div class="spinner-border" role="status">
-        <span class="visually-hidden">Loading...</span>
-      </div>
-    </div>
-    -->
 
     <div class="list-group" v-if="projects.length > 0">
       <router-link 
@@ -43,7 +35,7 @@
         <div class="modal-content">
           <div class="modal-header">
             <h5 class="modal-title" id="modalLabel">Створення нового проекту</h5>
-            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            <button type="button" class="btn-close" @click="closeCreateModal" aria-label="Close"></button>
           </div>
           <div class="modal-body">
             <form @submit.prevent="handleCreateProject">
@@ -58,7 +50,7 @@
             </form>
           </div>
           <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Відмінити</button>
+            <button type="button" class="btn btn-secondary" @click="closeCreateModal">Відмінити</button>
             <button type="button" class="btn btn-primary" @click="handleCreateProject">Створити</button>
           </div>
         </div>
@@ -79,7 +71,6 @@ const error = ref('');
 const newProject = ref({ name: '', description: '' });
 
 let createModalInstance = null;
-let modalEl = null; 
 
 const fetchProjects = async () => {
   loading.value = true;
@@ -95,6 +86,18 @@ const fetchProjects = async () => {
   }
 };
 
+const openCreateModal = () => {
+  if (createModalInstance) {
+    createModalInstance.show();
+  }
+};
+
+const closeCreateModal = () => {
+  if (createModalInstance) {
+    createModalInstance.hide();
+  }
+};
+
 const handleCreateProject = async () => {
   if (!newProject.value.name) {
     alert('Назва проекту обов`язкова');
@@ -102,16 +105,11 @@ const handleCreateProject = async () => {
   }
   
   try {
-    // request create
     await api.createProject(newProject.value);
     newProject.value = { name: '', description: '' };
-    
-    modalEl.addEventListener('hidden.bs.modal', async () => {
-        await fetchProjects();
-    }, { once: true });
-
-    createModalInstance.hide();
-
+    closeCreateModal();
+    // update after closing modal window
+    await fetchProjects();
   } catch (err) {
     alert('Помилка при створенні проекта');
     console.error(err);
@@ -131,11 +129,9 @@ const deleteProject = async (projectId) => {
 
 onMounted(() => {
   fetchProjects();
-  modalEl = document.getElementById('createProjectModal'); 
+  const modalEl = document.getElementById('createProjectModal'); 
   if (modalEl) {
-    createModalInstance = new Modal(modalEl); 
+    createModalInstance = new Modal(modalEl);
   }
 });
 </script>
-
-  

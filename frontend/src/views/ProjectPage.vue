@@ -13,8 +13,8 @@
           <p class="text-muted">{{ project.Description }}</p>
         </div>
         <div>
-          <button class="btn btn-success me-2" data-bs-toggle="modal" data-bs-target="#createTicketModal">Створити тикет</button>
-          <button class="btn btn-info" data-bs-toggle="modal" data-bs-target="#addMemberModal">Додати учасника</button>
+          <button class="btn btn-success me-2" @click="openCreateTicketModal">Створити тикет</button>
+          <button class="btn btn-info" @click="openAddMemberModal">Додати учасника</button>
         </div>
       </div>
 
@@ -70,34 +70,37 @@
       </div>
     </div>
 
+    <!-- ticket creatino modal window -->
     <div class="modal fade" id="createTicketModal" tabindex="-1">
       <div class="modal-dialog">
         <div class="modal-content">
           <div class="modal-header">
             <h5 class="modal-title">Новий тикет</h5>
-            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            <button type="button" class="btn-close" @click="closeCreateTicketModal"></button>
           </div>
           <div class="modal-body">
             <form @submit.prevent="handleCreateTicket">
                 <div class="mb-3"><label class="form-label">Заголовок:</label><input class="form-control" v-model="newTicket.title" required></div>
                 <div class="mb-3"><label class="form-label">Опис:</label><textarea class="form-control" v-model="newTicket.description"></textarea></div>
-                <div class="mb-3"><label class="form-label">Пріорітет:</label><select class="form-select" v-model="newTicket.priority"><option>low</option><option>medium</option><option>high</option></select></div>
+                <div class="mb-3"><label class="form-label">Пріоритет:</label><select class="form-select" v-model="newTicket.priority"><option>low</option><option>medium</option><option>high</option></select></div>
                 <div class="mb-3"><label class="form-label">Призначити на (ID):</label><input type="number" class="form-control" v-model.number="newTicket.assignee_id"></div>
             </form>
           </div>
           <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Відміна</button>
+            <button type="button" class="btn btn-secondary" @click="closeCreateTicketModal">Відміна</button>
             <button type="button" class="btn btn-primary" @click="handleCreateTicket">Створити</button>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- add member modal windoe -->
     <div class="modal fade" id="addMemberModal" tabindex="-1">
       <div class="modal-dialog">
         <div class="modal-content">
           <div class="modal-header">
             <h5 class="modal-title">Додати учасника</h5>
-            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            <button type="button" class="btn-close" @click="closeAddMemberModal"></button>
           </div>
           <div class="modal-body">
             <form @submit.prevent="handleAddMember">
@@ -106,7 +109,7 @@
             </form>
           </div>
           <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Відміна</button>
+            <button type="button" class="btn btn-secondary" @click="closeAddMemberModal">Відміна</button>
             <button type="button" class="btn btn-primary" @click="handleAddMember">Додати</button>
           </div>
         </div>
@@ -165,27 +168,61 @@ const markTicketAsDone = (ticketId) => {
     ticketToUpdate.Status = 'done';
   }
 };
-// =========================
+
+// Modal window controls
+const openCreateTicketModal = () => {
+  if (createTicketModalInstance) {
+    createTicketModalInstance.show();
+  }
+};
+
+const closeCreateTicketModal = () => {
+  if (createTicketModalInstance) {
+    createTicketModalInstance.hide();
+  }
+};
+
+const openAddMemberModal = () => {
+  if (addMemberModalInstance) {
+    addMemberModalInstance.show();
+  }
+};
+
+const closeAddMemberModal = () => {
+  if (addMemberModalInstance) {
+    addMemberModalInstance.hide();
+  }
+};
 
 const handleCreateTicket = async () => {
-    if (!newTicket.value.title) { alert('Заголовок обов`язковий'); return; }
+    if (!newTicket.value.title) { 
+      alert('Заголовок обов`язковий'); 
+      return; 
+    }
     try {
         await api.createTicket(projectId, newTicket.value);
         newTicket.value = { title: '', description: '', priority: 'medium', assignee_id: null };
-        createTicketModalInstance.hide();
-        setTimeout(() => { fetchData(); }, 350);
-    } catch (err) { alert('Помилка при створенні тикета'); }
-}
+        closeCreateTicketModal();
+        await fetchData();
+    } catch (err) { 
+      alert('Помилка при створенні тикета'); 
+    }
+};
 
 const handleAddMember = async () => {
-    if (!newMember.value.user_id) { alert('ID користувача обов`язковий'); return; }
+    if (!newMember.value.user_id) { 
+      alert('ID користувача обов`язковий'); 
+      return; 
+    }
     try {
         await api.addProjectMember(projectId, newMember.value);
         newMember.value = { user_id: null, role: 'worker'};
-        addMemberModalInstance.hide();
+        closeAddMemberModal();
         alert('Учасника додано!');
-    } catch (err) { alert('Помилка при призначенні учасника'); }
-}
+    } catch (err) { 
+      alert('Помилка при призначенні учасника'); 
+    }
+};
 
 onMounted(() => {
   fetchData();
