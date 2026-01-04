@@ -113,6 +113,9 @@ func main() {
 	api.GET("/tickets/:id", server.ticketHandler.Get)
 	api.PATCH("/tickets/:id", server.ticketHandler.Update)
 	api.DELETE("/tickets/:id", server.ticketHandler.Delete)
+	api.GET("/projects/:projectID/graph", server.ticketHandler.GetGraph)
+	api.POST("/tickets/:id/links", server.ticketHandler.AddLink)
+	api.DELETE("/links/:linkID", server.ticketHandler.RemoveLink)
 
 	e.Logger.Fatal(e.Start(":8080"))
 }

@@ -18,8 +18,8 @@ func NewRepository(db *sqlx.DB) *Repository {
 // Create new ticket in DB
 func (r *Repository) Create(ctx context.Context, ticket *Ticket) error {
 	query := `
-		INSERT INTO tickets (title, description, status, priority, project_id, reporter_id, assignee_id)
-		VALUES (:title, :description, :status, :priority, :project_id, :reporter_id, :assignee_id)
+		INSERT INTO tickets (title, description, status, priority, type, parent_id, project_id, reporter_id, assignee_id)
+		VALUES (:title, :description, :status, :priority, :type, :parent_id, :project_id, :reporter_id, :assignee_id)
 		RETURNING *`
 
 	rows, err := r.db.NamedQueryContext(ctx, query, ticket)
@@ -63,6 +63,8 @@ func (r *Repository) Update(ctx context.Context, ticket *Ticket) error {
 			description = :description,
 			status = :status,
 			priority = :priority,
+			type = :type,
+			parent_id = :parent_id,
 			assignee_id = :assignee_id,
 			updated_at = now()
 		WHERE id = :id`
@@ -100,4 +102,55 @@ func (r *Repository) Delete(ctx context.Context, id int64) error {
 	}
 
 	return nil
+}
+
+// CreateLink adds a link between tickets
+func (r *Repository) CreateLink(ctx context.Context, link *TicketLink) error {
+	query := `
+		INSERT INTO ticket_links (source_id, target_id, link_type)
+		VALUES (:source_id, :target_id, :link_type)
+		RETURNING *`
+
+	rows, err := r.db.NamedQueryContext(ctx, query, link)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		return rows.StructScan(link)
+	}
+	return errors.New("link creation failed")
+}
+
+// DeleteLink removes a link
+func (r *Repository) DeleteLink(ctx context.Context, linkID int64) error {
+	query := `DELETE FROM ticket_links WHERE id = $1`
+	result, err := r.db.ExecContext(ctx, query, linkID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return errors.New("link not found")
+	}
+	return nil
+}
+
+// GetLinksByProjectID returns all links where the source ticket belongs to the given project
+func (r *Repository) GetLinksByProjectID(ctx context.Context, projectID int64) ([]TicketLink, error) {
+	var links []TicketLink
+	query := `
+		SELECT l.* FROM ticket_links l
+		JOIN tickets t ON l.source_id = t.id
+		WHERE t.project_id = $1
+	`
+	err := r.db.SelectContext(ctx, &links, query, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return links, nil
 }

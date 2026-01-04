@@ -3,7 +3,7 @@ package project
 import (
 	"log"
 	"net/http"
-	"strconv" // Для конвертации строки в число
+	"strconv"
 
 	"github.com/labstack/echo/v4"
 )
