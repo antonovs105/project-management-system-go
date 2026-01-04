@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS ticket_links;
+ALTER TABLE tickets DROP COLUMN IF EXISTS parent_id;
+ALTER TABLE tickets DROP COLUMN IF EXISTS type;
