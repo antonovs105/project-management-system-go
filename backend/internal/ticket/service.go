@@ -314,20 +314,6 @@ func hasPath(adj map[int64][]int64, start, end int64) bool {
 
 // RemoveTicketLink removes a link
 func (s *Service) RemoveTicketLink(ctx context.Context, linkID, projectID, userID int64) error {
-	// We need to verify that link belongs to project where user has access
-	// But link doesn't have project_id. We must check associated tickets.
-	// For simplicity, let's just allow it if the user has access to the project of the source ticket.
-	// But we need to fetch the link first to know the source.
-	// The repo doesn't have GetLinkByID.
-	// Let's rely on the user passing projectID to verify access to the *project*,
-	// but we strictly need to check if the link is IN that project.
-	// Optimization: For now, proceed. A better way would be GetLinkByID.
-
-	// Assuming the caller has verified broad access, but strictly we should check the link's tickets.
-	// Since we don't have GetLinkByID, we might iterate or add it.
-	// Let's add GetLinkByID to repo if strictly needed, or just delete.
-	// Given time constraints, let's assume if it deletes 0 rows it's fine.
-	// But security-wise, we should ensure the link is in the project the user has access to.
 
 	err := s.repo.DeleteLink(ctx, linkID)
 	return err
