@@ -14,12 +14,12 @@ import (
 // Service incapsulates business logic for working with users
 // Depends on repository for data access
 type Service struct {
-	repo         *Repository
+	repo         Repository
 	jwtSecretKey []byte
 }
 
 // constructor for UserService.
-func NewService(repo *Repository, jwtSecret []byte) *Service {
+func NewService(repo Repository, jwtSecret []byte) *Service {
 	return &Service{
 		repo:         repo,
 		jwtSecretKey: jwtSecret,

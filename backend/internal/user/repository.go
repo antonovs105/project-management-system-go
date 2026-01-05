@@ -7,19 +7,26 @@ import (
 )
 
 // Repository
-type Repository struct {
+// Repository interface defines methods for user data access
+type Repository interface {
+	CreateUser(ctx context.Context, user *User) error
+	GetUserByEmail(ctx context.Context, email string) (*User, error)
+}
+
+// PgRepository implements Repository using PostgreSQL
+type PgRepository struct {
 	db *sqlx.DB
 }
 
-// Constructor
-func NewRepository(db *sqlx.DB) *Repository {
-	return &Repository{
+// NewRepository creates a new instance of PgRepository
+func NewRepository(db *sqlx.DB) Repository {
+	return &PgRepository{
 		db: db,
 	}
 }
 
 // Add new user
-func (r *Repository) CreateUser(ctx context.Context, user *User) error {
+func (r *PgRepository) CreateUser(ctx context.Context, user *User) error {
 	query := `
 		INSERT INTO users (username, email, password_hash, role)
 		VALUES (:username, :email, :password_hash, :role)
@@ -42,7 +49,7 @@ func (r *Repository) CreateUser(ctx context.Context, user *User) error {
 }
 
 // GetUserByEmail finds user by email
-func (r *Repository) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+func (r *PgRepository) GetUserByEmail(ctx context.Context, email string) (*User, error) {
 
 	var user User
 

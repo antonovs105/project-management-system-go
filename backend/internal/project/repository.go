@@ -7,16 +7,24 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-type Repository struct {
+type Repository interface {
+	Create(ctx context.Context, project *Project) error
+	GetByID(ctx context.Context, id int64) (*Project, error)
+	ListByOwnerID(ctx context.Context, ownerID int64) ([]Project, error)
+	Update(ctx context.Context, project *Project) error
+	Delete(ctx context.Context, id int64) error
+}
+
+type PgRepository struct {
 	db *sqlx.DB
 }
 
-func NewRepository(db *sqlx.DB) *Repository {
-	return &Repository{db: db}
+func NewRepository(db *sqlx.DB) Repository {
+	return &PgRepository{db: db}
 }
 
 // Create makes new project in DB
-func (r *Repository) Create(ctx context.Context, project *Project) error {
+func (r *PgRepository) Create(ctx context.Context, project *Project) error {
 	query := `
 		INSERT INTO projects (name, description, owner_id)
 		VALUES (:name, :description, :owner_id)
@@ -42,7 +50,7 @@ func (r *Repository) Create(ctx context.Context, project *Project) error {
 }
 
 // GetByID finds project by its I=id
-func (r *Repository) GetByID(ctx context.Context, id int64) (*Project, error) {
+func (r *PgRepository) GetByID(ctx context.Context, id int64) (*Project, error) {
 	var p Project
 	query := `SELECT * FROM projects WHERE id = $1`
 	err := r.db.GetContext(ctx, &p, query, id)
@@ -50,7 +58,7 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (*Project, error) {
 }
 
 // ListByOwnerID finds all prijects created by user
-func (r *Repository) ListByOwnerID(ctx context.Context, ownerID int64) ([]Project, error) {
+func (r *PgRepository) ListByOwnerID(ctx context.Context, ownerID int64) ([]Project, error) {
 	var projects []Project
 
 	query := `SELECT * FROM projects WHERE owner_id = $1 ORDER BY created_at DESC`
@@ -64,7 +72,7 @@ func (r *Repository) ListByOwnerID(ctx context.Context, ownerID int64) ([]Projec
 }
 
 // Update updates (how unexpectable) project data in DB
-func (r *Repository) Update(ctx context.Context, project *Project) error {
+func (r *PgRepository) Update(ctx context.Context, project *Project) error {
 	query := `
 		UPDATE projects 
 		SET 
@@ -91,7 +99,7 @@ func (r *Repository) Update(ctx context.Context, project *Project) error {
 }
 
 // Delete deletes (wow) project from DB
-func (r *Repository) Delete(ctx context.Context, id int64) error {
+func (r *PgRepository) Delete(ctx context.Context, id int64) error {
 	query := `DELETE FROM projects WHERE id = $1`
 
 	result, err := r.db.ExecContext(ctx, query, id)

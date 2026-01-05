@@ -14,11 +14,11 @@ type MemberAdder interface {
 }
 
 type Service struct {
-	repo                 *Repository
+	repo                 Repository
 	projectMemberService MemberAdder
 }
 
-func NewService(repo *Repository, pmService MemberAdder) *Service {
+func NewService(repo Repository, pmService MemberAdder) *Service {
 	return &Service{
 		repo:                 repo,
 		projectMemberService: pmService,

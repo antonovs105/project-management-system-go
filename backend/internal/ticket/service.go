@@ -13,11 +13,11 @@ type ProjectChecker interface {
 }
 
 type Service struct {
-	repo           *Repository
+	repo           Repository
 	projectService ProjectChecker
 }
 
-func NewService(repo *Repository, projectService ProjectChecker) *Service {
+func NewService(repo Repository, projectService ProjectChecker) *Service {
 	return &Service{
 		repo:           repo,
 		projectService: projectService,

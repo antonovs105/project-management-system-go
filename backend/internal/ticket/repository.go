@@ -7,16 +7,28 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-type Repository struct {
+// Repository interface
+type Repository interface {
+	Create(ctx context.Context, ticket *Ticket) error
+	ListByProjectID(ctx context.Context, projectID int64) ([]Ticket, error)
+	GetByID(ctx context.Context, id int64) (*Ticket, error)
+	Update(ctx context.Context, ticket *Ticket) error
+	Delete(ctx context.Context, id int64) error
+	CreateLink(ctx context.Context, link *TicketLink) error
+	DeleteLink(ctx context.Context, linkID int64) error
+	GetLinksByProjectID(ctx context.Context, projectID int64) ([]TicketLink, error)
+}
+
+type PgRepository struct {
 	db *sqlx.DB
 }
 
-func NewRepository(db *sqlx.DB) *Repository {
-	return &Repository{db: db}
+func NewRepository(db *sqlx.DB) Repository {
+	return &PgRepository{db: db}
 }
 
 // Create new ticket in DB
-func (r *Repository) Create(ctx context.Context, ticket *Ticket) error {
+func (r *PgRepository) Create(ctx context.Context, ticket *Ticket) error {
 	query := `
 		INSERT INTO tickets (title, description, status, priority, type, parent_id, project_id, reporter_id, assignee_id)
 		VALUES (:title, :description, :status, :priority, :type, :parent_id, :project_id, :reporter_id, :assignee_id)
@@ -35,7 +47,7 @@ func (r *Repository) Create(ctx context.Context, ticket *Ticket) error {
 }
 
 // ListByProjectID gets all tickets in a project
-func (r *Repository) ListByProjectID(ctx context.Context, projectID int64) ([]Ticket, error) {
+func (r *PgRepository) ListByProjectID(ctx context.Context, projectID int64) ([]Ticket, error) {
 	var tickets []Ticket
 	query := `SELECT * FROM tickets WHERE project_id = $1 ORDER BY created_at DESC`
 
@@ -47,7 +59,7 @@ func (r *Repository) ListByProjectID(ctx context.Context, projectID int64) ([]Ti
 }
 
 // GetByID finds single ticket by its id
-func (r *Repository) GetByID(ctx context.Context, id int64) (*Ticket, error) {
+func (r *PgRepository) GetByID(ctx context.Context, id int64) (*Ticket, error) {
 	var t Ticket
 	query := `SELECT * FROM tickets WHERE id = $1`
 	err := r.db.GetContext(ctx, &t, query, id)
@@ -55,7 +67,7 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (*Ticket, error) {
 }
 
 // Update renews (new synonym!) ticket data in DB
-func (r *Repository) Update(ctx context.Context, ticket *Ticket) error {
+func (r *PgRepository) Update(ctx context.Context, ticket *Ticket) error {
 	query := `
 		UPDATE tickets
 		SET
@@ -86,7 +98,7 @@ func (r *Repository) Update(ctx context.Context, ticket *Ticket) error {
 }
 
 // Delete removes ticket from DB
-func (r *Repository) Delete(ctx context.Context, id int64) error {
+func (r *PgRepository) Delete(ctx context.Context, id int64) error {
 	query := `DELETE FROM tickets WHERE id = $1`
 	result, err := r.db.ExecContext(ctx, query, id)
 	if err != nil {
@@ -105,7 +117,7 @@ func (r *Repository) Delete(ctx context.Context, id int64) error {
 }
 
 // CreateLink adds a link between tickets
-func (r *Repository) CreateLink(ctx context.Context, link *TicketLink) error {
+func (r *PgRepository) CreateLink(ctx context.Context, link *TicketLink) error {
 	query := `
 		INSERT INTO ticket_links (source_id, target_id, link_type)
 		VALUES (:source_id, :target_id, :link_type)
@@ -124,7 +136,7 @@ func (r *Repository) CreateLink(ctx context.Context, link *TicketLink) error {
 }
 
 // DeleteLink removes a link
-func (r *Repository) DeleteLink(ctx context.Context, linkID int64) error {
+func (r *PgRepository) DeleteLink(ctx context.Context, linkID int64) error {
 	query := `DELETE FROM ticket_links WHERE id = $1`
 	result, err := r.db.ExecContext(ctx, query, linkID)
 	if err != nil {
@@ -141,7 +153,7 @@ func (r *Repository) DeleteLink(ctx context.Context, linkID int64) error {
 }
 
 // GetLinksByProjectID returns all links where the source ticket belongs to the given project
-func (r *Repository) GetLinksByProjectID(ctx context.Context, projectID int64) ([]TicketLink, error) {
+func (r *PgRepository) GetLinksByProjectID(ctx context.Context, projectID int64) ([]TicketLink, error) {
 	var links []TicketLink
 	query := `
 		SELECT l.* FROM ticket_links l
