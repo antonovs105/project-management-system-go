@@ -1,5 +1,5 @@
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -43,6 +43,7 @@ export default function BoardPage() {
     const { projectId } = useParams();
     const queryClient = useQueryClient();
     const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
+    const initialStatusRef = useRef<string | null>(null);
 
     const { data: tickets = [], isLoading } = useQuery<Ticket[]>({
         queryKey: ['tickets', projectId],
@@ -116,7 +117,9 @@ export default function BoardPage() {
 
     function onDragStart(event: DragStartEvent) {
         if (event.active.data.current?.type === 'Ticket') {
-            setActiveTicket(event.active.data.current.ticket);
+            const ticket = event.active.data.current.ticket as Ticket;
+            setActiveTicket(ticket);
+            initialStatusRef.current = ticket.status;
         }
     }
 
@@ -155,23 +158,29 @@ export default function BoardPage() {
         const { active, over } = event;
         setActiveTicket(null);
 
-        if (!over) return;
+        if (!over) {
+            initialStatusRef.current = null;
+            return;
+        }
 
         const activeTicketData = active.data.current?.ticket as Ticket;
-        if (!activeTicketData) return;
+        if (!activeTicketData) {
+            initialStatusRef.current = null;
+            return;
+        }
 
-        // The status in the cache might already be updated by onDragOver
-        // We find the current status from the cache or use the 'over' info
+        // Find the final status after drag end
         let finalStatus = over.id as string;
         if (over.data.current?.type === 'Ticket') {
             finalStatus = over.data.current.ticket.status;
         }
 
-        // Only persist if the status has actually changed from the PERSISTED state
-        // To be safe, we just trigger the mutation if it's different from the original ticket status
-        if (activeTicketData.status !== finalStatus) {
+        // Trigger mutation only if the status actually changed from the START of the drag
+        if (initialStatusRef.current && finalStatus !== initialStatusRef.current) {
             updateTicketStatus.mutate({ id: activeTicketData.id, status: finalStatus });
         }
+
+        initialStatusRef.current = null;
     }
 
     const dropAnimation: DropAnimation = {

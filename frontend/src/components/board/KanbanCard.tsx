@@ -54,8 +54,15 @@ export function KanbanCard({ ticket, onClick }: KanbanCardProps) {
     };
 
     return (
-        <div ref={setNodeRef} style={style} className="touch-none" onClick={onClick}>
-            <Card className="cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow relative group">
+        <div
+            ref={setNodeRef}
+            style={style}
+            {...attributes}
+            {...listeners}
+            className="touch-none cursor-grab active:cursor-grabbing"
+            onClick={onClick}
+        >
+            <Card className="hover:shadow-md transition-shadow relative group border-slate-200">
                 <CardContent className="p-3">
                     <div className="flex justify-between items-start gap-2">
                         <div className="flex-1">
@@ -69,7 +76,7 @@ export function KanbanCard({ ticket, onClick }: KanbanCardProps) {
                                 {ticket.title}
                             </h4>
                         </div>
-                        <div {...attributes} {...listeners} className="text-slate-300 hover:text-slate-500 cursor-grab opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="text-slate-300 group-hover:text-slate-400 transition-colors">
                             <GripVertical size={16} />
                         </div>
                     </div>
