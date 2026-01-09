@@ -9,6 +9,7 @@ import {
     useSensor,
     PointerSensor,
     type DragStartEvent,
+    type DragOverEvent,
     type DragEndEvent,
     defaultDropAnimationSideEffects,
     type DropAnimation,
@@ -56,7 +57,30 @@ export default function BoardPage() {
         mutationFn: async ({ id, status }: { id: number; status: string }) => {
             await api.patch(`/api/tickets/${id}`, { status });
         },
-        onSuccess: () => {
+        onMutate: async (newTicket) => {
+            // Cancel any outgoing refetches (so they don't overwrite our optimistic update)
+            await queryClient.cancelQueries({ queryKey: ['tickets', projectId] });
+
+            // Snapshot the previous value
+            const previousTickets = queryClient.getQueryData<Ticket[]>(['tickets', projectId]);
+
+            // Optimistically update to the new value
+            if (previousTickets) {
+                queryClient.setQueryData<Ticket[]>(['tickets', projectId], (old) =>
+                    old?.map((t) => (t.id === newTicket.id ? { ...t, status: newTicket.status } : t))
+                );
+            }
+
+            return { previousTickets };
+        },
+        onError: (_err, _newTicket, context) => {
+            // If the mutation fails, use the context returned from onMutate to roll back
+            if (context?.previousTickets) {
+                queryClient.setQueryData(['tickets', projectId], context.previousTickets);
+            }
+        },
+        onSettled: () => {
+            // Always refetch after error or success to make sure the server-side state is synced
             queryClient.invalidateQueries({ queryKey: ['tickets', projectId] });
         },
     });
@@ -96,47 +120,58 @@ export default function BoardPage() {
         }
     }
 
+    function onDragOver(event: DragOverEvent) {
+        const { active, over } = event;
+        if (!over) return;
+
+        const activeId = active.id;
+        const overId = over.id;
+
+        if (activeId === overId) return;
+
+        const isActiveATask = active.data.current?.type === 'Ticket';
+        if (!isActiveATask) return;
+
+        // Find the target column ID
+        let overColumnId = overId as string;
+        const isOverATask = over.data.current?.type === 'Ticket';
+        if (isOverATask) {
+            overColumnId = over.data.current?.ticket.status;
+        }
+
+        // Get the current status from the cache to avoid redundant updates
+        const currentTickets = queryClient.getQueryData<Ticket[]>(['tickets', projectId]) || [];
+        const ticketInCache = currentTickets.find(t => t.id.toString() === activeId);
+
+        if (ticketInCache && ticketInCache.status !== overColumnId) {
+            // Live update the cache
+            queryClient.setQueryData<Ticket[]>(['tickets', projectId], (old = []) => {
+                return old.map(t => t.id === ticketInCache.id ? { ...t, status: overColumnId } : t);
+            });
+        }
+    }
+
     function onDragEnd(event: DragEndEvent) {
         const { active, over } = event;
         setActiveTicket(null);
 
         if (!over) return;
 
-        const overId = over.id;
+        const activeTicketData = active.data.current?.ticket as Ticket;
+        if (!activeTicketData) return;
 
-        // We dropped on a column?
-
-        // Or did we drop on a card?
-        if (active.data.current?.sortable?.containerId !== over.data.current?.sortable?.containerId) {
-            // If sorting context changes, update status
-            // Actually simpler to just check if `over` is a column ID
-            // If over is a ticket, we need to find which column it belongs to.
-            // But wait, the column droppable ID is the status.
-            // The SortableContext items are ticket IDs.
-            // dnd-kit is flexible. 
-
-            // Let's rely on onDragOver to handle optimistic updates if we wanted smooth sorting between columns
-            // But for simple Kanban status change:
-            const activeTicketData = active.data.current?.ticket as Ticket;
-
-            // Check if dropped on a container (Column)
-            if (COLUMNS.some(c => c.id === overId)) {
-                if (activeTicketData.status !== overId) {
-                    updateTicketStatus.mutate({ id: activeTicketData.id, status: overId as string });
-                }
-                return;
-            }
-
-            // Dropped on another ticket?
-            const overTicketData = over.data.current?.ticket as Ticket;
-            if (overTicketData && activeTicketData.status !== overTicketData.status) {
-                updateTicketStatus.mutate({ id: activeTicketData.id, status: overTicketData.status });
-            }
+        // The status in the cache might already be updated by onDragOver
+        // We find the current status from the cache or use the 'over' info
+        let finalStatus = over.id as string;
+        if (over.data.current?.type === 'Ticket') {
+            finalStatus = over.data.current.ticket.status;
         }
-    }
 
-    function onDragOver() {
-        // Optional: Logic for reordering within column (not persisted on backend yet needed for UI flow)
+        // Only persist if the status has actually changed from the PERSISTED state
+        // To be safe, we just trigger the mutation if it's different from the original ticket status
+        if (activeTicketData.status !== finalStatus) {
+            updateTicketStatus.mutate({ id: activeTicketData.id, status: finalStatus });
+        }
     }
 
     const dropAnimation: DropAnimation = {

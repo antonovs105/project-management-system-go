@@ -52,8 +52,6 @@ func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, pro
 	// Validate Ticket Type
 	rank, ok := ticketRanks[req.Type]
 	if !ok {
-		// Default to task if not specified or invalid (or return error? Prompt implies we add hierarchy, so better validation)
-		// For backward compatibility, maybe default to 'task'?
 		if req.Type == "" {
 			req.Type = "task"
 			rank = 2
@@ -74,16 +72,13 @@ func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, pro
 
 		parentRank, ok := ticketRanks[parent.Type]
 		if !ok {
-			// fallback if parent has unknown type (shouldn't happen with valid DB)
-			parentRank = 2 // assume task?
+			parentRank = 2
 		}
 
 		if parentRank <= rank {
 			return nil, errors.New("invalid hierarchy: parent must be of higher rank (Epic > Task > Subtask)")
 		}
 	} else {
-		// If no parent, Subtask is probably invalid? Or can a subtask be orphan?
-		// Usually subtask needs parent. But let's allow it for flexibility unless strict.
 		if req.Type == "subtask" {
 			return nil, errors.New("subtask must have a parent")
 		}
@@ -145,7 +140,7 @@ type UpdateTicketRequest struct {
 	Status      *string `json:"status"`
 	Priority    *string `json:"priority"`
 	Type        *string `json:"type"`
-	ParentID    **int64 `json:"parent_id"` // Pointer to pointer to allow setting null
+	ParentID    **int64 `json:"parent_id"`
 	AssigneeID  **int64 `json:"assignee_id"`
 }
 
@@ -183,7 +178,6 @@ func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, tic
 			if parent.ProjectID != ticketToUpdate.ProjectID {
 				return errors.New("parent ticket must be in the same project")
 			}
-			// check against itself?
 			if parent.ID == ticketToUpdate.ID {
 				return errors.New("cannot be own parent")
 			}
@@ -322,18 +316,18 @@ func (s *Service) RemoveTicketLink(ctx context.Context, linkID, projectID, userI
 // GraphNode DTO
 type GraphNode struct {
 	ID       int64  `json:"id"`
-	Label    string `json:"label"` // Title
+	Label    string `json:"label"`
 	Type     string `json:"type"`
 	Status   string `json:"status"`
 	Priority string `json:"priority"`
-	Group    string `json:"group"` // "epic", "task", "subtask"
+	Group    string `json:"group"`
 }
 
 // GraphLink DTO
 type GraphLink struct {
 	Source int64  `json:"source"`
 	Target int64  `json:"target"`
-	Type   string `json:"type"` // "hierarchy" or dependency type
+	Type   string `json:"type"`
 }
 
 // GraphResponse DTO
@@ -362,7 +356,7 @@ func (s *Service) GetTicketGraph(ctx context.Context, projectID, userID int64) (
 
 	response := &GraphResponse{
 		Nodes: make([]GraphNode, 0, len(tickets)),
-		Links: make([]GraphLink, 0, len(links)+len(tickets)), // rough estimate
+		Links: make([]GraphLink, 0, len(links)+len(tickets)),
 	}
 
 	for _, t := range tickets {

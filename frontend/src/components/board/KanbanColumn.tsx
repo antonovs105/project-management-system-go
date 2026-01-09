@@ -34,7 +34,7 @@ export function KanbanColumn({ id, title, tickets, onTicketClick }: KanbanColumn
             </div>
 
             <div ref={setNodeRef} className="flex-1 p-2 space-y-2 overflow-y-auto min-h-[100px]">
-                <SortableContext items={tickets.map(t => t.id.toString())} strategy={verticalListSortingStrategy}>
+                <SortableContext id={id} items={tickets.map(t => t.id.toString())} strategy={verticalListSortingStrategy}>
                     {tickets.map((ticket) => (
                         <KanbanCard key={ticket.id} ticket={ticket} onClick={() => onTicketClick && onTicketClick(ticket.id)} />
                     ))}
