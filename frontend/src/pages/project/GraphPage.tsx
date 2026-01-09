@@ -29,7 +29,7 @@ interface GraphData {
 export default function GraphPage() {
     const { projectId } = useParams();
     const containerRef = useRef<HTMLDivElement>(null);
-    const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+    const [dimensions, setDimensions] = useState({ width: 1, height: 1 });
 
     const { data: graphData, isLoading } = useQuery<GraphData>({
         queryKey: ['graph', projectId],
@@ -41,19 +41,30 @@ export default function GraphPage() {
     });
 
     useEffect(() => {
-        function handleResize() {
-            if (containerRef.current) {
-                setDimensions({
-                    width: containerRef.current.offsetWidth,
-                    height: containerRef.current.offsetHeight,
-                });
+        if (!containerRef.current) return;
+
+        // Initial measure
+        setDimensions({
+            width: containerRef.current.offsetWidth,
+            height: containerRef.current.offsetHeight
+        });
+
+        const resizeObserver = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                // Use getBoundingClientRect or contentRect. 
+                // offsetWidth/Height is often safer for "visual size" including padding/borders which we want for the canvas container
+                if (entry.target instanceof HTMLElement) {
+                    setDimensions({
+                        width: entry.target.offsetWidth,
+                        height: entry.target.offsetHeight,
+                    });
+                }
             }
-        }
+        });
 
-        window.addEventListener('resize', handleResize);
-        handleResize();
+        resizeObserver.observe(containerRef.current);
 
-        return () => window.removeEventListener('resize', handleResize);
+        return () => resizeObserver.disconnect();
     }, []);
 
     const getNodeColor = (type: string) => {
@@ -96,7 +107,7 @@ export default function GraphPage() {
                     <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-slate-500"></div>Subtask</div>
                 </div>
             </div>
-            <div className="flex-1 overflow-hidden relative" ref={containerRef}>
+            <div className="flex-1 w-full h-full overflow-hidden relative" ref={containerRef}>
                 {graphData && (
                     <ForceGraph2D
                         width={dimensions.width}
@@ -108,6 +119,7 @@ export default function GraphPage() {
                         linkDirectionalArrowRelPos={1}
                         linkCurvature={0.25}
                         backgroundColor="#f8fafc"
+                        linkColor={() => '#94a3b8'}
                     />
                 )}
             </div>
