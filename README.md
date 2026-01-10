@@ -1,7 +1,7 @@
 ## 🛠 Tech Stack
 
 ### Backend
-- **Language**: [Go](https://go.dev/) (v1.23+)
+- **Language**: [Go](https://go.dev/) (v1.25+)
 - **Framework**: [Echo](https://echo.labstack.com/) (High performance, extensible web framework)
 - **Database**: [PostgreSQL](https://www.postgresql.org/)
 - **Database Toolkit**: [sqlx](https://github.com/jmoiron/sqlx) (General purpose extensions to database/sql)
@@ -68,7 +68,6 @@ pnpm dev
 ├── backend/            # Go source code
 │   ├── cmd/api/        # Application entry point
 │   ├── internal/       # Internal packages (user, project, ticket, etc.)
-│   └── migrations/     # SQL migration files
 ├── frontend/           # React source code
 │   ├── src/
 │   │   ├── components/ # Reusable UI components
