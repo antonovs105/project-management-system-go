@@ -93,3 +93,29 @@ func TestOrderedCollectionDocuments(t *testing.T) {
 	assert.Equal(t, "https://example.test/projects/project-1/outbox?page=true&limit=2&offset=4", page["next"])
 	assert.Equal(t, "https://example.test/projects/project-1/outbox?page=true&limit=2", page["prev"])
 }
+
+func TestAcceptsActivityPubResponse(t *testing.T) {
+	for _, header := range []string{
+		"",
+		"*/*",
+		"application/*",
+		"application/json",
+		"application/activity+json",
+		`application/ld+json; profile="https://www.w3.org/ns/activitystreams"`,
+		"application/xml;q=0, application/activity+json;q=1",
+	} {
+		t.Run(header, func(t *testing.T) {
+			assert.True(t, acceptsActivityPubResponse(header))
+		})
+	}
+
+	for _, header := range []string{
+		"application/xml",
+		"text/html",
+		"application/activity+json;q=0",
+	} {
+		t.Run(header, func(t *testing.T) {
+			assert.False(t, acceptsActivityPubResponse(header))
+		})
+	}
+}

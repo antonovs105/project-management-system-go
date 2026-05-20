@@ -3,7 +3,10 @@ package webfinger
 import (
 	"encoding/json"
 	"errors"
+	"mime"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 )
@@ -23,6 +26,10 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 }
 
 func (h *Handler) Resolve(c echo.Context) error {
+	if !acceptsJRDResponse(c.Request().Header.Get(echo.HeaderAccept)) {
+		return c.JSON(http.StatusNotAcceptable, map[string]string{"error": "accept header must allow webfinger json"})
+	}
+
 	jrd, err := h.service.Resolve(c.Request().Context(), c.QueryParam("resource"))
 	if err != nil {
 		switch {
@@ -40,4 +47,34 @@ func (h *Handler) Resolve(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to encode webfinger response"})
 	}
 	return c.Blob(http.StatusOK, jrdMediaType, raw)
+}
+
+func acceptsJRDResponse(header string) bool {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return true
+	}
+	for _, part := range strings.Split(header, ",") {
+		mediaType, params, err := mime.ParseMediaType(strings.TrimSpace(part))
+		if err != nil {
+			mediaType = strings.TrimSpace(strings.Split(part, ";")[0])
+			params = nil
+		}
+		if isZeroQuality(params["q"]) {
+			continue
+		}
+		switch strings.ToLower(mediaType) {
+		case "*/*", "application/*", "application/json", jrdMediaType:
+			return true
+		}
+	}
+	return false
+}
+
+func isZeroQuality(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	return err == nil && value <= 0
 }

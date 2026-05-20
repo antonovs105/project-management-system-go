@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -46,18 +47,18 @@ func NewHandlerWithAuthorizer(db *sqlx.DB, cfg Config, authorizer Authorizer) *H
 }
 
 func (h *Handler) RegisterRoutes(e *echo.Echo) {
-	e.GET("/users/:username", h.GetUserActor)
-	e.GET("/users/:username/inbox", h.UserInbox)
-	e.GET("/users/:username/outbox", h.UserOutbox)
-	e.GET("/users/:username/followers", h.UserFollowers)
-	e.GET("/projects/:id", h.GetProjectActor)
-	e.GET("/projects/:id/inbox", h.ProjectInbox)
-	e.GET("/projects/:id/outbox", h.ProjectOutbox)
-	e.GET("/projects/:id/followers", h.ProjectFollowers)
-	e.GET("/projects/:id/tickets", h.ProjectTickets)
-	e.GET("/tickets/:id", h.GetTicket)
-	e.GET("/comments/:id", h.GetComment)
-	e.GET("/activities/:id", h.GetActivity)
+	e.GET("/users/:username", h.GetUserActor, requireActivityPubAccept)
+	e.GET("/users/:username/inbox", h.UserInbox, requireActivityPubAccept)
+	e.GET("/users/:username/outbox", h.UserOutbox, requireActivityPubAccept)
+	e.GET("/users/:username/followers", h.UserFollowers, requireActivityPubAccept)
+	e.GET("/projects/:id", h.GetProjectActor, requireActivityPubAccept)
+	e.GET("/projects/:id/inbox", h.ProjectInbox, requireActivityPubAccept)
+	e.GET("/projects/:id/outbox", h.ProjectOutbox, requireActivityPubAccept)
+	e.GET("/projects/:id/followers", h.ProjectFollowers, requireActivityPubAccept)
+	e.GET("/projects/:id/tickets", h.ProjectTickets, requireActivityPubAccept)
+	e.GET("/tickets/:id", h.GetTicket, requireActivityPubAccept)
+	e.GET("/comments/:id", h.GetComment, requireActivityPubAccept)
+	e.GET("/activities/:id", h.GetActivity, requireActivityPubAccept)
 }
 
 func (h *Handler) GetUserActor(c echo.Context) error {
@@ -534,6 +535,56 @@ func writeActivityJSON(c echo.Context, status int, doc any) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to encode activitypub document"})
 	}
 	return c.Blob(status, ActivityJSONMediaType, raw)
+}
+
+func requireActivityPubAccept(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		if !acceptsActivityPubResponse(c.Request().Header.Get(echo.HeaderAccept)) {
+			return c.JSON(http.StatusNotAcceptable, map[string]string{"error": "accept header must allow activitypub json"})
+		}
+		return next(c)
+	}
+}
+
+func acceptsActivityPubResponse(header string) bool {
+	return acceptsMediaType(header, isActivityPubResponseMediaType)
+}
+
+func acceptsMediaType(header string, allowed func(string) bool) bool {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return true
+	}
+	for _, part := range strings.Split(header, ",") {
+		mediaType, params, err := mime.ParseMediaType(strings.TrimSpace(part))
+		if err != nil {
+			mediaType = strings.TrimSpace(strings.Split(part, ";")[0])
+			params = nil
+		}
+		if isZeroQuality(params["q"]) {
+			continue
+		}
+		if allowed(strings.ToLower(mediaType)) {
+			return true
+		}
+	}
+	return false
+}
+
+func isActivityPubResponseMediaType(mediaType string) bool {
+	return mediaType == "*/*" ||
+		mediaType == "application/*" ||
+		mediaType == "application/json" ||
+		mediaType == ActivityJSONMediaType ||
+		mediaType == "application/ld+json"
+}
+
+func isZeroQuality(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	return err == nil && value <= 0
 }
 
 func stringItems(values []string) []any {
