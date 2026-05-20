@@ -1,60 +1,57 @@
 services:
   db:
     image: postgres:17-alpine
-    container_name: pms-db
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=pms
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-pms}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 5
+
+  migrations:
+    image: migrate/migrate
+    volumes:
+      - ./migrations:/migrations:ro
+    command:
+      - -path=/migrations/
+      - -database=postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-pms}?sslmode=disable
+      - up
+    depends_on:
+      db:
+        condition: service_healthy
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: pms-backend
     ports:
-      - "8080:8080"
+      - "${BACKEND_PORT:-8080}:8080"
     environment:
-      - DB_SOURCE=postgres://postgres:postgres@db:5432/pms?sslmode=disable
-      - JWT_SECRET_KEY=your_secret_key_here
-      - PUBLIC_BASE_URL=http://localhost:8080
-      - LOCAL_DOMAIN=localhost:8080
+      DB_SOURCE: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-pms}?sslmode=disable
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-your_secret_key_here}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      LOCAL_DOMAIN: ${LOCAL_DOMAIN:-localhost:8080}
     depends_on:
-      db:
-        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: pms-frontend
     ports:
-      - "5173:5173"
+      - "${FRONTEND_PORT:-5173}:5173"
     environment:
-      - VITE_API_URL=http://localhost:8080
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8080}
     depends_on:
       - backend
-
-  migrations:
-    image: migrate/migrate
-    volumes:
-      - ./migrations:/migrations
-    command:
-      - -path=/migrations/
-      - -database=postgres://postgres:postgres@db:5432/pms?sslmode=disable
-      - up
-    depends_on:
-      db:
-        condition: service_healthy
 
 volumes:
   postgres_data:

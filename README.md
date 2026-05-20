@@ -35,23 +35,28 @@
    ```
 
 2. **Set up environment variables**:
-   Copy `.env.example` to `.env` (if needed) or rely on the defaults in `docker-compose.yml`.
+   Copy `.env.example` to `.env` if you want to override ports, credentials, or public URLs. The backend is intended to run as a Linux container.
 
 3. **Run the application**:
    ```bash
-   docker-compose up --build
+   docker compose up --build
    ```
+
+   The `migrations` service runs after Postgres is healthy and must complete before the backend starts.
 
 4. **Access the application**:
    - Frontend: [http://localhost:5173](http://localhost:5173)
    - Backend API: [http://localhost:8080](http://localhost:8080)
 
-### Manual Setup (Development)
+### Local Development Without Containers
+
+This path is only for development. The server runtime target is the Docker/Alpine container setup above.
 
 #### Backend
 ```bash
 cd backend
-# Create .env file with DB_SOURCE and JWT_SECRET_KEY
+# Create .env file with DB_SOURCE pointing to localhost, for example:
+# DB_SOURCE=postgres://postgres:postgres@localhost:5432/pms?sslmode=disable
 go run cmd/api/main.go
 ```
 
@@ -61,6 +66,19 @@ cd frontend
 pnpm install
 pnpm dev
 ```
+
+### Backend Integration Tests
+
+Integration tests are behind the `integration` build tag and expect a migrated PostgreSQL database.
+
+With Docker running:
+```bash
+docker compose up -d db migrations
+cd backend
+TEST_DB_SOURCE=postgres://postgres:postgres@localhost:5432/pms?sslmode=disable go test -tags=integration ./internal/integration
+```
+
+If you changed `POSTGRES_PORT`, use that port in `TEST_DB_SOURCE`.
 
 ## 📂 Project Structure
 

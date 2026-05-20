@@ -47,7 +47,7 @@ func (r *PgRepository) Create(ctx context.Context, ticket *Ticket) error {
 			:id, :ap_id, :title, :description, :status, :priority, :type, :parent_id,
 			:project_id, :reporter_id, :is_resolved,
 			CASE WHEN :is_resolved THEN now() ELSE NULL END,
-			CASE WHEN :is_resolved THEN :reporter_id ELSE NULL END
+			CASE WHEN :is_resolved THEN CAST(:reporter_id AS uuid) ELSE NULL END
 		)
 	`, ticket); err != nil {
 		return err
@@ -121,7 +121,7 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket) error {
 				ELSE resolved_at
 			END,
 			resolved_by_actor_id = CASE
-				WHEN :is_resolved THEN :reporter_id
+				WHEN :is_resolved THEN CAST(:reporter_id AS uuid)
 				ELSE NULL
 			END
 		WHERE id = :id

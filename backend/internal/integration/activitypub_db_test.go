@@ -1,0 +1,315 @@
+//go:build integration
+
+package integration
+
+import (
+	"context"
+	"database/sql"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	"github.com/antonovs105/project-management-system-go/internal/comment"
+	"github.com/antonovs105/project-management-system-go/internal/project"
+	"github.com/antonovs105/project-management-system-go/internal/ticket"
+	"github.com/antonovs105/project-management-system-go/internal/user"
+	"github.com/jmoiron/sqlx"
+	_ "github.com/lib/pq"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestActivityPubFoundationFlow(t *testing.T) {
+	db := openIntegrationDB(t)
+	resetIntegrationDB(t, db)
+
+	ctx := context.Background()
+	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+
+	userRepo := user.NewRepository(db, cfg)
+	userService := user.NewService(userRepo, []byte("integration-secret"), cfg)
+
+	projectRepo := project.NewRepository(db, cfg)
+	projectService := project.NewService(projectRepo, cfg)
+
+	ticketRepo := ticket.NewRepository(db, cfg)
+	ticketService := ticket.NewService(ticketRepo, projectService, cfg)
+
+	commentRepo := comment.NewRepository(db, cfg)
+	commentService := comment.NewService(commentRepo, ticketService, cfg)
+
+	owner, err := userService.RegisterUser(ctx, "owner", "owner@example.test", "password123")
+	require.NoError(t, err)
+	member, err := userService.RegisterUser(ctx, "member", "member@example.test", "password123")
+	require.NoError(t, err)
+
+	requireRowCount(t, db, "actors", 2)
+	requireRowCount(t, db, "actor_keys", 2)
+	requireObjectType(t, db, owner.APID, "Person")
+
+	project, err := projectService.CreateProject(ctx, "Federated Board", "A local ActivityPub board", owner.ID)
+	require.NoError(t, err)
+	requireObjectType(t, db, project.APID, "Group")
+	requireProjectRole(t, db, owner.ID, project.ID, "owner")
+	requireFollow(t, db, owner.ID, project.ID, "accepted")
+
+	invite, err := projectService.AddMemberToProject(ctx, project.ID, owner.ID, member.ID, "developer")
+	require.NoError(t, err)
+	requireActivityType(t, db, invite.APID, "Invite")
+
+	require.NoError(t, projectService.AcceptInvite(ctx, invite.ID, member.ID))
+	requireProjectRole(t, db, member.ID, project.ID, "developer")
+	requireFollow(t, db, member.ID, project.ID, "accepted")
+
+	createdTicket, err := ticketService.CreateTicket(ctx, ticket.CreateTicketRequest{
+		Title:       "Design local outbox",
+		Description: "Persist local AP activities",
+		Priority:    "high",
+		Type:        "task",
+	}, project.ID, owner.ID)
+	require.NoError(t, err)
+	requireObjectType(t, db, createdTicket.APID, "Ticket")
+	requireActivityForObject(t, db, "Create", createdTicket.APID)
+	requireInboxItem(t, db, project.ID, "Create", createdTicket.APID)
+	requireOutboxItem(t, db, owner.ID, "Create", createdTicket.APID)
+
+	status := "done"
+	assigneeID := member.ID
+	assigneePatch := &assigneeID
+	require.NoError(t, ticketService.UpdateTicket(ctx, ticket.UpdateTicketRequest{
+		Status:     &status,
+		AssigneeID: &assigneePatch,
+	}, createdTicket.ID, owner.ID))
+	requireActivityForObject(t, db, "Update", createdTicket.APID)
+	requireTicketResolved(t, db, createdTicket.ID)
+
+	createdComment, err := commentService.CreateComment(ctx, createdTicket.ID, member.ID, "This is ready.")
+	require.NoError(t, err)
+	requireObjectType(t, db, createdComment.APID, "Note")
+	requireActivityForObject(t, db, "Create", createdComment.APID)
+	requireOutboxItem(t, db, member.ID, "Create", createdComment.APID)
+}
+
+func TestActivityPubFoundationConstraints(t *testing.T) {
+	db := openIntegrationDB(t)
+	resetIntegrationDB(t, db)
+
+	ctx := context.Background()
+	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+
+	userRepo := user.NewRepository(db, cfg)
+	userService := user.NewService(userRepo, []byte("integration-secret"), cfg)
+	projectRepo := project.NewRepository(db, cfg)
+	projectService := project.NewService(projectRepo, cfg)
+
+	owner, err := userService.RegisterUser(ctx, "owner", "owner@example.test", "password123")
+	require.NoError(t, err)
+	project, err := projectService.CreateProject(ctx, "Constraint Board", "", owner.ID)
+	require.NoError(t, err)
+
+	t.Run("core tables exist", func(t *testing.T) {
+		for _, tableName := range []string{
+			"actors",
+			"actor_keys",
+			"ap_objects",
+			"ap_activities",
+			"actor_inbox_items",
+			"actor_outbox_items",
+			"project_members",
+			"actor_follows",
+			"project_invites",
+			"tickets",
+			"ticket_assignees",
+			"comments",
+		} {
+			var exists bool
+			err := db.Get(&exists, `SELECT to_regclass($1) IS NOT NULL`, tableName)
+			require.NoError(t, err)
+			assert.True(t, exists, tableName)
+		}
+	})
+
+	t.Run("duplicate actor handle fails", func(t *testing.T) {
+		_, err := db.ExecContext(ctx, `
+			INSERT INTO actors (
+				ap_id, type, preferred_username, handle, name, inbox_url, outbox_url, followers_url
+			)
+			VALUES (
+				$1, 'Person', 'owner-copy', $2, 'Owner Copy', $3, $4, $5
+			)
+		`,
+			"http://localhost:8080/users/owner-copy",
+			owner.Handle,
+			"http://localhost:8080/users/owner-copy/inbox",
+			"http://localhost:8080/users/owner-copy/outbox",
+			"http://localhost:8080/users/owner-copy/followers",
+		)
+		require.Error(t, err)
+	})
+
+	t.Run("invalid ticket status fails", func(t *testing.T) {
+		_, err := db.ExecContext(ctx, `
+			INSERT INTO tickets (
+				ap_id, project_id, reporter_id, title, status, priority, type
+			)
+			VALUES ($1, $2, $3, 'Invalid status', 'blocked', 'medium', 'task')
+		`, "http://localhost:8080/tickets/invalid-status", project.ID, owner.ID)
+		require.Error(t, err)
+	})
+}
+
+func openIntegrationDB(t *testing.T) *sqlx.DB {
+	t.Helper()
+
+	source := os.Getenv("TEST_DB_SOURCE")
+	if source == "" {
+		t.Skip("set TEST_DB_SOURCE to run integration tests against a migrated PostgreSQL database")
+	}
+
+	db, err := sqlx.Connect("postgres", source)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, db.Close())
+	})
+	return db
+}
+
+func resetIntegrationDB(t *testing.T, db *sqlx.DB) {
+	t.Helper()
+
+	_, err := db.Exec(`
+		TRUNCATE TABLE
+			actor_outbox_items,
+			actor_inbox_items,
+			project_invites,
+			ap_activities,
+			ap_objects,
+			comments,
+			ticket_assignees,
+			ticket_links,
+			tickets,
+			actor_follows,
+			project_members,
+			projects,
+			users,
+			actor_keys,
+			actors
+		CASCADE
+	`)
+	require.NoError(t, err)
+}
+
+func requireRowCount(t *testing.T, db *sqlx.DB, tableName string, expected int) {
+	t.Helper()
+
+	var actual int
+	err := db.Get(&actual, "SELECT count(*) FROM "+tableName)
+	require.NoError(t, err)
+	require.Equal(t, expected, actual)
+}
+
+func requireObjectType(t *testing.T, db *sqlx.DB, apID, expectedType string) {
+	t.Helper()
+
+	var objectType string
+	err := db.Get(&objectType, `SELECT object_type FROM ap_objects WHERE ap_id = $1`, apID)
+	require.NoError(t, err)
+	require.Equal(t, expectedType, objectType)
+}
+
+func requireProjectRole(t *testing.T, db *sqlx.DB, userID, projectID, expectedRole string) {
+	t.Helper()
+
+	var role string
+	err := db.Get(&role, `
+		SELECT role
+		FROM project_members
+		WHERE user_id = $1 AND project_id = $2
+	`, userID, projectID)
+	require.NoError(t, err)
+	require.Equal(t, expectedRole, role)
+}
+
+func requireFollow(t *testing.T, db *sqlx.DB, followerID, followedID, expectedState string) {
+	t.Helper()
+
+	var state string
+	err := db.Get(&state, `
+		SELECT state
+		FROM actor_follows
+		WHERE follower_actor_id = $1 AND followed_actor_id = $2
+	`, followerID, followedID)
+	require.NoError(t, err)
+	require.Equal(t, expectedState, state)
+}
+
+func requireActivityType(t *testing.T, db *sqlx.DB, apID, expectedType string) {
+	t.Helper()
+
+	var activityType string
+	err := db.Get(&activityType, `SELECT activity_type FROM ap_activities WHERE ap_id = $1`, apID)
+	require.NoError(t, err)
+	require.Equal(t, expectedType, activityType)
+}
+
+func requireActivityForObject(t *testing.T, db *sqlx.DB, activityType, objectAPID string) {
+	t.Helper()
+
+	var count int
+	err := db.Get(&count, `
+		SELECT count(*)
+		FROM ap_activities
+		WHERE activity_type = $1 AND object_ap_id = $2
+	`, activityType, objectAPID)
+	require.NoError(t, err)
+	require.Greater(t, count, 0)
+}
+
+func requireInboxItem(t *testing.T, db *sqlx.DB, actorID, activityType, objectAPID string) {
+	t.Helper()
+	requireBoxItem(t, db, "actor_inbox_items", actorID, activityType, objectAPID)
+}
+
+func requireOutboxItem(t *testing.T, db *sqlx.DB, actorID, activityType, objectAPID string) {
+	t.Helper()
+	requireBoxItem(t, db, "actor_outbox_items", actorID, activityType, objectAPID)
+}
+
+func requireBoxItem(t *testing.T, db *sqlx.DB, tableName, actorID, activityType, objectAPID string) {
+	t.Helper()
+
+	if tableName != "actor_inbox_items" && tableName != "actor_outbox_items" {
+		t.Fatalf("unexpected box table %q", tableName)
+	}
+
+	var count int
+	err := db.Get(&count, `
+		SELECT count(*)
+		FROM `+tableName+` box
+		JOIN ap_activities activity ON activity.id = box.activity_id
+		WHERE box.actor_id = $1
+			AND activity.activity_type = $2
+			AND activity.object_ap_id = $3
+	`, actorID, activityType, objectAPID)
+	require.NoError(t, err)
+	require.Greater(t, count, 0)
+}
+
+func requireTicketResolved(t *testing.T, db *sqlx.DB, ticketID string) {
+	t.Helper()
+
+	var resolved sql.NullBool
+	err := db.Get(&resolved, `SELECT is_resolved FROM tickets WHERE id = $1`, ticketID)
+	require.NoError(t, err)
+	require.True(t, resolved.Valid)
+	require.True(t, resolved.Bool)
+}
+
+func TestIntegrationDBSourceLooksSafe(t *testing.T) {
+	source := os.Getenv("TEST_DB_SOURCE")
+	if source == "" {
+		t.Skip("set TEST_DB_SOURCE to check integration database safety")
+	}
+	require.True(t, strings.Contains(source, "localhost") || strings.Contains(source, "127.0.0.1") || strings.Contains(source, "db:5432"))
+}
