@@ -89,6 +89,44 @@ func TestVerifyRequestRejectsTamperedBody(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidDigest)
 }
 
+func TestVerifyRequestRequiresBodyDigestCoverage(t *testing.T) {
+	service, key, _ := newTestService(t, AlgorithmRSAV15SHA256)
+	body := []byte(`{"type":"Create"}`)
+	req := newSignedRequest(t, http.MethodPost, "https://remote.test/inbox", body)
+
+	err := service.SignRequest(context.Background(), key.ActorID, req, nil)
+	require.NoError(t, err)
+
+	_, err = service.VerifyRequest(context.Background(), req, body)
+	require.ErrorIs(t, err, ErrMissingCoveredContent)
+}
+
+func TestVerifyRequestRejectsInvalidSignedDate(t *testing.T) {
+	service, key, _ := newTestService(t, AlgorithmRSAV15SHA256)
+	body := []byte(`{"type":"Create"}`)
+	req := newSignedRequest(t, http.MethodPost, "https://remote.test/inbox", body)
+	req.Header.Set("Date", "not-a-date")
+
+	err := service.SignRequest(context.Background(), key.ActorID, req, body)
+	require.NoError(t, err)
+
+	_, err = service.VerifyRequest(context.Background(), req, body)
+	require.ErrorIs(t, err, ErrInvalidDate)
+}
+
+func TestVerifyRequestRejectsExpiredSignedDate(t *testing.T) {
+	service, key, now := newTestService(t, AlgorithmRSAV15SHA256)
+	body := []byte(`{"type":"Create"}`)
+	req := newSignedRequest(t, http.MethodPost, "https://remote.test/inbox", body)
+	req.Header.Set("Date", now.Add(-10*time.Minute).Format(http.TimeFormat))
+
+	err := service.SignRequest(context.Background(), key.ActorID, req, body)
+	require.NoError(t, err)
+
+	_, err = service.VerifyRequest(context.Background(), req, body)
+	require.ErrorIs(t, err, ErrExpiredSignature)
+}
+
 func TestVerifyRequestRejectsTamperedSignedComponent(t *testing.T) {
 	service, key, _ := newTestService(t, AlgorithmRSAV15SHA256)
 	body := []byte(`{"type":"Create"}`)

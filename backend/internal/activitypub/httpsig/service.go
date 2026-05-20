@@ -38,6 +38,7 @@ var (
 	ErrUnsupportedAlgorithm   = errors.New("unsupported http signature algorithm")
 	ErrInvalidSignature       = errors.New("invalid http signature")
 	ErrInvalidDigest          = errors.New("invalid content digest")
+	ErrInvalidDate            = errors.New("invalid http date")
 	ErrMissingCoveredContent  = errors.New("missing signed content")
 	ErrExpiredSignature       = errors.New("expired http signature")
 	ErrMissingCoveredMetadata = errors.New("missing signed metadata")
@@ -170,6 +171,12 @@ func (s *Service) VerifyRequest(ctx context.Context, req *http.Request, body []b
 	}
 
 	if err := requireComponents(input.Components, []string{componentMethod, componentAuthority, componentPath, componentDate}); err != nil {
+		return nil, err
+	}
+	if len(body) > 0 && !containsComponent(input.Components, componentContentDigest) {
+		return nil, fmt.Errorf("%w: %s", ErrMissingCoveredContent, componentContentDigest)
+	}
+	if err := verifyDate(req.Header.Get(headerDate), s.clock().UTC(), s.maxAge); err != nil {
 		return nil, err
 	}
 	if containsComponent(input.Components, componentContentDigest) {
@@ -329,6 +336,20 @@ func verifyContentDigest(header string, body []byte) error {
 	}
 	if header != contentDigest(body) {
 		return ErrInvalidDigest
+	}
+	return nil
+}
+
+func verifyDate(header string, now time.Time, maxAge time.Duration) error {
+	signedAt, err := http.ParseTime(header)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidDate, err)
+	}
+	if maxAge > 0 {
+		signedAt = signedAt.UTC()
+		if now.Sub(signedAt) > maxAge || signedAt.Sub(now) > maxAge {
+			return ErrExpiredSignature
+		}
 	}
 	return nil
 }
