@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/c2s"
@@ -28,11 +29,13 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	_ "github.com/lib/pq"
+	"github.com/redis/go-redis/v9"
 )
 
 // Server structure
 type ApiServer struct {
 	db              *sqlx.DB
+	redisAddr       string
 	userHandler     *user.Handler
 	projectHandler  *project.Handler
 	ticketHandler   *ticket.Handler
@@ -240,6 +243,7 @@ func main() {
 	// Dependency injection
 	server := &ApiServer{
 		db:              db,
+		redisAddr:       redisAddr,
 		userHandler:     userHandler,
 		projectHandler:  projectHandler,
 		ticketHandler:   ticketHandler,
@@ -274,6 +278,7 @@ func main() {
 
 	// Routes
 	e.GET("/health", server.healthCheck)
+	e.GET("/ready", server.readinessCheck)
 
 	server.userHandler.RegisterRoutes(e)
 	server.wfHandler.RegisterRoutes(e)
@@ -314,6 +319,44 @@ func (s *ApiServer) healthCheck(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{
 		"status": "ok",
 		"system": "working",
+	})
+}
+
+func (s *ApiServer) readinessCheck(c echo.Context) error {
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 2*time.Second)
+	defer cancel()
+
+	statusCode := http.StatusOK
+	status := "ready"
+	checks := map[string]string{}
+
+	if err := s.db.PingContext(ctx); err != nil {
+		log.Printf("Readiness check failed: database ping error: %v", err)
+		statusCode = http.StatusServiceUnavailable
+		status = "not_ready"
+		checks["database"] = "error"
+	} else {
+		checks["database"] = "ok"
+	}
+
+	if strings.TrimSpace(s.redisAddr) == "" {
+		checks["redis"] = "disabled"
+	} else {
+		client := redis.NewClient(&redis.Options{Addr: s.redisAddr})
+		defer client.Close()
+		if err := client.Ping(ctx).Err(); err != nil {
+			log.Printf("Readiness check failed: redis ping error: %v", err)
+			statusCode = http.StatusServiceUnavailable
+			status = "not_ready"
+			checks["redis"] = "error"
+		} else {
+			checks["redis"] = "ok"
+		}
+	}
+
+	return c.JSON(statusCode, map[string]any{
+		"status": status,
+		"checks": checks,
 	})
 }
 
