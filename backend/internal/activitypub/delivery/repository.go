@@ -14,7 +14,7 @@ type Repository interface {
 	CreateWithActor(ctx context.Context, activityID string, actorID string, targetInboxURL string, maxAttempts int) (*Delivery, bool, error)
 	StartAttempt(ctx context.Context, deliveryID string) (*Delivery, error)
 	MarkDelivered(ctx context.Context, deliveryID string) error
-	MarkFailed(ctx context.Context, deliveryID string, message string, nextAttemptAt *time.Time) error
+	MarkFailed(ctx context.Context, deliveryID string, message string, details FailureDetails, nextAttemptAt *time.Time) error
 }
 
 type RecipientRepository interface {
@@ -163,6 +163,9 @@ func (r *PgRepository) StartAttempt(ctx context.Context, deliveryID string) (*De
 		SET state = $2,
 			attempts = attempts + 1,
 			last_error = NULL,
+			last_attempt_at = now(),
+			last_failure_kind = '',
+			last_status_code = NULL,
 			next_attempt_at = NULL
 		WHERE id = $1
 	`, deliveryID, StateProcessing); err != nil {
@@ -185,24 +188,32 @@ func (r *PgRepository) MarkDelivered(ctx context.Context, deliveryID string) err
 		SET state = $2,
 			delivered_at = now(),
 			next_attempt_at = NULL,
-			last_error = NULL
+			last_error = NULL,
+			last_failure_kind = '',
+			last_status_code = NULL
 		WHERE id = $1
 	`, deliveryID, StateDelivered)
 	return err
 }
 
-func (r *PgRepository) MarkFailed(ctx context.Context, deliveryID string, message string, nextAttemptAt *time.Time) error {
+func (r *PgRepository) MarkFailed(ctx context.Context, deliveryID string, message string, details FailureDetails, nextAttemptAt *time.Time) error {
 	state := StateFailed
 	if nextAttemptAt == nil {
 		state = StateDead
+	}
+	if details.Kind == "" {
+		details.Kind = FailureKindUnknown
 	}
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE activity_deliveries
 		SET state = $2,
 			last_error = $3,
-			next_attempt_at = $4
+			next_attempt_at = $4,
+			last_attempt_at = COALESCE(last_attempt_at, now()),
+			last_failure_kind = $5,
+			last_status_code = $6
 		WHERE id = $1
-	`, deliveryID, state, message, nextAttemptAt)
+	`, deliveryID, state, message, nextAttemptAt, details.Kind, details.StatusCode)
 	return err
 }
 
@@ -239,6 +250,9 @@ func (r *PgRepository) ProjectDeliveries(ctx context.Context, projectID string, 
 			d.max_attempts,
 			d.next_attempt_at,
 			d.last_error,
+			d.last_attempt_at,
+			d.last_failure_kind,
+			d.last_status_code,
 			d.delivered_at,
 			($3 AND d.state IN ('failed', 'dead')) AS can_retry,
 			d.created_at,
@@ -479,6 +493,9 @@ func deliverySelect() string {
 			d.max_attempts,
 			d.next_attempt_at,
 			d.last_error,
+			d.last_attempt_at,
+			d.last_failure_kind,
+			d.last_status_code,
 			d.delivered_at,
 			a.document,
 			d.created_at,

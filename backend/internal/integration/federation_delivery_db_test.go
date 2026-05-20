@@ -120,6 +120,9 @@ func TestFederationDiscoveryAndDeliverySmoke(t *testing.T) {
 	assert.WithinDuration(t, time.Now().UTC().Add(time.Minute), failedState.NextAttemptAt.Time, 5*time.Second)
 	require.True(t, failedState.LastError.Valid)
 	assert.Contains(t, failedState.LastError.String, "503")
+	assert.Equal(t, delivery.FailureKindHTTP, failedState.LastFailureKind)
+	require.True(t, failedState.LastStatusCode.Valid)
+	assert.Equal(t, int64(http.StatusServiceUnavailable), failedState.LastStatusCode.Int64)
 }
 
 type federationSmokeClient struct {
@@ -246,11 +249,13 @@ func requireActivityIDForObject(t *testing.T, db *sqlx.DB, objectAPID string) st
 }
 
 type deliveryStateRow struct {
-	State         string         `db:"state"`
-	Attempts      int            `db:"attempts"`
-	NextAttemptAt sql.NullTime   `db:"next_attempt_at"`
-	LastError     sql.NullString `db:"last_error"`
-	DeliveredAt   sql.NullTime   `db:"delivered_at"`
+	State           string         `db:"state"`
+	Attempts        int            `db:"attempts"`
+	NextAttemptAt   sql.NullTime   `db:"next_attempt_at"`
+	LastError       sql.NullString `db:"last_error"`
+	LastFailureKind string         `db:"last_failure_kind"`
+	LastStatusCode  sql.NullInt64  `db:"last_status_code"`
+	DeliveredAt     sql.NullTime   `db:"delivered_at"`
 }
 
 func requireDeliveryState(t *testing.T, db *sqlx.DB, deliveryID string) deliveryStateRow {
@@ -258,7 +263,7 @@ func requireDeliveryState(t *testing.T, db *sqlx.DB, deliveryID string) delivery
 
 	var row deliveryStateRow
 	require.NoError(t, db.Get(&row, `
-		SELECT state, attempts, next_attempt_at, last_error, delivered_at
+		SELECT state, attempts, next_attempt_at, last_error, last_failure_kind, last_status_code, delivered_at
 		FROM activity_deliveries
 		WHERE id = $1
 	`, deliveryID))

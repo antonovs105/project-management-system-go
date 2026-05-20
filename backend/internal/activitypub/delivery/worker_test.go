@@ -23,6 +23,7 @@ type workerRepo struct {
 	deliveredID     string
 	failedID        string
 	failedMsg       string
+	failedDetails   FailureDetails
 	nextAttempt     *time.Time
 	startAttempt    error
 	targetActorAPID string
@@ -49,9 +50,10 @@ func (r *workerRepo) MarkDelivered(ctx context.Context, deliveryID string) error
 	return nil
 }
 
-func (r *workerRepo) MarkFailed(ctx context.Context, deliveryID string, message string, nextAttemptAt *time.Time) error {
+func (r *workerRepo) MarkFailed(ctx context.Context, deliveryID string, message string, details FailureDetails, nextAttemptAt *time.Time) error {
 	r.failedID = deliveryID
 	r.failedMsg = message
+	r.failedDetails = details
 	r.nextAttempt = nextAttemptAt
 	return nil
 }
@@ -177,6 +179,9 @@ func TestWorkerRetriesTransientFailureWithBackoff(t *testing.T) {
 	assert.False(t, errors.Is(err, asynq.SkipRetry))
 	assert.Equal(t, "delivery-1", repo.failedID)
 	assert.Contains(t, repo.failedMsg, "500")
+	assert.Equal(t, FailureKindHTTP, repo.failedDetails.Kind)
+	require.NotNil(t, repo.failedDetails.StatusCode)
+	assert.Equal(t, http.StatusInternalServerError, *repo.failedDetails.StatusCode)
 	require.NotNil(t, repo.nextAttempt)
 	assert.WithinDuration(t, time.Now().UTC().Add(2*time.Minute), *repo.nextAttempt, 5*time.Second)
 }
@@ -236,6 +241,9 @@ func TestWorkerRetriesRateLimitFailure(t *testing.T) {
 	assert.False(t, errors.Is(err, asynq.SkipRetry))
 	assert.Equal(t, "delivery-1", repo.failedID)
 	assert.Contains(t, repo.failedMsg, "429")
+	assert.Equal(t, FailureKindHTTP, repo.failedDetails.Kind)
+	require.NotNil(t, repo.failedDetails.StatusCode)
+	assert.Equal(t, http.StatusTooManyRequests, *repo.failedDetails.StatusCode)
 	require.NotNil(t, repo.nextAttempt)
 }
 
@@ -253,6 +261,8 @@ func TestWorkerRetriesNetworkFailure(t *testing.T) {
 	assert.False(t, errors.Is(err, asynq.SkipRetry))
 	assert.Equal(t, "delivery-1", repo.failedID)
 	assert.Equal(t, "connection refused", repo.failedMsg)
+	assert.Equal(t, FailureKindNetwork, repo.failedDetails.Kind)
+	assert.Nil(t, repo.failedDetails.StatusCode)
 	require.NotNil(t, repo.nextAttempt)
 }
 
@@ -269,6 +279,9 @@ func TestWorkerSkipsRetryForPermanentFailure(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, asynq.SkipRetry))
 	assert.Equal(t, "delivery-1", repo.failedID)
+	assert.Equal(t, FailureKindHTTP, repo.failedDetails.Kind)
+	require.NotNil(t, repo.failedDetails.StatusCode)
+	assert.Equal(t, http.StatusNotFound, *repo.failedDetails.StatusCode)
 	assert.Nil(t, repo.nextAttempt)
 }
 
@@ -291,6 +304,7 @@ func TestWorkerSkipsRetryForUnsupportedInboxScheme(t *testing.T) {
 	assert.False(t, clientCalled)
 	assert.Equal(t, "delivery-1", repo.failedID)
 	assert.Contains(t, repo.failedMsg, "unsupported scheme")
+	assert.Equal(t, FailureKindSafety, repo.failedDetails.Kind)
 	assert.Nil(t, repo.nextAttempt)
 }
 
@@ -311,6 +325,7 @@ func TestWorkerSkipsRetryForUnsafeInboxHost(t *testing.T) {
 	assert.False(t, signerCalled)
 	assert.Equal(t, "delivery-1", repo.failedID)
 	assert.Contains(t, repo.failedMsg, "blocked address")
+	assert.Equal(t, FailureKindSafety, repo.failedDetails.Kind)
 	assert.Nil(t, repo.nextAttempt)
 }
 

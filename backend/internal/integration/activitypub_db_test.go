@@ -428,7 +428,7 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	require.NoError(t, err)
 	projectDeleteDelivery := findProjectDelivery(postDeleteDeliveries, "Delete", project.APID, remoteInbox)
 	require.NotNil(t, projectDeleteDelivery)
-	require.NoError(t, delivery.NewRepository(db).MarkFailed(ctx, projectDeleteDelivery.ID, "remote server unavailable", nil))
+	require.NoError(t, delivery.NewRepository(db).MarkFailed(ctx, projectDeleteDelivery.ID, "remote server unavailable", delivery.FailureDetails{Kind: delivery.FailureKindNetwork}, nil))
 	deadProjectDeliveries, err := deliveryService.ListProjectDeliveriesWithOptions(ctx, project.ID, owner.ID, delivery.ProjectDeliveryListOptions{
 		State: delivery.StateDead,
 	})
@@ -650,34 +650,38 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		var fetched struct {
 			LastFetchedAt sql.NullTime   `db:"last_fetched_at"`
 			FetchError    sql.NullString `db:"fetch_error"`
+			FetchErrorAt  sql.NullTime   `db:"fetch_error_at"`
 		}
 		require.NoError(t, db.GetContext(ctx, &fetched, `
-			SELECT last_fetched_at, fetch_error
+			SELECT last_fetched_at, fetch_error, fetch_error_at
 			FROM actors
 			WHERE ap_id = $1
 		`, actor.APID))
 		require.True(t, fetched.LastFetchedAt.Valid)
 		require.False(t, fetched.FetchError.Valid)
+		require.False(t, fetched.FetchErrorAt.Valid)
 
 		require.NoError(t, repo.RecordRemoteActorFetchFailure(ctx, actor.APID, "remote actor fetch failed"))
 		require.NoError(t, db.GetContext(ctx, &fetched, `
-			SELECT last_fetched_at, fetch_error
+			SELECT last_fetched_at, fetch_error, fetch_error_at
 			FROM actors
 			WHERE ap_id = $1
 		`, actor.APID))
 		require.True(t, fetched.LastFetchedAt.Valid)
 		require.True(t, fetched.FetchError.Valid)
+		require.True(t, fetched.FetchErrorAt.Valid)
 		assert.Equal(t, "remote actor fetch failed", fetched.FetchError.String)
 
 		actor.Name = "Remote Bot Refreshed"
 		require.NoError(t, repo.UpsertRemoteActor(ctx, actor))
 		require.NoError(t, db.GetContext(ctx, &fetched, `
-			SELECT last_fetched_at, fetch_error
+			SELECT last_fetched_at, fetch_error, fetch_error_at
 			FROM actors
 			WHERE ap_id = $1
 		`, actor.APID))
 		require.True(t, fetched.LastFetchedAt.Valid)
 		require.False(t, fetched.FetchError.Valid)
+		require.False(t, fetched.FetchErrorAt.Valid)
 	})
 
 	t.Run("remote actor key rotation deactivates old key", func(t *testing.T) {
@@ -1160,9 +1164,10 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, delivery.StateProcessing, started.State)
 		assert.Equal(t, 1, started.Attempts)
+		require.NotNil(t, started.LastAttemptAt)
 
 		nextAttempt := time.Now().UTC().Add(time.Minute)
-		require.NoError(t, repo.MarkFailed(ctx, created.ID, "remote 503", &nextAttempt))
+		require.NoError(t, repo.MarkFailed(ctx, created.ID, "remote 503", delivery.FailureDetails{Kind: delivery.FailureKindHTTP, StatusCode: intPtr(http.StatusServiceUnavailable)}, &nextAttempt))
 
 		retried, err := repo.StartAttempt(ctx, created.ID)
 		require.NoError(t, err)
@@ -1175,20 +1180,24 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		finalDelivery, isNew, err := repo.Create(ctx, activityID, "https://remote.example/users/dead/inbox", 2)
 		require.NoError(t, err)
 		assert.True(t, isNew)
-		require.NoError(t, repo.MarkFailed(ctx, finalDelivery.ID, "permanent failure", nil))
+		require.NoError(t, repo.MarkFailed(ctx, finalDelivery.ID, "permanent failure", delivery.FailureDetails{Kind: delivery.FailureKindUnknown}, nil))
 
 		var terminal struct {
-			State         string       `db:"state"`
-			LastError     string       `db:"last_error"`
-			NextAttemptAt sql.NullTime `db:"next_attempt_at"`
+			State           string        `db:"state"`
+			LastError       string        `db:"last_error"`
+			LastFailureKind string        `db:"last_failure_kind"`
+			LastStatusCode  sql.NullInt64 `db:"last_status_code"`
+			NextAttemptAt   sql.NullTime  `db:"next_attempt_at"`
 		}
 		require.NoError(t, db.GetContext(ctx, &terminal, `
-			SELECT state, last_error, next_attempt_at
+			SELECT state, last_error, last_failure_kind, last_status_code, next_attempt_at
 			FROM activity_deliveries
 			WHERE id = $1
 		`, finalDelivery.ID))
 		assert.Equal(t, delivery.StateDead, terminal.State)
 		assert.Equal(t, "permanent failure", terminal.LastError)
+		assert.Equal(t, delivery.FailureKindUnknown, terminal.LastFailureKind)
+		assert.False(t, terminal.LastStatusCode.Valid)
 		assert.False(t, terminal.NextAttemptAt.Valid)
 
 		_, err = repo.StartAttempt(ctx, finalDelivery.ID)
@@ -2778,6 +2787,10 @@ func requireTicketObjectNotAssignedTo(t *testing.T, db *sqlx.DB, ticketAPID, ass
 	`, ticketAPID, assigneeAPID)
 	require.NoError(t, err)
 	require.False(t, assigned)
+}
+
+func intPtr(value int) *int {
+	return &value
 }
 
 func TestIntegrationDBSourceLooksSafe(t *testing.T) {

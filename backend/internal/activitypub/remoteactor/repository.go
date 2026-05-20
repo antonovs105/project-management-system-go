@@ -43,6 +43,7 @@ func (r *PgRepository) RemoteActorByAPID(ctx context.Context, apID string) (*Act
 			COALESCE(object.document, '{}'::jsonb) AS document,
 			actor.last_fetched_at,
 			actor.fetch_error,
+			actor.fetch_error_at,
 			actor.created_at,
 			actor.updated_at
 		FROM actors actor
@@ -70,9 +71,9 @@ func (r *PgRepository) UpsertRemoteActor(ctx context.Context, actor *Actor) erro
 		INSERT INTO actors (
 			ap_id, type, preferred_username, handle, name, summary,
 			inbox_url, outbox_url, followers_url, following_url,
-			is_local, last_fetched_at, fetch_error
+			is_local, last_fetched_at, fetch_error, fetch_error_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, now(), NULL)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, now(), NULL, NULL)
 		ON CONFLICT (ap_id) DO UPDATE
 		SET
 			type = EXCLUDED.type,
@@ -85,9 +86,10 @@ func (r *PgRepository) UpsertRemoteActor(ctx context.Context, actor *Actor) erro
 			followers_url = EXCLUDED.followers_url,
 			following_url = EXCLUDED.following_url,
 			last_fetched_at = now(),
-			fetch_error = NULL
+			fetch_error = NULL,
+			fetch_error_at = NULL
 		WHERE actors.is_local = false
-		RETURNING id::text, last_fetched_at, fetch_error, created_at, updated_at
+		RETURNING id::text, last_fetched_at, fetch_error, fetch_error_at, created_at, updated_at
 	`,
 		actor.APID,
 		actor.Type,
@@ -99,7 +101,7 @@ func (r *PgRepository) UpsertRemoteActor(ctx context.Context, actor *Actor) erro
 		actor.OutboxURL,
 		actor.FollowersURL,
 		actor.FollowingURL,
-	).Scan(&actor.ID, &actor.LastFetchedAt, &actor.FetchError, &actor.CreatedAt, &actor.UpdatedAt); err != nil {
+	).Scan(&actor.ID, &actor.LastFetchedAt, &actor.FetchError, &actor.FetchErrorAt, &actor.CreatedAt, &actor.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrLocalActorConflict
 		}
@@ -164,7 +166,8 @@ func (r *PgRepository) UpsertRemoteActor(ctx context.Context, actor *Actor) erro
 func (r *PgRepository) RecordRemoteActorFetchFailure(ctx context.Context, apID string, fetchError string) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE actors
-		SET fetch_error = $2
+		SET fetch_error = $2,
+			fetch_error_at = now()
 		WHERE ap_id = $1 AND is_local = false
 	`, apID, fetchError)
 	return err

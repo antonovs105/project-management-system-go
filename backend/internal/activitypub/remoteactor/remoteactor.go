@@ -31,6 +31,7 @@ type Actor struct {
 	Document          json.RawMessage `db:"document" json:"-"`
 	LastFetchedAt     *time.Time      `db:"last_fetched_at" json:"last_fetched_at,omitempty"`
 	FetchError        *string         `db:"fetch_error" json:"fetch_error,omitempty"`
+	FetchErrorAt      *time.Time      `db:"fetch_error_at" json:"fetch_error_at,omitempty"`
 	CreatedAt         time.Time       `db:"created_at" json:"created_at"`
 	UpdatedAt         time.Time       `db:"updated_at" json:"updated_at"`
 }

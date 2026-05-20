@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"net/url"
@@ -165,6 +166,7 @@ func (s *Service) recordFetchFailure(ctx context.Context, actorURL string, err e
 	if actorURL == "" || err == nil {
 		return
 	}
+	log.Printf("activitypub_remote_actor_fetch_failure actor_ap_id=%s error=%q", actorURL, err.Error())
 	_ = s.repo.RecordRemoteActorFetchFailure(ctx, actorURL, err.Error())
 }
 

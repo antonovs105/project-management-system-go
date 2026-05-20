@@ -1006,6 +1006,14 @@ components:
           format: date-time
         last_error:
           type: string
+        last_attempt_at:
+          type: string
+          format: date-time
+        last_failure_kind:
+          type: string
+          enum: [http, network, signing, safety, unknown]
+        last_status_code:
+          type: integer
         delivered_at:
           type: string
           format: date-time

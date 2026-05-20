@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -123,7 +124,21 @@ func (w *Worker) HandleDeliveryTask(ctx context.Context, task *asynq.Task) error
 		if !nextAttemptAt.IsZero() {
 			next = &nextAttemptAt
 		}
-		if markErr := w.repo.MarkFailed(ctx, delivery.ID, err.Error(), next); markErr != nil {
+		details := failureDetailsFromError(err)
+		log.Printf(
+			"activitypub_delivery_failure delivery_id=%s activity_id=%s activity_ap_id=%s target_inbox_url=%s attempt=%d max_attempts=%d failure_kind=%s status_code=%s retryable=%t error=%q",
+			delivery.ID,
+			delivery.ActivityID,
+			delivery.ActivityAPID,
+			delivery.TargetInboxURL,
+			delivery.Attempts,
+			delivery.MaxAttempts,
+			details.Kind,
+			statusCodeLogValue(details.StatusCode),
+			retryable,
+			err.Error(),
+		)
+		if markErr := w.repo.MarkFailed(ctx, delivery.ID, err.Error(), details, next); markErr != nil {
 			return markErr
 		}
 		if !retryable {
@@ -171,9 +186,9 @@ func (w *Worker) deliver(ctx context.Context, delivery *Delivery) error {
 
 	message := responseMessage(resp)
 	if isRetryableStatus(resp.StatusCode) {
-		return errors.New(message)
+		return httpStatusError{statusCode: resp.StatusCode, err: errors.New(message)}
 	}
-	return permanentError{err: errors.New(message)}
+	return permanentError{err: httpStatusError{statusCode: resp.StatusCode, err: errors.New(message)}}
 }
 
 func (w *Worker) refreshTargetActor(ctx context.Context, inboxURL string) {
@@ -234,6 +249,31 @@ func isRetryable(err error) bool {
 	return !errors.As(err, &permanent)
 }
 
+func failureDetailsFromError(err error) FailureDetails {
+	var httpErr httpStatusError
+	if errors.As(err, &httpErr) {
+		statusCode := httpErr.statusCode
+		return FailureDetails{Kind: FailureKindHTTP, StatusCode: &statusCode}
+	}
+	switch {
+	case errors.Is(err, httpsig.ErrInvalidPrivateKey), errors.Is(err, httpsig.ErrUnsupportedAlgorithm):
+		return FailureDetails{Kind: FailureKindSigning}
+	case errors.Is(err, netguard.ErrUnsafeURL), errors.Is(err, netguard.ErrTooManyRedirects):
+		return FailureDetails{Kind: FailureKindSafety}
+	case isRetryable(err):
+		return FailureDetails{Kind: FailureKindNetwork}
+	default:
+		return FailureDetails{Kind: FailureKindUnknown}
+	}
+}
+
+func statusCodeLogValue(statusCode *int) string {
+	if statusCode == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d", *statusCode)
+}
+
 func validateTargetInboxURL(raw string) error {
 	if _, err := netguard.ValidateRemoteURL(raw); err != nil {
 		return permanentError{err: err}
@@ -264,5 +304,18 @@ func (e permanentError) Error() string {
 }
 
 func (e permanentError) Unwrap() error {
+	return e.err
+}
+
+type httpStatusError struct {
+	statusCode int
+	err        error
+}
+
+func (e httpStatusError) Error() string {
+	return e.err.Error()
+}
+
+func (e httpStatusError) Unwrap() error {
 	return e.err
 }

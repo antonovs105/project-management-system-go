@@ -62,7 +62,7 @@ func (r *serviceRepo) MarkDelivered(ctx context.Context, deliveryID string) erro
 	return nil
 }
 
-func (r *serviceRepo) MarkFailed(ctx context.Context, deliveryID string, message string, nextAttemptAt *time.Time) error {
+func (r *serviceRepo) MarkFailed(ctx context.Context, deliveryID string, message string, details FailureDetails, nextAttemptAt *time.Time) error {
 	return nil
 }
 

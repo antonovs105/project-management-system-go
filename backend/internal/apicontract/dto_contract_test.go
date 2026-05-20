@@ -21,6 +21,7 @@ func TestRESTDTOsUseStableSnakeCaseFields(t *testing.T) {
 	parentID := "parent-1"
 	lastError := "remote 503"
 	nextAttempt := now.Add(time.Minute)
+	statusCode := 503
 
 	cases := []struct {
 		name       string
@@ -135,26 +136,30 @@ func TestRESTDTOsUseStableSnakeCaseFields(t *testing.T) {
 		{
 			name: "delivery",
 			value: delivery.Delivery{
-				ID:             "delivery-1",
-				ActivityID:     "activity-1",
-				ActivityAPID:   "https://local.test/activities/activity-1",
-				ActorID:        "actor-1",
-				ActorAPID:      "https://local.test/users/alice",
-				TargetInboxURL: "https://remote.test/users/bob/inbox",
-				State:          delivery.StateFailed,
-				Attempts:       2,
-				MaxAttempts:    10,
-				NextAttemptAt:  &nextAttempt,
-				LastError:      &lastError,
-				Document:       json.RawMessage(`{"should_not":"leak"}`),
-				CreatedAt:      now,
-				UpdatedAt:      now,
+				ID:              "delivery-1",
+				ActivityID:      "activity-1",
+				ActivityAPID:    "https://local.test/activities/activity-1",
+				ActorID:         "actor-1",
+				ActorAPID:       "https://local.test/users/alice",
+				TargetInboxURL:  "https://remote.test/users/bob/inbox",
+				State:           delivery.StateFailed,
+				Attempts:        2,
+				MaxAttempts:     10,
+				NextAttemptAt:   &nextAttempt,
+				LastError:       &lastError,
+				LastAttemptAt:   &now,
+				LastFailureKind: delivery.FailureKindHTTP,
+				LastStatusCode:  &statusCode,
+				Document:        json.RawMessage(`{"should_not":"leak"}`),
+				CreatedAt:       now,
+				UpdatedAt:       now,
 			},
 			wantKeys: []string{
 				"id", "activity_id", "activity_ap_id", "actor_id", "actor_ap_id", "target_inbox_url",
-				"state", "attempts", "max_attempts", "next_attempt_at", "last_error", "created_at", "updated_at",
+				"state", "attempts", "max_attempts", "next_attempt_at", "last_error", "last_attempt_at",
+				"last_failure_kind", "last_status_code", "created_at", "updated_at",
 			},
-			forbidKeys: []string{"document", "activityID", "actorAPID", "targetInboxURL", "maxAttempts"},
+			forbidKeys: []string{"document", "activityID", "actorAPID", "targetInboxURL", "maxAttempts", "lastFailureKind"},
 		},
 		{
 			name: "federation domain block",
