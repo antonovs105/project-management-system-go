@@ -107,9 +107,16 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 	if err != nil {
 		return nil, err
 	}
+	isProjectCreateTicket, err := s.isProjectCreateTicket(ctx, targetActorID, targetAPID, activity)
+	if err != nil {
+		return nil, err
+	}
 
 	if isProjectCreateNote {
 		return s.repo.StoreInboundCreateNote(ctx, targetActorID, activity)
+	}
+	if isProjectCreateTicket {
+		return s.repo.StoreInboundCreateTicket(ctx, targetActorID, activity)
 	}
 
 	accepted, err := s.repo.StoreInboundActivity(ctx, targetActorID, activity)
@@ -131,6 +138,42 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 		}
 	}
 	return accepted, nil
+}
+
+func (s *Service) isProjectCreateTicket(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
+	if activity.Type != "Create" || activity.ObjectTicket == nil {
+		return false, nil
+	}
+	isProjectActor, err := s.repo.IsProjectActor(ctx, targetActorID)
+	if err != nil {
+		return false, err
+	}
+	if !isProjectActor {
+		return false, nil
+	}
+	ticket := activity.ObjectTicket
+	if ticket.ID == "" || !isAbsoluteURI(ticket.ID) {
+		return false, fmt.Errorf("%w: ticket id", ErrInvalidActivity)
+	}
+	if ticket.AttributedTo == "" || ticket.AttributedTo != activity.ActorAPID {
+		return false, ErrForbiddenActor
+	}
+	if ticket.Context != targetAPID {
+		return false, fmt.Errorf("%w: ticket context must match inbox actor", ErrInvalidActivity)
+	}
+	if strings.TrimSpace(ticket.Name) == "" {
+		return false, fmt.Errorf("%w: ticket name", ErrInvalidActivity)
+	}
+	if _, ok := normalizeTicketPriority(ticket.Priority); !ok {
+		return false, fmt.Errorf("%w: ticket priority", ErrInvalidActivity)
+	}
+	if _, ok := normalizeTicketType(ticket.TicketType); !ok {
+		return false, fmt.Errorf("%w: ticket type", ErrInvalidActivity)
+	}
+	if activity.TargetAPID != nil && *activity.TargetAPID != targetAPID {
+		return false, fmt.Errorf("%w: create target must match inbox actor", ErrInvalidActivity)
+	}
+	return true, nil
 }
 
 func (s *Service) isProjectCreateNote(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
@@ -249,6 +292,9 @@ func parseActivity(body []byte) (*InboundActivity, error) {
 	if objectNote := extractInboundNote(rawObject); objectNote != nil {
 		activity.ObjectNote = objectNote
 	}
+	if objectTicket := extractInboundTicket(rawObject); objectTicket != nil {
+		activity.ObjectTicket = objectTicket
+	}
 	if targetAPID := extractAPID(raw["target"]); targetAPID != "" {
 		activity.TargetAPID = &targetAPID
 	}
@@ -331,6 +377,55 @@ func extractInboundNote(value any) *InboundNote {
 	}
 }
 
+func extractInboundTicket(value any) *InboundTicket {
+	raw, ok := value.(map[string]any)
+	if !ok || !hasObjectType(raw["type"], "forge:Ticket") {
+		return nil
+	}
+	document, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	isResolved, _ := boolValue(raw["forge:isResolved"])
+	return &InboundTicket{
+		ID:           extractAPID(raw["id"]),
+		AttributedTo: extractAPID(raw["attributedTo"]),
+		Context:      extractAPID(raw["context"]),
+		Name:         strings.TrimSpace(stringValue(raw["name"])),
+		Content:      strings.TrimSpace(stringValue(raw["content"])),
+		Priority:     strings.TrimSpace(stringValue(raw["forge:priority"])),
+		TicketType:   strings.TrimSpace(stringValue(raw["forge:ticketType"])),
+		IsResolved:   isResolved,
+		Document:     document,
+	}
+}
+
+func normalizeTicketPriority(value string) (string, bool) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return "medium", true
+	}
+	switch value {
+	case "low", "medium", "high", "urgent":
+		return value, true
+	default:
+		return "", false
+	}
+}
+
+func normalizeTicketType(value string) (string, bool) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return "task", true
+	}
+	switch value {
+	case "epic", "task", "subtask":
+		return value, true
+	default:
+		return "", false
+	}
+}
+
 func hasObjectType(value any, expected string) bool {
 	switch typed := value.(type) {
 	case string:
@@ -350,6 +445,13 @@ func stringValue(value any) string {
 		return typed
 	}
 	return ""
+}
+
+func boolValue(value any) (bool, bool) {
+	if typed, ok := value.(bool); ok {
+		return typed, true
+	}
+	return false, false
 }
 
 func isAbsoluteURI(value string) bool {

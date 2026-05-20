@@ -17,6 +17,7 @@ type Repository interface {
 	IsProjectActor(ctx context.Context, actorID string) (bool, error)
 	StoreInboundActivity(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	StoreInboundCreateNote(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
+	StoreInboundCreateTicket(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	AcceptProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) (*FollowResponse, error)
 	UndoProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) error
 }
@@ -90,6 +91,32 @@ func (r *PgRepository) StoreInboundCreateNote(ctx context.Context, targetActorID
 	}
 	if !accepted.Duplicate {
 		if err := r.insertRemoteNoteCommentTx(ctx, tx, targetActorID, activity); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return accepted, nil
+}
+
+func (r *PgRepository) StoreInboundCreateTicket(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
+	if activity.ObjectTicket == nil {
+		return nil, ErrInvalidActivity
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	accepted, err := r.storeInboundActivityTx(ctx, tx, targetActorID, activity)
+	if err != nil {
+		return nil, err
+	}
+	if !accepted.Duplicate {
+		if err := r.insertRemoteTicketTx(ctx, tx, targetActorID, activity); err != nil {
 			return nil, err
 		}
 	}
@@ -233,6 +260,89 @@ func (r *PgRepository) insertRemoteNoteCommentTx(ctx context.Context, tx *sqlx.T
 			document = EXCLUDED.document,
 			is_deleted = false
 	`, note.ID, activity.ActorID, storedCommentID, note.Document)
+	return err
+}
+
+func (r *PgRepository) insertRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity) error {
+	ticket := activity.ObjectTicket
+
+	var acceptedFollower bool
+	if err := tx.GetContext(ctx, &acceptedFollower, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM actor_follows
+			WHERE follower_actor_id = $1
+				AND followed_actor_id = $2
+				AND state = 'accepted'
+		)
+	`, activity.ActorID, targetActorID); err != nil {
+		return err
+	}
+	if !acceptedFollower {
+		return ErrForbiddenActor
+	}
+
+	priority, ok := normalizeTicketPriority(ticket.Priority)
+	if !ok {
+		return ErrInvalidActivity
+	}
+	ticketType, ok := normalizeTicketType(ticket.TicketType)
+	if !ok {
+		return ErrInvalidActivity
+	}
+	status := "open"
+	if ticket.IsResolved {
+		status = "done"
+	}
+
+	ticketID, err := activitypub.NewID()
+	if err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO tickets (
+			id, ap_id, project_id, reporter_id, title, description,
+			status, priority, type, is_resolved, resolved_at, resolved_by_actor_id
+		)
+		VALUES (
+			$1, $2, $3, $4, $5, $6,
+			$7, $8, $9, $10,
+			CASE WHEN $10 THEN now() ELSE NULL END,
+			CASE WHEN $10 THEN CAST($4 AS uuid) ELSE NULL END
+		)
+		ON CONFLICT (ap_id) DO NOTHING
+	`, ticketID, ticket.ID, targetActorID, activity.ActorID, ticket.Name, ticket.Content, status, priority, ticketType, ticket.IsResolved); err != nil {
+		return err
+	}
+
+	var stored struct {
+		ID         string `db:"id"`
+		ProjectID  string `db:"project_id"`
+		ReporterID string `db:"reporter_id"`
+	}
+	if err := tx.GetContext(ctx, &stored, `
+		SELECT id::text, project_id::text, reporter_id::text
+		FROM tickets
+		WHERE ap_id = $1
+	`, ticket.ID); err != nil {
+		return err
+	}
+	if stored.ProjectID != targetActorID || stored.ReporterID != activity.ActorID {
+		return ErrActivityConflict
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO ap_objects (ap_id, object_type, actor_id, local_ref_table, local_ref_id, document)
+		VALUES ($1, 'Ticket', $2, 'tickets', $3, $4)
+		ON CONFLICT (ap_id) DO UPDATE
+		SET object_type = EXCLUDED.object_type,
+			actor_id = EXCLUDED.actor_id,
+			local_ref_table = EXCLUDED.local_ref_table,
+			local_ref_id = EXCLUDED.local_ref_id,
+			document = EXCLUDED.document,
+			is_deleted = false
+	`, ticket.ID, activity.ActorID, stored.ID, ticket.Document)
 	return err
 }
 

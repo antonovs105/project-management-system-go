@@ -25,6 +25,7 @@ type InboundActivity struct {
 	ObjectAPID     *string           `json:"object,omitempty"`
 	ObjectActivity *EmbeddedActivity `json:"-"`
 	ObjectNote     *InboundNote      `json:"-"`
+	ObjectTicket   *InboundTicket    `json:"-"`
 	TargetAPID     *string           `json:"target,omitempty"`
 	Document       json.RawMessage   `json:"-"`
 }
@@ -41,6 +42,18 @@ type InboundNote struct {
 	AttributedTo string
 	InReplyTo    string
 	Content      string
+	Document     json.RawMessage
+}
+
+type InboundTicket struct {
+	ID           string
+	AttributedTo string
+	Context      string
+	Name         string
+	Content      string
+	Priority     string
+	TicketType   string
+	IsResolved   bool
 	Document     json.RawMessage
 }
 

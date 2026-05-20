@@ -391,6 +391,30 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		assert.Equal(t, remoteActor.ID, comments[0].AuthorID)
 		assert.Equal(t, "Remote review looks good.", comments[0].Content)
 
+		remoteTicketAPID := "https://remote.example/tickets/project-ticket"
+		createTicketAPID := "https://remote.example/activities/create-project-ticket"
+		ticketBody := []byte(`{"id":"` + createTicketAPID + `","type":"Create","actor":"` + remoteActor.APID + `","object":{"id":"` + remoteTicketAPID + `","type":["forge:Ticket"],"attributedTo":"` + remoteActor.APID + `","context":"` + project.APID + `","name":"Remote ticket","content":"Created from another server.","forge:priority":"urgent","forge:ticketType":"task","forge:isResolved":false}}`)
+		ticketReq, err := http.NewRequest(http.MethodPost, project.APID+"/inbox", bytes.NewReader(ticketBody))
+		require.NoError(t, err)
+		require.NoError(t, signer.SignRequest(ctx, remoteActor.ID, ticketReq, ticketBody))
+
+		remoteTicket, err := receiver.Receive(ctx, ticketReq, project.APID, ticketBody)
+		require.NoError(t, err)
+		require.Equal(t, createTicketAPID, remoteTicket.ActivityAPID)
+		requireObjectType(t, db, remoteTicketAPID, "Ticket")
+		requireActivityForObject(t, db, "Create", remoteTicketAPID)
+		requireInboxItem(t, db, project.ID, "Create", remoteTicketAPID)
+
+		tickets, err := ticketService.ListTicketsInProject(ctx, project.ID, owner.ID)
+		require.NoError(t, err)
+		createdRemoteTicket := findTicketByAPID(tickets, remoteTicketAPID)
+		require.NotNil(t, createdRemoteTicket)
+		assert.Equal(t, remoteActor.ID, createdRemoteTicket.ReporterID)
+		assert.Equal(t, "Remote ticket", createdRemoteTicket.Title)
+		assert.Equal(t, "Created from another server.", createdRemoteTicket.Description)
+		assert.Equal(t, "urgent", createdRemoteTicket.Priority)
+		assert.Equal(t, "task", createdRemoteTicket.Type)
+
 		undoAPID := "https://remote.example/activities/undo-follow-project"
 		undoBody := []byte(`{"id":"` + undoAPID + `","type":"Undo","actor":"` + remoteActor.APID + `","object":{"id":"` + followAPID + `","type":"Follow","actor":"` + remoteActor.APID + `","object":"` + project.APID + `"}}`)
 		undoReq, err := http.NewRequest(http.MethodPost, project.APID+"/inbox", bytes.NewReader(undoBody))
@@ -518,6 +542,15 @@ func requireRowCount(t *testing.T, db *sqlx.DB, tableName string, expected int) 
 	err := db.Get(&actual, "SELECT count(*) FROM "+tableName)
 	require.NoError(t, err)
 	require.Equal(t, expected, actual)
+}
+
+func findTicketByAPID(tickets []ticket.Ticket, apID string) *ticket.Ticket {
+	for i := range tickets {
+		if tickets[i].APID == apID {
+			return &tickets[i]
+		}
+	}
+	return nil
 }
 
 func requireObjectType(t *testing.T, db *sqlx.DB, apID, expectedType string) {
