@@ -383,6 +383,7 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		requireInboxItem(t, db, project.ID, "Create", noteAPID)
 
 		commentService := comment.NewService(comment.NewRepository(db, cfg), ticketService, cfg)
+		commentService.SetDelivery(deliveryService)
 		comments, err := commentService.ListComments(ctx, localTicket.ID, owner.ID)
 		require.NoError(t, err)
 		require.Len(t, comments, 1)
@@ -403,6 +404,10 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		requireNoFollow(t, db, remoteActor.ID, project.ID)
 		requireActivityForObject(t, db, "Undo", followAPID)
 		requireInboxItem(t, db, project.ID, "Undo", followAPID)
+
+		localReply, err := commentService.CreateComment(ctx, localTicket.ID, owner.ID, "Thanks for the review.")
+		require.NoError(t, err)
+		requireDeliveryForObject(t, db, "Create", localReply.APID, remoteActor.InboxURL)
 
 		ticketAfterUndo, err := ticketService.CreateTicket(ctx, ticket.CreateTicketRequest{
 			Title:       "No delivery after undo",

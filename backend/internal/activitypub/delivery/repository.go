@@ -19,6 +19,7 @@ type Repository interface {
 type RecipientRepository interface {
 	Repository
 	RemoteProjectFollowerInboxes(ctx context.Context, projectID string) ([]string, error)
+	RemoteProjectTicketRecipientInboxes(ctx context.Context, projectID string, ticketID string) ([]string, error)
 }
 
 type PgRepository struct {
@@ -155,6 +156,57 @@ func (r *PgRepository) RemoteProjectFollowerInboxes(ctx context.Context, project
 			AND follower.inbox_url <> ''
 		ORDER BY follower.inbox_url ASC
 	`, projectID)
+	return inboxes, err
+}
+
+func (r *PgRepository) RemoteProjectTicketRecipientInboxes(ctx context.Context, projectID string, ticketID string) ([]string, error) {
+	var inboxes []string
+	err := r.db.SelectContext(ctx, &inboxes, `
+		WITH recipients AS (
+			SELECT follower.inbox_url
+			FROM actor_follows f
+			JOIN actors follower ON follower.id = f.follower_actor_id
+			WHERE f.followed_actor_id = $1
+				AND f.state = 'accepted'
+				AND follower.is_local = false
+				AND follower.inbox_url <> ''
+
+			UNION
+
+			SELECT reporter.inbox_url
+			FROM tickets ticket
+			JOIN actors reporter ON reporter.id = ticket.reporter_id
+			WHERE ticket.project_id = $1
+				AND ticket.id = $2
+				AND reporter.is_local = false
+				AND reporter.inbox_url <> ''
+
+			UNION
+
+			SELECT assignee.inbox_url
+			FROM tickets ticket
+			JOIN ticket_assignees ta ON ta.ticket_id = ticket.id
+			JOIN actors assignee ON assignee.id = ta.actor_id
+			WHERE ticket.project_id = $1
+				AND ticket.id = $2
+				AND assignee.is_local = false
+				AND assignee.inbox_url <> ''
+
+			UNION
+
+			SELECT author.inbox_url
+			FROM comments comment
+			JOIN tickets ticket ON ticket.id = comment.ticket_id
+			JOIN actors author ON author.id = comment.author_id
+			WHERE ticket.project_id = $1
+				AND ticket.id = $2
+				AND author.is_local = false
+				AND author.inbox_url <> ''
+		)
+		SELECT DISTINCT inbox_url
+		FROM recipients
+		ORDER BY inbox_url ASC
+	`, projectID, ticketID)
 	return inboxes, err
 }
 

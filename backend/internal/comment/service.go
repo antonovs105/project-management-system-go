@@ -25,6 +25,7 @@ func NewService(repo Repository, tickets TicketChecker, apConfig activitypub.Con
 
 type DeliveryEnqueuer interface {
 	EnqueueProjectFollowers(ctx context.Context, projectID string, activityIDs ...string) error
+	EnqueueProjectTicketRecipients(ctx context.Context, projectID string, ticketID string, activityIDs ...string) error
 }
 
 func (s *Service) SetDelivery(delivery DeliveryEnqueuer) {
@@ -51,7 +52,7 @@ func (s *Service) CreateComment(ctx context.Context, ticketID, authorID, content
 	if err != nil {
 		return nil, err
 	}
-	s.enqueueProjectFollowers(ctx, ticket.ProjectID, activityID)
+	s.enqueueProjectTicketRecipients(ctx, ticket.ProjectID, ticket.ID, activityID)
 	return comment, nil
 }
 
@@ -68,5 +69,14 @@ func (s *Service) enqueueProjectFollowers(ctx context.Context, projectID string,
 	}
 	if err := s.delivery.EnqueueProjectFollowers(ctx, projectID, activityIDs...); err != nil {
 		log.Printf("failed to enqueue ActivityPub deliveries for project %s: %v", projectID, err)
+	}
+}
+
+func (s *Service) enqueueProjectTicketRecipients(ctx context.Context, projectID, ticketID string, activityIDs ...string) {
+	if s.delivery == nil || len(activityIDs) == 0 {
+		return
+	}
+	if err := s.delivery.EnqueueProjectTicketRecipients(ctx, projectID, ticketID, activityIDs...); err != nil {
+		log.Printf("failed to enqueue ActivityPub deliveries for project %s ticket %s: %v", projectID, ticketID, err)
 	}
 }

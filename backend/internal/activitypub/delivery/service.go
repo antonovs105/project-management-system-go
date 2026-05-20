@@ -33,6 +33,21 @@ func (s *Service) EnqueueProjectFollowers(ctx context.Context, projectID string,
 	if err != nil {
 		return err
 	}
+	return s.enqueueToInboxes(ctx, inboxes, activityIDs...)
+}
+
+func (s *Service) EnqueueProjectTicketRecipients(ctx context.Context, projectID string, ticketID string, activityIDs ...string) error {
+	if len(activityIDs) == 0 {
+		return nil
+	}
+	inboxes, err := s.repo.RemoteProjectTicketRecipientInboxes(ctx, projectID, ticketID)
+	if err != nil {
+		return err
+	}
+	return s.enqueueToInboxes(ctx, inboxes, activityIDs...)
+}
+
+func (s *Service) enqueueToInboxes(ctx context.Context, inboxes []string, activityIDs ...string) error {
 	for _, activityID := range activityIDs {
 		if activityID == "" {
 			continue

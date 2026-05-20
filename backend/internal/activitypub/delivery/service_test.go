@@ -14,6 +14,9 @@ type serviceRepo struct {
 	targetInboxURL string
 	maxAttempts    int
 	inboxes        []string
+	ticketInboxes  []string
+	projectID      string
+	ticketID       string
 	delivery       *Delivery
 	created        []*Delivery
 	err            error
@@ -50,7 +53,17 @@ func (r *serviceRepo) RemoteProjectFollowerInboxes(ctx context.Context, projectI
 	if r.err != nil {
 		return nil, r.err
 	}
+	r.projectID = projectID
 	return r.inboxes, nil
+}
+
+func (r *serviceRepo) RemoteProjectTicketRecipientInboxes(ctx context.Context, projectID string, ticketID string) ([]string, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	r.projectID = projectID
+	r.ticketID = ticketID
+	return r.ticketInboxes, nil
 }
 
 type serviceQueue struct {
@@ -97,4 +110,19 @@ func TestServiceEnqueueProjectFollowersCreatesDeliveriesForRemoteInboxes(t *test
 	assert.Equal(t, "activity-1", repo.activityID)
 	assert.Equal(t, "https://remote.example/bob/inbox", repo.targetInboxURL)
 	assert.Equal(t, repo.created[1].ID, queue.deliveryID)
+}
+
+func TestServiceEnqueueProjectTicketRecipientsCreatesDeliveriesForRemoteInboxes(t *testing.T) {
+	repo := &serviceRepo{ticketInboxes: []string{"https://remote.example/alice/inbox", "https://remote.example/thread/inbox"}}
+	queue := &serviceQueue{}
+	service := NewService(repo, queue)
+
+	err := service.EnqueueProjectTicketRecipients(context.Background(), "project-1", "ticket-1", "activity-1")
+
+	require.NoError(t, err)
+	assert.Len(t, repo.created, 2)
+	assert.Equal(t, "project-1", repo.projectID)
+	assert.Equal(t, "ticket-1", repo.ticketID)
+	assert.Equal(t, "activity-1", repo.activityID)
+	assert.Equal(t, "https://remote.example/thread/inbox", repo.targetInboxURL)
 }
