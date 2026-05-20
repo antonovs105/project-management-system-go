@@ -17,7 +17,7 @@ type Repository interface {
 	GetUserRole(ctx context.Context, userID, projectID string) (string, error)
 	IsProjectMember(ctx context.Context, projectID, userID string) (bool, error)
 	HasPendingInvite(ctx context.Context, projectID, userID string) (bool, error)
-	Update(ctx context.Context, project *Project) error
+	Update(ctx context.Context, project *Project, actorID string) (*UpdateResult, error)
 	Delete(ctx context.Context, id string, actorID string) (*DeleteResult, error)
 	RemoveMember(ctx context.Context, projectID, actorID, targetUserID string) error
 	GetInviteByID(ctx context.Context, inviteID string) (*ProjectInvite, error)
@@ -235,12 +235,17 @@ func (r *PgRepository) HasPendingInvite(ctx context.Context, projectID, userID s
 	return pending, err
 }
 
-func (r *PgRepository) Update(ctx context.Context, project *Project) error {
+func (r *PgRepository) Update(ctx context.Context, project *Project, actorID string) (*UpdateResult, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
+
+	recipientInboxes, err := remoteProjectFollowerInboxes(ctx, tx, project.ID)
+	if err != nil {
+		return nil, err
+	}
 
 	result, err := tx.NamedExecContext(ctx, `
 		UPDATE projects
@@ -248,14 +253,14 @@ func (r *PgRepository) Update(ctx context.Context, project *Project) error {
 		WHERE id = :id
 	`, project)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if rowsAffected == 0 {
-		return errors.New("no rows affected, project not found")
+		return nil, errors.New("no rows affected, project not found")
 	}
 
 	if _, err := tx.NamedExecContext(ctx, `
@@ -263,24 +268,36 @@ func (r *PgRepository) Update(ctx context.Context, project *Project) error {
 		SET name = :name, summary = :description
 		WHERE id = :id
 	`, project); err != nil {
-		return err
+		return nil, err
 	}
 
 	publicKey, _ := lookupActivePublicKey(ctx, tx, project.ID)
 	doc := activitypub.ProjectActorDocument(project.APID, project.Name, project.Description, publicKey)
 	rawDoc, err := json.Marshal(doc)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE ap_objects
 		SET document = $1, object_type = 'Group'
 		WHERE ap_id = $2
 	`, rawDoc, project.APID); err != nil {
-		return err
+		return nil, err
 	}
 
-	return tx.Commit()
+	activityID, err := r.writeProjectUpdateActivity(ctx, tx, project.ID, actorID, project.APID, doc)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &UpdateResult{
+		ActivityID:       activityID,
+		ProjectID:        project.ID,
+		RecipientInboxes: recipientInboxes,
+	}, nil
 }
 
 func (r *PgRepository) Delete(ctx context.Context, id string, actorID string) (*DeleteResult, error) {
@@ -357,6 +374,43 @@ func remoteProjectFollowerInboxes(ctx context.Context, q sqlx.QueryerContext, pr
 		ORDER BY follower.inbox_url ASC
 	`, projectID)
 	return inboxes, err
+}
+
+func (r *PgRepository) writeProjectUpdateActivity(ctx context.Context, tx *sqlx.Tx, projectID, actorID, projectAPID string, object any) (string, error) {
+	actorAPID, err := lookupActorAPID(ctx, tx, actorID)
+	if err != nil {
+		return "", err
+	}
+	activityID, err := activitypub.NewID()
+	if err != nil {
+		return "", err
+	}
+	activityAPID := activitypub.ActivityAPID(r.cfg, activityID)
+	doc := activitypub.ActivityDocument("Update", activityAPID, actorAPID, object, projectAPID, time.Now().UTC())
+	rawDoc, err := json.Marshal(doc)
+	if err != nil {
+		return "", err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO ap_activities (id, ap_id, activity_type, actor_id, object_ap_id, target_ap_id, document)
+		VALUES ($1, $2, 'Update', $3, $4, $5, $6)
+	`, activityID, activityAPID, actorID, projectAPID, projectAPID, rawDoc); err != nil {
+		return "", err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO actor_outbox_items (actor_id, activity_id, activity_ap_id)
+		VALUES ($1, $2, $3)
+	`, actorID, activityID, activityAPID); err != nil {
+		return "", err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO actor_inbox_items (actor_id, activity_id, activity_ap_id)
+		VALUES ($1, $2, $3)
+	`, projectID, activityID, activityAPID); err != nil {
+		return "", err
+	}
+	return activityID, nil
 }
 
 func tombstoneProjectTree(ctx context.Context, tx *sqlx.Tx, projectID, projectAPID string) error {

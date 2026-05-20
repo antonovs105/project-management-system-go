@@ -300,6 +300,23 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	require.NoError(t, projectService.AcceptInvite(ctx, managerInvite.ID, manager.ID))
 	requireProjectRole(t, db, manager.ID, project.ID, "manager")
 
+	updatedProjectName := "Federated Board Renamed"
+	updatedProjectDescription := "A manager-published ActivityPub board update"
+	updateRequest := projectUpdateNameRequest(&updatedProjectName)
+	updateRequest.Description = &updatedProjectDescription
+	require.NoError(t, projectService.UpdateProject(ctx, project.ID, manager.ID, updateRequest))
+	requireProjectObjectFields(t, db, project.APID, updatedProjectName, updatedProjectDescription)
+	requireActivityForObjectAndActor(t, db, "Update", project.APID, manager.ID)
+	requireActivityForObjectAndTarget(t, db, "Update", project.APID, project.APID)
+	requireOutboxItem(t, db, manager.ID, "Update", project.APID)
+	requireInboxItem(t, db, project.ID, "Update", project.APID)
+	requireDeliveryForObject(t, db, "Update", project.APID, remoteInbox)
+	managerDeliveries, err := deliveryService.ListProjectDeliveries(ctx, project.ID, manager.ID)
+	require.NoError(t, err)
+	requireProjectDelivery(t, managerDeliveries, "Update", project.APID, remoteInbox)
+	project.Name = updatedProjectName
+	project.Description = updatedProjectDescription
+
 	removableDev, err := userService.RegisterUser(ctx, "removable-dev", "removable-dev@example.test", "password123")
 	require.NoError(t, err)
 	removableInvite, err := projectService.AddMemberToProject(ctx, project.ID, owner.ID, removableDev.ID, "developer")
@@ -1584,6 +1601,28 @@ func requireObjectType(t *testing.T, db *sqlx.DB, apID, expectedType string) {
 	err := db.Get(&objectType, `SELECT object_type FROM ap_objects WHERE ap_id = $1`, apID)
 	require.NoError(t, err)
 	require.Equal(t, expectedType, objectType)
+}
+
+func requireProjectObjectFields(t *testing.T, db *sqlx.DB, apID, expectedName, expectedSummary string) {
+	t.Helper()
+
+	var stored struct {
+		Name      string `db:"name"`
+		Summary   string `db:"summary"`
+		IsDeleted bool   `db:"is_deleted"`
+	}
+	err := db.Get(&stored, `
+		SELECT
+			document->>'name' AS name,
+			document->>'summary' AS summary,
+			is_deleted
+		FROM ap_objects
+		WHERE ap_id = $1
+	`, apID)
+	require.NoError(t, err)
+	require.Equal(t, expectedName, stored.Name)
+	require.Equal(t, expectedSummary, stored.Summary)
+	require.False(t, stored.IsDeleted)
 }
 
 func requireObjectDeleted(t *testing.T, db *sqlx.DB, apID string) {

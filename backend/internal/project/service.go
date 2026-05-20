@@ -105,7 +105,12 @@ func (s *Service) UpdateProject(ctx context.Context, projectID, userID string, r
 		projectToUpdate.Description = *req.Description
 	}
 
-	return s.repo.Update(ctx, projectToUpdate)
+	updateResult, err := s.repo.Update(ctx, projectToUpdate, userID)
+	if err != nil {
+		return err
+	}
+	s.enqueueActivityRecipientInboxes(ctx, updateResult.ProjectID, updateResult.ActivityID, updateResult.RecipientInboxes)
+	return nil
 }
 
 func (s *Service) DeleteProject(ctx context.Context, projectID, userID string) error {
@@ -123,20 +128,20 @@ func (s *Service) DeleteProject(ctx context.Context, projectID, userID string) e
 	if err != nil {
 		return err
 	}
-	s.enqueueRecipientInboxes(ctx, deleteResult)
+	s.enqueueActivityRecipientInboxes(ctx, deleteResult.ProjectID, deleteResult.ActivityID, deleteResult.RecipientInboxes)
 	return nil
 }
 
-func (s *Service) enqueueRecipientInboxes(ctx context.Context, result *DeleteResult) {
-	if s.delivery == nil || result == nil || result.ActivityID == "" {
+func (s *Service) enqueueActivityRecipientInboxes(ctx context.Context, projectID string, activityID string, inboxes []string) {
+	if s.delivery == nil || activityID == "" {
 		return
 	}
-	for _, inbox := range result.RecipientInboxes {
+	for _, inbox := range inboxes {
 		if inbox == "" {
 			continue
 		}
-		if _, err := s.delivery.Enqueue(ctx, result.ActivityID, inbox); err != nil {
-			log.Printf("failed to enqueue ActivityPub delivery for project %s inbox %s: %v", result.ProjectID, inbox, err)
+		if _, err := s.delivery.Enqueue(ctx, activityID, inbox); err != nil {
+			log.Printf("failed to enqueue ActivityPub delivery for project %s inbox %s: %v", projectID, inbox, err)
 		}
 	}
 }

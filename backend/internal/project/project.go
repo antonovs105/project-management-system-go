@@ -41,6 +41,12 @@ type ProjectMember struct {
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
+type UpdateResult struct {
+	ActivityID       string
+	ProjectID        string
+	RecipientInboxes []string
+}
+
 type DeleteResult struct {
 	ActivityID       string
 	ProjectID        string

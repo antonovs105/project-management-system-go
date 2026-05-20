@@ -47,9 +47,12 @@ func (m *MockRepository) HasPendingInvite(ctx context.Context, projectID, userID
 	return args.Bool(0), args.Error(1)
 }
 
-func (m *MockRepository) Update(ctx context.Context, project *Project) error {
-	args := m.Called(ctx, project)
-	return args.Error(0)
+func (m *MockRepository) Update(ctx context.Context, project *Project, actorID string) (*UpdateResult, error) {
+	args := m.Called(ctx, project, actorID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*UpdateResult), args.Error(1)
 }
 
 func (m *MockRepository) Delete(ctx context.Context, id string, actorID string) (*DeleteResult, error) {
