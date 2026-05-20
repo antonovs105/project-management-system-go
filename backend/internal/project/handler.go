@@ -23,6 +23,8 @@ func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.DELETE("/projects/:id", h.Delete)
 	api.POST("/projects/:id/members", h.AddMember)
 	api.POST("/invites/:id/accept", h.AcceptInvite)
+	api.POST("/invites/:id/reject", h.RejectInvite)
+	api.POST("/invites/:id/revoke", h.RevokeInvite)
 }
 
 type createProjectRequest struct {
@@ -144,6 +146,28 @@ func (h *Handler) AcceptInvite(c echo.Context) error {
 	userID := c.Get("userID").(string)
 
 	if err := h.service.AcceptInvite(c.Request().Context(), inviteID, userID); err != nil {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+	}
+
+	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *Handler) RejectInvite(c echo.Context) error {
+	inviteID := c.Param("id")
+	userID := c.Get("userID").(string)
+
+	if err := h.service.RejectInvite(c.Request().Context(), inviteID, userID); err != nil {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+	}
+
+	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *Handler) RevokeInvite(c echo.Context) error {
+	inviteID := c.Param("id")
+	userID := c.Get("userID").(string)
+
+	if err := h.service.RevokeInvite(c.Request().Context(), inviteID, userID); err != nil {
 		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
 	}
 

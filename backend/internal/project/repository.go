@@ -15,10 +15,15 @@ type Repository interface {
 	GetByID(ctx context.Context, id string) (*Project, error)
 	ListByOwnerID(ctx context.Context, ownerID string) ([]Project, error)
 	GetUserRole(ctx context.Context, userID, projectID string) (string, error)
+	IsProjectMember(ctx context.Context, projectID, userID string) (bool, error)
+	HasPendingInvite(ctx context.Context, projectID, userID string) (bool, error)
 	Update(ctx context.Context, project *Project) error
 	Delete(ctx context.Context, id string) error
+	GetInviteByID(ctx context.Context, inviteID string) (*ProjectInvite, error)
 	CreateInvite(ctx context.Context, invite *ProjectInvite) error
 	AcceptInvite(ctx context.Context, inviteID, userID string) error
+	RejectInvite(ctx context.Context, inviteID, userID string) error
+	RevokeInvite(ctx context.Context, inviteID, actorID string) error
 }
 
 type PgRepository struct {
@@ -203,6 +208,32 @@ func (r *PgRepository) GetUserRole(ctx context.Context, userID, projectID string
 	return role, err
 }
 
+func (r *PgRepository) IsProjectMember(ctx context.Context, projectID, userID string) (bool, error) {
+	var member bool
+	err := r.db.GetContext(ctx, &member, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM project_members
+			WHERE project_id = $1 AND user_id = $2
+		)
+	`, projectID, userID)
+	return member, err
+}
+
+func (r *PgRepository) HasPendingInvite(ctx context.Context, projectID, userID string) (bool, error) {
+	var pending bool
+	err := r.db.GetContext(ctx, &pending, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM project_invites
+			WHERE project_id = $1
+				AND invitee_actor_id = $2
+				AND status = 'pending'
+		)
+	`, projectID, userID)
+	return pending, err
+}
+
 func (r *PgRepository) Update(ctx context.Context, project *Project) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -266,6 +297,27 @@ func (r *PgRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+func (r *PgRepository) GetInviteByID(ctx context.Context, inviteID string) (*ProjectInvite, error) {
+	var invite ProjectInvite
+	if err := r.db.GetContext(ctx, &invite, `
+		SELECT
+			id::text,
+			ap_id,
+			project_id::text,
+			inviter_actor_id::text,
+			invitee_actor_id::text,
+			role,
+			status,
+			created_at,
+			updated_at
+		FROM project_invites
+		WHERE id = $1
+	`, inviteID); err != nil {
+		return nil, err
+	}
+	return &invite, nil
+}
+
 func (r *PgRepository) CreateInvite(ctx context.Context, invite *ProjectInvite) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -284,6 +336,21 @@ func (r *PgRepository) CreateInvite(ctx context.Context, invite *ProjectInvite) 
 	inviteeAPID, err := lookupActorAPID(ctx, tx, invite.InviteeActorID)
 	if err != nil {
 		return err
+	}
+
+	member, err := isProjectMemberTx(ctx, tx, invite.ProjectID, invite.InviteeActorID)
+	if err != nil {
+		return err
+	}
+	if member {
+		return errors.New("user is already a project member")
+	}
+	pending, err := hasPendingInviteTx(ctx, tx, invite.ProjectID, invite.InviteeActorID)
+	if err != nil {
+		return err
+	}
+	if pending {
+		return errors.New("pending invite already exists")
 	}
 
 	activityID, err := activitypub.NewID()
@@ -376,6 +443,13 @@ func (r *PgRepository) AcceptInvite(ctx context.Context, inviteID, userID string
 	if invite.Status != "pending" {
 		return errors.New("invite is not pending")
 	}
+	member, err := isProjectMemberTx(ctx, tx, invite.ProjectID, userID)
+	if err != nil {
+		return err
+	}
+	if member {
+		return errors.New("user is already a project member")
+	}
 
 	actorAPID, err := lookupActorAPID(ctx, tx, userID)
 	if err != nil {
@@ -438,6 +512,183 @@ func (r *PgRepository) AcceptInvite(ctx context.Context, inviteID, userID string
 	}
 
 	return tx.Commit()
+}
+
+func (r *PgRepository) RejectInvite(ctx context.Context, inviteID, userID string) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	invite, err := getInviteForUpdate(ctx, tx, inviteID)
+	if err != nil {
+		return err
+	}
+	if invite.InviteeActorID != userID {
+		return errors.New("invite does not belong to current user")
+	}
+	if invite.Status != "pending" {
+		return errors.New("invite is not pending")
+	}
+
+	actorAPID, err := lookupActorAPID(ctx, tx, userID)
+	if err != nil {
+		return err
+	}
+	projectAPID, err := lookupActorAPID(ctx, tx, invite.ProjectID)
+	if err != nil {
+		return err
+	}
+	activityID, err := activitypub.NewID()
+	if err != nil {
+		return err
+	}
+	activityAPID := activitypub.ActivityAPID(r.cfg, activityID)
+	doc := activitypub.ActivityDocument("Reject", activityAPID, actorAPID, invite.APID, projectAPID, time.Now().UTC())
+	rawDoc, err := json.Marshal(doc)
+	if err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO ap_activities (id, ap_id, activity_type, actor_id, object_ap_id, target_ap_id, document)
+		VALUES ($1, $2, 'Reject', $3, $4, $5, $6)
+	`, activityID, activityAPID, userID, invite.APID, projectAPID, rawDoc); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO actor_outbox_items (actor_id, activity_id, activity_ap_id)
+		VALUES ($1, $2, $3)
+	`, userID, activityID, activityAPID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO actor_inbox_items (actor_id, activity_id, activity_ap_id)
+		VALUES ($1, $2, $3)
+	`, invite.ProjectID, activityID, activityAPID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE project_invites
+		SET status = 'rejected', response_activity_id = $1
+		WHERE id = $2
+	`, activityID, invite.ID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (r *PgRepository) RevokeInvite(ctx context.Context, inviteID, actorID string) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	invite, err := getInviteForUpdate(ctx, tx, inviteID)
+	if err != nil {
+		return err
+	}
+	if invite.Status != "pending" {
+		return errors.New("invite is not pending")
+	}
+
+	actorAPID, err := lookupActorAPID(ctx, tx, actorID)
+	if err != nil {
+		return err
+	}
+	inviteeAPID, err := lookupActorAPID(ctx, tx, invite.InviteeActorID)
+	if err != nil {
+		return err
+	}
+	activityID, err := activitypub.NewID()
+	if err != nil {
+		return err
+	}
+	activityAPID := activitypub.ActivityAPID(r.cfg, activityID)
+	doc := activitypub.ActivityDocument("Undo", activityAPID, actorAPID, invite.APID, inviteeAPID, time.Now().UTC())
+	rawDoc, err := json.Marshal(doc)
+	if err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO ap_activities (id, ap_id, activity_type, actor_id, object_ap_id, target_ap_id, document)
+		VALUES ($1, $2, 'Undo', $3, $4, $5, $6)
+	`, activityID, activityAPID, actorID, invite.APID, inviteeAPID, rawDoc); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO actor_outbox_items (actor_id, activity_id, activity_ap_id)
+		VALUES ($1, $2, $3)
+	`, actorID, activityID, activityAPID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO actor_inbox_items (actor_id, activity_id, activity_ap_id)
+		VALUES ($1, $2, $3)
+	`, invite.InviteeActorID, activityID, activityAPID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE project_invites
+		SET status = 'revoked', response_activity_id = $1
+		WHERE id = $2
+	`, activityID, invite.ID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func getInviteForUpdate(ctx context.Context, tx *sqlx.Tx, inviteID string) (*ProjectInvite, error) {
+	var invite ProjectInvite
+	if err := tx.GetContext(ctx, &invite, `
+		SELECT
+			id::text,
+			ap_id,
+			project_id::text,
+			inviter_actor_id::text,
+			invitee_actor_id::text,
+			role,
+			status,
+			created_at,
+			updated_at
+		FROM project_invites
+		WHERE id = $1
+		FOR UPDATE
+	`, inviteID); err != nil {
+		return nil, err
+	}
+	return &invite, nil
+}
+
+func isProjectMemberTx(ctx context.Context, q sqlx.QueryerContext, projectID, userID string) (bool, error) {
+	var member bool
+	err := sqlx.GetContext(ctx, q, &member, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM project_members
+			WHERE project_id = $1 AND user_id = $2
+		)
+	`, projectID, userID)
+	return member, err
+}
+
+func hasPendingInviteTx(ctx context.Context, q sqlx.QueryerContext, projectID, userID string) (bool, error) {
+	var pending bool
+	err := sqlx.GetContext(ctx, q, &pending, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM project_invites
+			WHERE project_id = $1
+				AND invitee_actor_id = $2
+				AND status = 'pending'
+		)
+	`, projectID, userID)
+	return pending, err
 }
 
 func lookupActorAPID(ctx context.Context, q sqlx.QueryerContext, actorID string) (string, error) {

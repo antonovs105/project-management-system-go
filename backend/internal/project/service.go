@@ -131,6 +131,20 @@ func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUser
 	if role == RoleOwner && currentUserRole != RoleOwner {
 		return nil, errors.New("insufficient permissions: only owners can invite owners")
 	}
+	member, err := s.repo.IsProjectMember(ctx, projectID, newUserID)
+	if err != nil {
+		return nil, err
+	}
+	if member {
+		return nil, errors.New("user is already a project member")
+	}
+	pending, err := s.repo.HasPendingInvite(ctx, projectID, newUserID)
+	if err != nil {
+		return nil, err
+	}
+	if pending {
+		return nil, errors.New("pending invite already exists")
+	}
 
 	inviteID, err := activitypub.NewID()
 	if err != nil {
@@ -152,4 +166,26 @@ func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUser
 
 func (s *Service) AcceptInvite(ctx context.Context, inviteID, userID string) error {
 	return s.repo.AcceptInvite(ctx, inviteID, userID)
+}
+
+func (s *Service) RejectInvite(ctx context.Context, inviteID, userID string) error {
+	return s.repo.RejectInvite(ctx, inviteID, userID)
+}
+
+func (s *Service) RevokeInvite(ctx context.Context, inviteID, userID string) error {
+	invite, err := s.repo.GetInviteByID(ctx, inviteID)
+	if err != nil {
+		return err
+	}
+	role, err := s.repo.GetUserRole(ctx, userID, invite.ProjectID)
+	if err != nil {
+		return errors.New("access denied: you are not a member of this project")
+	}
+	if !CanManageMembers(role) {
+		return errors.New("insufficient permissions: only owners or managers can revoke invites")
+	}
+	if invite.Role == RoleOwner && role != RoleOwner {
+		return errors.New("insufficient permissions: only owners can revoke owner invites")
+	}
+	return s.repo.RevokeInvite(ctx, inviteID, userID)
 }

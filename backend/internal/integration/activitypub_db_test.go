@@ -74,6 +74,68 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	requireProjectRole(t, db, member.ID, project.ID, "developer")
 	requireFollow(t, db, member.ID, project.ID, "accepted")
 
+	inviteGuardActivityCount := activityCount(t, db)
+	_, err = projectService.AddMemberToProject(ctx, project.ID, owner.ID, member.ID, "viewer")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "already a project member")
+	requireActivityCount(t, db, inviteGuardActivityCount)
+
+	rejectUser, err := userService.RegisterUser(ctx, "reject-user", "reject-user@example.test", "password123")
+	require.NoError(t, err)
+	rejectInvite, err := projectService.AddMemberToProject(ctx, project.ID, owner.ID, rejectUser.ID, "viewer")
+	require.NoError(t, err)
+	requireActivityType(t, db, rejectInvite.APID, "Invite")
+
+	rejectInvalidActivityCount := activityCount(t, db)
+	err = projectService.RejectInvite(ctx, rejectInvite.ID, owner.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invite does not belong")
+	requireActivityCount(t, db, rejectInvalidActivityCount)
+
+	require.NoError(t, projectService.RejectInvite(ctx, rejectInvite.ID, rejectUser.ID))
+	requireInviteStatus(t, db, rejectInvite.ID, "rejected")
+	requireActivityForObjectAndActor(t, db, "Reject", rejectInvite.APID, rejectUser.ID)
+	requireNoProjectMember(t, db, rejectUser.ID, project.ID)
+
+	rejectedActivityCount := activityCount(t, db)
+	err = projectService.AcceptInvite(ctx, rejectInvite.ID, rejectUser.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invite is not pending")
+	requireActivityCount(t, db, rejectedActivityCount)
+
+	pendingUser, err := userService.RegisterUser(ctx, "pending-user", "pending-user@example.test", "password123")
+	require.NoError(t, err)
+	pendingInvite, err := projectService.AddMemberToProject(ctx, project.ID, owner.ID, pendingUser.ID, "developer")
+	require.NoError(t, err)
+	pendingActivityCount := activityCount(t, db)
+	_, err = projectService.AddMemberToProject(ctx, project.ID, owner.ID, pendingUser.ID, "developer")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "pending invite already exists")
+	requireActivityCount(t, db, pendingActivityCount)
+	requireInviteStatus(t, db, pendingInvite.ID, "pending")
+
+	revokeUser, err := userService.RegisterUser(ctx, "revoke-user", "revoke-user@example.test", "password123")
+	require.NoError(t, err)
+	revokeInvite, err := projectService.AddMemberToProject(ctx, project.ID, owner.ID, revokeUser.ID, "viewer")
+	require.NoError(t, err)
+
+	revokeInvalidActivityCount := activityCount(t, db)
+	err = projectService.RevokeInvite(ctx, revokeInvite.ID, member.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "only owners or managers can revoke invites")
+	requireActivityCount(t, db, revokeInvalidActivityCount)
+
+	require.NoError(t, projectService.RevokeInvite(ctx, revokeInvite.ID, owner.ID))
+	requireInviteStatus(t, db, revokeInvite.ID, "revoked")
+	requireActivityForObjectAndActor(t, db, "Undo", revokeInvite.APID, owner.ID)
+	requireNoProjectMember(t, db, revokeUser.ID, project.ID)
+
+	revokedActivityCount := activityCount(t, db)
+	err = projectService.AcceptInvite(ctx, revokeInvite.ID, revokeUser.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invite is not pending")
+	requireActivityCount(t, db, revokedActivityCount)
+
 	remoteInbox := "https://remote.example/users/follower/inbox"
 	remoteFollower := &remoteactor.Actor{
 		APID:              "https://remote.example/users/follower",
@@ -1494,6 +1556,28 @@ func requireProjectRole(t *testing.T, db *sqlx.DB, userID, projectID, expectedRo
 	`, userID, projectID)
 	require.NoError(t, err)
 	require.Equal(t, expectedRole, role)
+}
+
+func requireNoProjectMember(t *testing.T, db *sqlx.DB, userID, projectID string) {
+	t.Helper()
+
+	var count int
+	err := db.Get(&count, `
+		SELECT count(*)
+		FROM project_members
+		WHERE user_id = $1 AND project_id = $2
+	`, userID, projectID)
+	require.NoError(t, err)
+	require.Zero(t, count)
+}
+
+func requireInviteStatus(t *testing.T, db *sqlx.DB, inviteID, expectedStatus string) {
+	t.Helper()
+
+	var status string
+	err := db.Get(&status, `SELECT status FROM project_invites WHERE id = $1`, inviteID)
+	require.NoError(t, err)
+	require.Equal(t, expectedStatus, status)
 }
 
 func requireFollow(t *testing.T, db *sqlx.DB, followerID, followedID, expectedState string) {

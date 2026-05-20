@@ -37,6 +37,16 @@ func (m *MockRepository) GetUserRole(ctx context.Context, userID, projectID stri
 	return args.String(0), args.Error(1)
 }
 
+func (m *MockRepository) IsProjectMember(ctx context.Context, projectID, userID string) (bool, error) {
+	args := m.Called(ctx, projectID, userID)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockRepository) HasPendingInvite(ctx context.Context, projectID, userID string) (bool, error) {
+	args := m.Called(ctx, projectID, userID)
+	return args.Bool(0), args.Error(1)
+}
+
 func (m *MockRepository) Update(ctx context.Context, project *Project) error {
 	args := m.Called(ctx, project)
 	return args.Error(0)
@@ -52,7 +62,25 @@ func (m *MockRepository) CreateInvite(ctx context.Context, invite *ProjectInvite
 	return args.Error(0)
 }
 
+func (m *MockRepository) GetInviteByID(ctx context.Context, inviteID string) (*ProjectInvite, error) {
+	args := m.Called(ctx, inviteID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*ProjectInvite), args.Error(1)
+}
+
 func (m *MockRepository) AcceptInvite(ctx context.Context, inviteID, userID string) error {
+	args := m.Called(ctx, inviteID, userID)
+	return args.Error(0)
+}
+
+func (m *MockRepository) RejectInvite(ctx context.Context, inviteID, userID string) error {
+	args := m.Called(ctx, inviteID, userID)
+	return args.Error(0)
+}
+
+func (m *MockRepository) RevokeInvite(ctx context.Context, inviteID, userID string) error {
 	args := m.Called(ctx, inviteID, userID)
 	return args.Error(0)
 }

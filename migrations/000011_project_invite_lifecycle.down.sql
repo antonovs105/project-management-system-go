@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_project_invites_one_pending_per_invitee;
