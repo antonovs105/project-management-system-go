@@ -31,7 +31,7 @@ func (s *Service) Resolve(ctx context.Context, resource string) (*JRD, error) {
 		return nil, ErrNotFound
 	}
 
-	actor, err := s.repo.FindLocalUserActor(ctx, username)
+	actor, err := s.repo.FindLocalActor(ctx, username)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrNotFound

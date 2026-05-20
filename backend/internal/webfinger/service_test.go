@@ -15,7 +15,7 @@ type mockRepository struct {
 	err   error
 }
 
-func (m mockRepository) FindLocalUserActor(ctx context.Context, username string) (*ActorResource, error) {
+func (m mockRepository) FindLocalActor(ctx context.Context, preferredUsername string) (*ActorResource, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -41,6 +41,27 @@ func TestServiceResolve(t *testing.T) {
 	assert.Equal(t, "self", jrd.Links[0].Rel)
 	assert.Equal(t, "application/activity+json", jrd.Links[0].Type)
 	assert.Equal(t, "https://example.test/users/alice", jrd.Links[0].Href)
+}
+
+func TestServiceResolveProjectActor(t *testing.T) {
+	cfg := activitypub.NewConfig("https://example.test", "example.test")
+	service := NewService(mockRepository{
+		actor: &ActorResource{
+			Username: "project-123",
+			Handle:   "project-123@example.test",
+			APID:     "https://example.test/projects/123",
+		},
+	}, cfg)
+
+	jrd, err := service.Resolve(context.Background(), "acct:project-123@example.test")
+
+	require.NoError(t, err)
+	assert.Equal(t, "acct:project-123@example.test", jrd.Subject)
+	assert.Equal(t, []string{"https://example.test/projects/123"}, jrd.Aliases)
+	require.Len(t, jrd.Links, 1)
+	assert.Equal(t, "self", jrd.Links[0].Rel)
+	assert.Equal(t, "application/activity+json", jrd.Links[0].Type)
+	assert.Equal(t, "https://example.test/projects/123", jrd.Links[0].Href)
 }
 
 func TestServiceResolveRejectsInvalidResources(t *testing.T) {

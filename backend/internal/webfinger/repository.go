@@ -7,7 +7,7 @@ import (
 )
 
 type Repository interface {
-	FindLocalUserActor(ctx context.Context, username string) (*ActorResource, error)
+	FindLocalActor(ctx context.Context, preferredUsername string) (*ActorResource, error)
 }
 
 type PgRepository struct {
@@ -18,16 +18,15 @@ func NewRepository(db *sqlx.DB) Repository {
 	return &PgRepository{db: db}
 }
 
-func (r *PgRepository) FindLocalUserActor(ctx context.Context, username string) (*ActorResource, error) {
+func (r *PgRepository) FindLocalActor(ctx context.Context, preferredUsername string) (*ActorResource, error) {
 	var actor ActorResource
 	err := r.db.GetContext(ctx, &actor, `
-		SELECT u.username, a.handle, a.ap_id
-		FROM users u
-		JOIN actors a ON a.id = u.id
-		WHERE lower(u.username) = lower($1)
+		SELECT a.preferred_username AS username, a.handle, a.ap_id
+		FROM actors a
+		WHERE lower(a.preferred_username) = lower($1)
 			AND a.is_local = true
-			AND a.type = 'Person'
-	`, username)
+			AND a.type IN ('Person', 'Group')
+	`, preferredUsername)
 	if err != nil {
 		return nil, err
 	}
