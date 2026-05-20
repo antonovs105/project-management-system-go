@@ -7,6 +7,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -16,13 +17,15 @@ import (
 type Service struct {
 	repo         Repository
 	jwtSecretKey []byte
+	apConfig     activitypub.Config
 }
 
 // constructor for UserService.
-func NewService(repo Repository, jwtSecret []byte) *Service {
+func NewService(repo Repository, jwtSecret []byte, apConfig activitypub.Config) *Service {
 	return &Service{
 		repo:         repo,
 		jwtSecretKey: jwtSecret,
+		apConfig:     apConfig,
 	}
 }
 
@@ -35,11 +38,28 @@ func (s *Service) RegisterUser(ctx context.Context, username, email, password st
 		return nil, err
 	}
 
+	userID, err := activitypub.NewID()
+	if err != nil {
+		return nil, err
+	}
+	publicKey, privateKey, err := activitypub.GenerateRSAKeyPair()
+	if err != nil {
+		return nil, err
+	}
+
 	// Creating struct User
 	newUser := &User{
-		Username:     username,
-		Email:        email,
-		PasswordHash: string(hashedPassword),
+		ID:            userID,
+		APID:          activitypub.UserAPID(s.apConfig, username),
+		Username:      username,
+		Email:         email,
+		PasswordHash:  string(hashedPassword),
+		Role:          "worker",
+		Handle:        activitypub.Handle(username, s.apConfig),
+		Name:          username,
+		Summary:       "",
+		PublicKeyPEM:  publicKey,
+		PrivateKeyPEM: privateKey,
 	}
 
 	// Saving User in DB
@@ -67,7 +87,7 @@ func (s *Service) Login(ctx context.Context, email, password string) (string, er
 	}
 
 	log.Println("---------------------------------")
-	log.Printf("[DEBUG] Attempting login for user ID: %d", user.ID)
+	log.Printf("[DEBUG] Attempting login for user ID: %s", user.ID)
 	log.Printf("[DEBUG] Email from request: '%s'", email)
 	log.Printf("[DEBUG] Password from request: '%s'", password)
 	log.Printf("[DEBUG] Hash from DB: '%s'", user.PasswordHash)
@@ -80,7 +100,7 @@ func (s *Service) Login(ctx context.Context, email, password string) (string, er
 		return "", errors.New("invalid credentials")
 	}
 
-	log.Printf("[DEBUG] Password for user ID %d comparison successful!", user.ID)
+	log.Printf("[DEBUG] Password for user ID %s comparison successful!", user.ID)
 
 	// generating JWT
 	claims := jwt.MapClaims{

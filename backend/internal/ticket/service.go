@@ -4,23 +4,26 @@ import (
 	"context"
 	"errors"
 
+	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/antonovs105/project-management-system-go/internal/project"
 )
 
 // ProjectChecker interface
 type ProjectChecker interface {
-	GetProjectByID(ctx context.Context, projectID, userID int64) (*project.Project, error)
+	GetProjectByID(ctx context.Context, projectID, userID string) (*project.Project, error)
 }
 
 type Service struct {
 	repo           Repository
 	projectService ProjectChecker
+	apConfig       activitypub.Config
 }
 
-func NewService(repo Repository, projectService ProjectChecker) *Service {
+func NewService(repo Repository, projectService ProjectChecker, apConfig activitypub.Config) *Service {
 	return &Service{
 		repo:           repo,
 		projectService: projectService,
+		apConfig:       apConfig,
 	}
 }
 
@@ -30,8 +33,8 @@ type CreateTicketRequest struct {
 	Description string
 	Priority    string
 	Type        string
-	ParentID    *int64
-	AssigneeID  *int64
+	ParentID    *string
+	AssigneeID  *string
 }
 
 // Hierarchy ranks
@@ -42,7 +45,7 @@ var ticketRanks = map[string]int{
 }
 
 // CreateTicket logic for ticket creation
-func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, projectID, reporterID int64) (*Ticket, error) {
+func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, projectID, reporterID string) (*Ticket, error) {
 	// checking access
 	_, err := s.projectService.GetProjectByID(ctx, projectID, reporterID)
 	if err != nil {
@@ -85,11 +88,21 @@ func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, pro
 	}
 
 	// TODO: check is AssigneeID a project member
+	if req.Priority == "" {
+		req.Priority = "medium"
+	}
+
+	ticketID, err := activitypub.NewID()
+	if err != nil {
+		return nil, err
+	}
 
 	t := &Ticket{
+		ID:          ticketID,
+		APID:        activitypub.TicketAPID(s.apConfig, ticketID),
 		Title:       req.Title,
 		Description: req.Description,
-		Status:      "new",
+		Status:      "open",
 		Priority:    req.Priority,
 		Type:        req.Type,
 		ParentID:    req.ParentID,
@@ -107,7 +120,7 @@ func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, pro
 }
 
 // ListTicketsInProject logic for ticket list
-func (s *Service) ListTicketsInProject(ctx context.Context, projectID, userID int64) ([]Ticket, error) {
+func (s *Service) ListTicketsInProject(ctx context.Context, projectID, userID string) ([]Ticket, error) {
 	// check access
 	_, err := s.projectService.GetProjectByID(ctx, projectID, userID)
 	if err != nil {
@@ -118,7 +131,7 @@ func (s *Service) ListTicketsInProject(ctx context.Context, projectID, userID in
 }
 
 // GetTicketByID gogic to get single ticket
-func (s *Service) GetTicketByID(ctx context.Context, ticketID, userID int64) (*Ticket, error) {
+func (s *Service) GetTicketByID(ctx context.Context, ticketID, userID string) (*Ticket, error) {
 	ticket, err := s.repo.GetByID(ctx, ticketID)
 	if err != nil {
 		return nil, errors.New("ticket not found")
@@ -135,17 +148,17 @@ func (s *Service) GetTicketByID(ctx context.Context, ticketID, userID int64) (*T
 
 // UpdateTicketRequest DTO for updating ticket
 type UpdateTicketRequest struct {
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
-	Status      *string `json:"status"`
-	Priority    *string `json:"priority"`
-	Type        *string `json:"type"`
-	ParentID    **int64 `json:"parent_id"`
-	AssigneeID  **int64 `json:"assignee_id"`
+	Title       *string  `json:"title"`
+	Description *string  `json:"description"`
+	Status      *string  `json:"status"`
+	Priority    *string  `json:"priority"`
+	Type        *string  `json:"type"`
+	ParentID    **string `json:"parent_id"`
+	AssigneeID  **string `json:"assignee_id"`
 }
 
 // UpdateTicket logic for update
-func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, ticketID, userID int64) error {
+func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, ticketID, userID string) error {
 	// find ticket, check access
 	ticketToUpdate, err := s.GetTicketByID(ctx, ticketID, userID)
 	if err != nil {
@@ -224,7 +237,7 @@ func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, tic
 }
 
 // DeleteTicket logic for deleting
-func (s *Service) DeleteTicket(ctx context.Context, ticketID, userID int64) error {
+func (s *Service) DeleteTicket(ctx context.Context, ticketID, userID string) error {
 	// check access
 	_, err := s.GetTicketByID(ctx, ticketID, userID)
 	if err != nil {
@@ -235,7 +248,7 @@ func (s *Service) DeleteTicket(ctx context.Context, ticketID, userID int64) erro
 }
 
 // AddTicketLink adds a link and checks for cycles
-func (s *Service) AddTicketLink(ctx context.Context, sourceID, targetID int64, linkType string, projectID, userID int64) error {
+func (s *Service) AddTicketLink(ctx context.Context, sourceID, targetID string, linkType string, projectID, userID string) error {
 	if sourceID == targetID {
 		return errors.New("cannot link ticket to itself")
 	}
@@ -262,7 +275,7 @@ func (s *Service) AddTicketLink(ctx context.Context, sourceID, targetID int64, l
 	}
 
 	// Build adjacency list
-	adj := make(map[int64][]int64)
+	adj := make(map[string][]string)
 	for _, l := range links {
 		adj[l.SourceID] = append(adj[l.SourceID], l.TargetID)
 	}
@@ -283,9 +296,9 @@ func (s *Service) AddTicketLink(ctx context.Context, sourceID, targetID int64, l
 }
 
 // hasPath checks if there is a path from start to end using BFS
-func hasPath(adj map[int64][]int64, start, end int64) bool {
-	visited := make(map[int64]bool)
-	queue := []int64{start}
+func hasPath(adj map[string][]string, start, end string) bool {
+	visited := make(map[string]bool)
+	queue := []string{start}
 	visited[start] = true
 
 	for len(queue) > 0 {
@@ -307,7 +320,7 @@ func hasPath(adj map[int64][]int64, start, end int64) bool {
 }
 
 // RemoveTicketLink removes a link
-func (s *Service) RemoveTicketLink(ctx context.Context, linkID, projectID, userID int64) error {
+func (s *Service) RemoveTicketLink(ctx context.Context, linkID, projectID, userID string) error {
 
 	err := s.repo.DeleteLink(ctx, linkID)
 	return err
@@ -315,7 +328,7 @@ func (s *Service) RemoveTicketLink(ctx context.Context, linkID, projectID, userI
 
 // GraphNode DTO
 type GraphNode struct {
-	ID       int64  `json:"id"`
+	ID       string `json:"id"`
 	Label    string `json:"label"`
 	Type     string `json:"type"`
 	Status   string `json:"status"`
@@ -325,8 +338,8 @@ type GraphNode struct {
 
 // GraphLink DTO
 type GraphLink struct {
-	Source int64  `json:"source"`
-	Target int64  `json:"target"`
+	Source string `json:"source"`
+	Target string `json:"target"`
 	Type   string `json:"type"`
 }
 
@@ -337,7 +350,7 @@ type GraphResponse struct {
 }
 
 // GetTicketGraph returns nodes and links for react-force-graph
-func (s *Service) GetTicketGraph(ctx context.Context, projectID, userID int64) (*GraphResponse, error) {
+func (s *Service) GetTicketGraph(ctx context.Context, projectID, userID string) (*GraphResponse, error) {
 	// check access
 	_, err := s.projectService.GetProjectByID(ctx, projectID, userID)
 	if err != nil {

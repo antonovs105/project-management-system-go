@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/antonovs105/project-management-system-go/internal/project"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -14,11 +15,11 @@ import (
 func TestService_CreateTicket(t *testing.T) {
 	mockRepo := new(MockRepository)
 	mockProject := new(MockProjectChecker)
-	service := NewService(mockRepo, mockProject)
+	service := NewService(mockRepo, mockProject, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
 
 	ctx := context.Background()
-	projectID := int64(10)
-	reporterID := int64(1)
+	projectID := "project-1"
+	reporterID := "user-1"
 	req := CreateTicketRequest{
 		Title:       "New Ticket",
 		Description: "Desc",
@@ -30,7 +31,7 @@ func TestService_CreateTicket(t *testing.T) {
 		mockProject.On("GetProjectByID", ctx, projectID, reporterID).Return(&project.Project{ID: projectID}, nil).Once()
 		mockRepo.On("Create", ctx, mock.AnythingOfType("*ticket.Ticket")).Return(nil).Run(func(args mock.Arguments) {
 			ticket := args.Get(1).(*Ticket)
-			ticket.ID = 100
+			ticket.ID = "ticket-1"
 		}).Once()
 
 		ticket, err := service.CreateTicket(ctx, req, projectID, reporterID)
@@ -58,12 +59,12 @@ func TestService_CreateTicket(t *testing.T) {
 func TestService_GetTicketByID(t *testing.T) {
 	mockRepo := new(MockRepository)
 	mockProject := new(MockProjectChecker)
-	service := NewService(mockRepo, mockProject)
+	service := NewService(mockRepo, mockProject, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
 
 	ctx := context.Background()
-	ticketID := int64(100)
-	projectID := int64(10)
-	userID := int64(1)
+	ticketID := "ticket-1"
+	projectID := "project-1"
+	userID := "user-1"
 
 	expectedTicket := &Ticket{
 		ID:        ticketID,
@@ -95,13 +96,13 @@ func TestService_GetTicketByID(t *testing.T) {
 func TestService_AddTicketLink(t *testing.T) {
 	mockRepo := new(MockRepository)
 	mockProject := new(MockProjectChecker)
-	service := NewService(mockRepo, mockProject)
+	service := NewService(mockRepo, mockProject, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
 
 	ctx := context.Background()
-	projectID := int64(10)
-	userID := int64(1)
-	sourceID := int64(100)
-	targetID := int64(101)
+	projectID := "project-1"
+	userID := "user-1"
+	sourceID := "ticket-100"
+	targetID := "ticket-101"
 
 	sourceTicket := &Ticket{ID: sourceID, ProjectID: projectID}
 	targetTicket := &Ticket{ID: targetID, ProjectID: projectID}
@@ -131,20 +132,20 @@ func TestService_AddTicketLink(t *testing.T) {
 		// A -> B. Try to add B -> A.
 		// Source: B (101), Target: A (100)
 
-		tktA := &Ticket{ID: 100, ProjectID: projectID}
-		tktB := &Ticket{ID: 101, ProjectID: projectID}
+		tktA := &Ticket{ID: "ticket-100", ProjectID: projectID}
+		tktB := &Ticket{ID: "ticket-101", ProjectID: projectID}
 
-		mockRepo.On("GetByID", ctx, int64(101)).Return(tktB, nil).Once()
+		mockRepo.On("GetByID", ctx, "ticket-101").Return(tktB, nil).Once()
 		mockProject.On("GetProjectByID", ctx, projectID, userID).Return(&project.Project{}, nil).Once()
 
-		mockRepo.On("GetByID", ctx, int64(100)).Return(tktA, nil).Once()
+		mockRepo.On("GetByID", ctx, "ticket-100").Return(tktA, nil).Once()
 		mockProject.On("GetProjectByID", ctx, projectID, userID).Return(&project.Project{}, nil).Once()
 
 		// Existing links: A->B
-		existingLink := TicketLink{SourceID: 100, TargetID: 101, LinkType: "blocks"}
+		existingLink := TicketLink{SourceID: "ticket-100", TargetID: "ticket-101", LinkType: "blocks"}
 		mockRepo.On("GetLinksByProjectID", ctx, projectID).Return([]TicketLink{existingLink}, nil).Once()
 
-		err := service.AddTicketLink(ctx, 101, 100, "blocks", projectID, userID)
+		err := service.AddTicketLink(ctx, "ticket-101", "ticket-100", "blocks", projectID, userID)
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "cycle detected")
@@ -154,18 +155,18 @@ func TestService_AddTicketLink(t *testing.T) {
 func TestService_GetTicketGraph(t *testing.T) {
 	mockRepo := new(MockRepository)
 	mockProject := new(MockProjectChecker)
-	service := NewService(mockRepo, mockProject)
+	service := NewService(mockRepo, mockProject, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
 
 	ctx := context.Background()
-	projectID := int64(10)
-	userID := int64(1)
+	projectID := "project-1"
+	userID := "user-1"
 
 	t.Run("Success", func(t *testing.T) {
 		mockProject.On("GetProjectByID", ctx, projectID, userID).Return(&project.Project{}, nil).Once()
 
 		tickets := []Ticket{
-			{ID: 1, Title: "Epic", Type: "epic", CreatedAt: time.Now()},
-			{ID: 2, Title: "Task", Type: "task", ParentID: int64Ptr(1), CreatedAt: time.Now()},
+			{ID: "ticket-1", Title: "Epic", Type: "epic", CreatedAt: time.Now()},
+			{ID: "ticket-2", Title: "Task", Type: "task", ParentID: stringPtr("ticket-1"), CreatedAt: time.Now()},
 		}
 		mockRepo.On("ListByProjectID", ctx, projectID).Return(tickets, nil).Once()
 		mockRepo.On("GetLinksByProjectID", ctx, projectID).Return([]TicketLink{}, nil).Once()
@@ -180,4 +181,4 @@ func TestService_GetTicketGraph(t *testing.T) {
 	})
 }
 
-func int64Ptr(i int64) *int64 { return &i }
+func stringPtr(s string) *string { return &s }
