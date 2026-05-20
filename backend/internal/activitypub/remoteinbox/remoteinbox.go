@@ -79,3 +79,10 @@ type FollowResponse struct {
 	ActivityAPID   string
 	TargetInboxURL string
 }
+
+type InviteResponseType string
+
+const (
+	InviteResponseAccept InviteResponseType = "accepted"
+	InviteResponseReject InviteResponseType = "rejected"
+)

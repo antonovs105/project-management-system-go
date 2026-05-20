@@ -1105,6 +1105,114 @@ func TestRemoteInboxRefreshesRotatedActorKey(t *testing.T) {
 	requireActorPublicKey(t, db, remoteActor.PublicKeyID, newPublicKey)
 }
 
+func TestRemoteInboxHandlesInviteResponses(t *testing.T) {
+	db := openIntegrationDB(t)
+	resetIntegrationDB(t, db)
+
+	ctx := context.Background()
+	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+	userService := user.NewService(user.NewRepository(db, cfg), []byte("integration-secret"), cfg)
+	projectService := project.NewService(project.NewRepository(db, cfg), cfg)
+	receiver := remoteinbox.NewService(
+		remoteinbox.NewRepository(db, cfg),
+		httpsig.NewService(httpsig.NewRepository(db)),
+	)
+
+	owner, err := userService.RegisterUser(ctx, "owner", "owner@example.test", "password123")
+	require.NoError(t, err)
+	createdProject, err := projectService.CreateProject(ctx, "Invite Response Board", "", owner.ID)
+	require.NoError(t, err)
+
+	t.Run("accepts remote invite response idempotently", func(t *testing.T) {
+		remoteActor, privateKey := createRemoteActor(t, ctx, db, "invite-accept")
+		invite, err := projectService.AddMemberToProject(ctx, createdProject.ID, owner.ID, remoteActor.ID, "viewer")
+		require.NoError(t, err)
+
+		activityAPID := "https://remote.example/activities/accept-project-invite"
+		body := []byte(`{"id":"` + activityAPID + `","type":"Accept","actor":"` + remoteActor.APID + `","object":"` + invite.APID + `","target":"` + createdProject.APID + `"}`)
+		req := signedRemoteInboxRequest(t, ctx, createdProject.APID, remoteActor, privateKey, body)
+
+		accepted, err := receiver.Receive(ctx, req, createdProject.APID, body)
+		require.NoError(t, err)
+		require.False(t, accepted.Duplicate)
+		requireInviteStatus(t, db, invite.ID, "accepted")
+		requireFollow(t, db, remoteActor.ID, createdProject.ID, "accepted")
+		requireNoProjectMember(t, db, remoteActor.ID, createdProject.ID)
+		requireActivityForObjectAndActor(t, db, "Accept", invite.APID, remoteActor.ID)
+		requireInboxItem(t, db, createdProject.ID, "Accept", invite.APID)
+
+		duplicate, err := receiver.Receive(ctx, req, createdProject.APID, body)
+		require.NoError(t, err)
+		require.True(t, duplicate.Duplicate)
+		requireInboxActivityCount(t, db, activityAPID, 1)
+
+		nonPendingAPID := "https://remote.example/activities/reject-accepted-invite"
+		nonPendingBody := []byte(`{"id":"` + nonPendingAPID + `","type":"Reject","actor":"` + remoteActor.APID + `","object":"` + invite.APID + `","target":"` + createdProject.APID + `"}`)
+		nonPendingReq := signedRemoteInboxRequest(t, ctx, createdProject.APID, remoteActor, privateKey, nonPendingBody)
+
+		_, err = receiver.Receive(ctx, nonPendingReq, createdProject.APID, nonPendingBody)
+		require.ErrorIs(t, err, remoteinbox.ErrInvalidActivity)
+		requireInviteStatus(t, db, invite.ID, "accepted")
+		requireNoActivityByAPID(t, db, nonPendingAPID)
+		requireNoInboxActivity(t, db, nonPendingAPID)
+	})
+
+	t.Run("rejects remote invite response", func(t *testing.T) {
+		remoteActor, privateKey := createRemoteActor(t, ctx, db, "invite-reject")
+		invite, err := projectService.AddMemberToProject(ctx, createdProject.ID, owner.ID, remoteActor.ID, "viewer")
+		require.NoError(t, err)
+
+		activityAPID := "https://remote.example/activities/reject-project-invite"
+		body := []byte(`{"id":"` + activityAPID + `","type":"Reject","actor":"` + remoteActor.APID + `","object":{"id":"` + invite.APID + `","type":"Invite","actor":"` + owner.APID + `","object":"` + createdProject.APID + `"},"target":"` + createdProject.APID + `"}`)
+		req := signedRemoteInboxRequest(t, ctx, createdProject.APID, remoteActor, privateKey, body)
+
+		accepted, err := receiver.Receive(ctx, req, createdProject.APID, body)
+		require.NoError(t, err)
+		require.False(t, accepted.Duplicate)
+		requireInviteStatus(t, db, invite.ID, "rejected")
+		requireNoFollow(t, db, remoteActor.ID, createdProject.ID)
+		requireActivityForObjectAndActor(t, db, "Reject", invite.APID, remoteActor.ID)
+		requireInboxItem(t, db, createdProject.ID, "Reject", invite.APID)
+	})
+
+	t.Run("rejects invite response from wrong actor", func(t *testing.T) {
+		invitee, _ := createRemoteActor(t, ctx, db, "invite-target")
+		mallory, privateKey := createRemoteActor(t, ctx, db, "invite-mallory")
+		invite, err := projectService.AddMemberToProject(ctx, createdProject.ID, owner.ID, invitee.ID, "viewer")
+		require.NoError(t, err)
+
+		activityAPID := "https://remote.example/activities/wrong-actor-invite-accept"
+		body := []byte(`{"id":"` + activityAPID + `","type":"Accept","actor":"` + mallory.APID + `","object":"` + invite.APID + `","target":"` + createdProject.APID + `"}`)
+		req := signedRemoteInboxRequest(t, ctx, createdProject.APID, mallory, privateKey, body)
+
+		_, err = receiver.Receive(ctx, req, createdProject.APID, body)
+		require.ErrorIs(t, err, remoteinbox.ErrForbiddenActor)
+		requireInviteStatus(t, db, invite.ID, "pending")
+		requireNoFollow(t, db, mallory.ID, createdProject.ID)
+		requireNoActivityByAPID(t, db, activityAPID)
+		requireNoInboxActivity(t, db, activityAPID)
+	})
+
+	t.Run("rejects invite response sent to wrong project", func(t *testing.T) {
+		remoteActor, privateKey := createRemoteActor(t, ctx, db, "invite-wrong-project")
+		invite, err := projectService.AddMemberToProject(ctx, createdProject.ID, owner.ID, remoteActor.ID, "viewer")
+		require.NoError(t, err)
+		otherProject, err := projectService.CreateProject(ctx, "Other Invite Board", "", owner.ID)
+		require.NoError(t, err)
+
+		activityAPID := "https://remote.example/activities/wrong-project-invite-accept"
+		body := []byte(`{"id":"` + activityAPID + `","type":"Accept","actor":"` + remoteActor.APID + `","object":"` + invite.APID + `","target":"` + otherProject.APID + `"}`)
+		req := signedRemoteInboxRequest(t, ctx, otherProject.APID, remoteActor, privateKey, body)
+
+		_, err = receiver.Receive(ctx, req, otherProject.APID, body)
+		require.ErrorIs(t, err, remoteinbox.ErrInvalidActivity)
+		requireInviteStatus(t, db, invite.ID, "pending")
+		requireNoFollow(t, db, remoteActor.ID, otherProject.ID)
+		requireNoActivityByAPID(t, db, activityAPID)
+		requireNoInboxActivity(t, db, activityAPID)
+	})
+}
+
 func TestRemoteInboxRejectsUnsafeInboundActivities(t *testing.T) {
 	db := openIntegrationDB(t)
 

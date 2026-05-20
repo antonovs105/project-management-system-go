@@ -22,6 +22,8 @@ type Repository interface {
 	StoreInboundAddTicketAssignee(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	StoreInboundRemoveTicketAssignee(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	StoreInboundDeleteTicket(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
+	StoreInboundAcceptInvite(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
+	StoreInboundRejectInvite(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	AcceptProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) (*FollowResponse, error)
 	UndoProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) error
 }
@@ -233,6 +235,97 @@ func (r *PgRepository) StoreInboundDeleteTicket(ctx context.Context, targetActor
 	}
 
 	return accepted, nil
+}
+
+func (r *PgRepository) StoreInboundAcceptInvite(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
+	return r.storeInboundInviteResponse(ctx, targetActorID, activity, InviteResponseAccept)
+}
+
+func (r *PgRepository) StoreInboundRejectInvite(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
+	return r.storeInboundInviteResponse(ctx, targetActorID, activity, InviteResponseReject)
+}
+
+func (r *PgRepository) storeInboundInviteResponse(ctx context.Context, targetActorID string, activity *InboundActivity, response InviteResponseType) (*AcceptedActivity, error) {
+	if activity.ObjectAPID == nil {
+		return nil, ErrInvalidActivity
+	}
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	accepted, err := r.storeInboundActivityTx(ctx, tx, targetActorID, activity)
+	if err != nil {
+		return nil, err
+	}
+	if !accepted.Duplicate {
+		if err := r.applyInboundInviteResponseTx(ctx, tx, targetActorID, activity, accepted.ActivityID, response); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return accepted, nil
+}
+
+func (r *PgRepository) applyInboundInviteResponseTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity, responseActivityID string, response InviteResponseType) error {
+	var invite struct {
+		ID             string `db:"id"`
+		ProjectID      string `db:"project_id"`
+		InviteeActorID string `db:"invitee_actor_id"`
+		Status         string `db:"status"`
+	}
+	if err := tx.GetContext(ctx, &invite, `
+		SELECT
+			id::text,
+			project_id::text,
+			invitee_actor_id::text,
+			status
+		FROM project_invites
+		WHERE ap_id = $1
+		FOR UPDATE
+	`, *activity.ObjectAPID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrInvalidActivity
+		}
+		return err
+	}
+	if invite.ProjectID != targetActorID {
+		return ErrInvalidActivity
+	}
+	if invite.InviteeActorID != activity.ActorID {
+		return ErrForbiddenActor
+	}
+	if invite.Status != "pending" {
+		return ErrInvalidActivity
+	}
+
+	switch response {
+	case InviteResponseAccept:
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO actor_follows (follower_actor_id, followed_actor_id, state)
+			VALUES ($1, $2, 'accepted')
+			ON CONFLICT (follower_actor_id, followed_actor_id)
+			DO UPDATE SET state = 'accepted'
+		`, activity.ActorID, targetActorID); err != nil {
+			return err
+		}
+	case InviteResponseReject:
+	default:
+		return ErrInvalidActivity
+	}
+
+	_, err := tx.ExecContext(ctx, `
+		UPDATE project_invites
+		SET status = $2,
+			response_activity_id = $3
+		WHERE id = $1
+	`, invite.ID, string(response), responseActivityID)
+	return err
 }
 
 func (r *PgRepository) storeInboundActivityTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {

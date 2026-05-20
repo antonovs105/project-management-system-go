@@ -127,6 +127,14 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 	if err != nil {
 		return nil, err
 	}
+	isProjectAcceptInvite, err := s.isProjectInviteResponse(ctx, targetActorID, targetAPID, activity, "Accept")
+	if err != nil {
+		return nil, err
+	}
+	isProjectRejectInvite, err := s.isProjectInviteResponse(ctx, targetActorID, targetAPID, activity, "Reject")
+	if err != nil {
+		return nil, err
+	}
 
 	if isProjectCreateNote {
 		return s.repo.StoreInboundCreateNote(ctx, targetActorID, activity)
@@ -145,6 +153,12 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 	}
 	if isProjectDeleteTicket {
 		return s.repo.StoreInboundDeleteTicket(ctx, targetActorID, activity)
+	}
+	if isProjectAcceptInvite {
+		return s.repo.StoreInboundAcceptInvite(ctx, targetActorID, activity)
+	}
+	if isProjectRejectInvite {
+		return s.repo.StoreInboundRejectInvite(ctx, targetActorID, activity)
 	}
 
 	accepted, err := s.repo.StoreInboundActivity(ctx, targetActorID, activity)
@@ -166,6 +180,33 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 		}
 	}
 	return accepted, nil
+}
+
+func (s *Service) isProjectInviteResponse(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity, activityType string) (bool, error) {
+	if activity.Type != activityType {
+		return false, nil
+	}
+	isProjectActor, err := s.repo.IsProjectActor(ctx, targetActorID)
+	if err != nil {
+		return false, err
+	}
+	if !isProjectActor {
+		return false, nil
+	}
+	activityName := strings.ToLower(activityType)
+	if activity.ObjectAPID == nil || !isAbsoluteURI(*activity.ObjectAPID) {
+		return false, fmt.Errorf("%w: %s object must be an invite", ErrInvalidActivity, activityName)
+	}
+	if *activity.ObjectAPID == targetAPID {
+		return false, fmt.Errorf("%w: %s object must be an invite", ErrInvalidActivity, activityName)
+	}
+	if activity.ObjectActivity != nil && activity.ObjectActivity.Type != "Invite" {
+		return false, fmt.Errorf("%w: %s object must be an invite", ErrInvalidActivity, activityName)
+	}
+	if activity.TargetAPID != nil && *activity.TargetAPID != targetAPID {
+		return false, fmt.Errorf("%w: %s target must match inbox actor", ErrInvalidActivity, activityName)
+	}
+	return true, nil
 }
 
 func (s *Service) isProjectDeleteTicket(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
