@@ -377,6 +377,25 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	requireOutboxItem(t, db, owner.ID, "Delete", project.APID)
 	requireInboxItem(t, db, project.ID, "Delete", project.APID)
 	requireDeliveryForObject(t, db, "Delete", project.APID, remoteInbox)
+	postDeleteDeliveries, err := deliveryService.ListProjectDeliveries(ctx, project.ID, owner.ID)
+	require.NoError(t, err)
+	projectDeleteDelivery := findProjectDelivery(postDeleteDeliveries, "Delete", project.APID, remoteInbox)
+	require.NotNil(t, projectDeleteDelivery)
+	require.NoError(t, delivery.NewRepository(db).MarkFailed(ctx, projectDeleteDelivery.ID, "remote server unavailable", nil))
+	deadProjectDeliveries, err := deliveryService.ListProjectDeliveriesWithOptions(ctx, project.ID, owner.ID, delivery.ProjectDeliveryListOptions{
+		State: delivery.StateDead,
+	})
+	require.NoError(t, err)
+	requireProjectDelivery(t, deadProjectDeliveries, "Delete", project.APID, remoteInbox)
+	projectDeliverySummary, err := deliveryService.GetProjectDeliverySummary(ctx, project.ID, owner.ID)
+	require.NoError(t, err)
+	require.True(t, projectDeliverySummary.CanRetry)
+	require.GreaterOrEqual(t, projectDeliverySummary.Dead, 1)
+	retriedProjectDelivery, err := deliveryService.RetryProjectDelivery(ctx, project.ID, owner.ID, projectDeleteDelivery.ID)
+	require.NoError(t, err)
+	assert.Equal(t, delivery.StatePending, retriedProjectDelivery.State)
+	_, err = deliveryService.ListProjectDeliveries(ctx, project.ID, manager.ID)
+	require.ErrorIs(t, err, delivery.ErrProjectAccessDenied)
 	requireNoProjectByID(t, db, project.ID)
 	requireNoTicketByAPID(t, db, assignmentTarget.APID)
 	requireNoTicketByAPID(t, db, memberRemovalTicket.APID)
@@ -1812,15 +1831,22 @@ func requireDeliveryForObject(t *testing.T, db *sqlx.DB, activityType, objectAPI
 func requireProjectDelivery(t *testing.T, deliveries []delivery.ProjectDelivery, activityType, objectAPID, inboxURL string) {
 	t.Helper()
 
+	if findProjectDelivery(deliveries, activityType, objectAPID, inboxURL) != nil {
+		return
+	}
+	t.Fatalf("project delivery not found for %s %s to %s", activityType, objectAPID, inboxURL)
+}
+
+func findProjectDelivery(deliveries []delivery.ProjectDelivery, activityType, objectAPID, inboxURL string) *delivery.ProjectDelivery {
 	for _, item := range deliveries {
 		if item.ActivityType != activityType || item.TargetInboxURL != inboxURL || item.ObjectAPID == nil {
 			continue
 		}
 		if *item.ObjectAPID == objectAPID {
-			return
+			return &item
 		}
 	}
-	t.Fatalf("project delivery not found for %s %s to %s", activityType, objectAPID, inboxURL)
+	return nil
 }
 
 func requireNoDeliveryForObject(t *testing.T, db *sqlx.DB, activityType, objectAPID, inboxURL string) {

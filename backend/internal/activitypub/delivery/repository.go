@@ -51,11 +51,53 @@ func (r *PgRepository) Create(ctx context.Context, activityID string, targetInbo
 	var id string
 	err = tx.QueryRowxContext(ctx, `
 		INSERT INTO activity_deliveries (
-			activity_id, activity_ap_id, actor_id, target_inbox_url, max_attempts
+			activity_id, activity_ap_id, actor_id, project_actor_id, target_inbox_url, max_attempts
 		)
-		SELECT id, ap_id, actor_id, $2, $3
-		FROM ap_activities
-		WHERE id = $1
+		SELECT
+			activity.id,
+			activity.ap_id,
+			activity.actor_id,
+			COALESCE(
+				target_project_actor.id,
+				object_project_actor.id,
+				activity_project_actor.id,
+				object_ticket.project_id,
+				target_ticket.project_id,
+				object_comment_ticket.project_id,
+				target_comment_ticket.project_id
+			),
+			$2,
+			$3
+		FROM ap_activities activity
+		LEFT JOIN actors target_project_actor
+			ON target_project_actor.ap_id = activity.target_ap_id
+			AND target_project_actor.type = 'Group'
+			AND target_project_actor.is_local = true
+		LEFT JOIN actors object_project_actor
+			ON object_project_actor.ap_id = activity.object_ap_id
+			AND object_project_actor.type = 'Group'
+			AND object_project_actor.is_local = true
+		LEFT JOIN actors activity_project_actor
+			ON activity_project_actor.id = activity.actor_id
+			AND activity_project_actor.type = 'Group'
+			AND activity_project_actor.is_local = true
+		LEFT JOIN ap_objects object_scope ON object_scope.ap_id = activity.object_ap_id
+		LEFT JOIN tickets object_ticket
+			ON object_scope.local_ref_table = 'tickets'
+			AND object_ticket.id = object_scope.local_ref_id
+		LEFT JOIN comments object_comment
+			ON object_scope.local_ref_table = 'comments'
+			AND object_comment.id = object_scope.local_ref_id
+		LEFT JOIN tickets object_comment_ticket ON object_comment_ticket.id = object_comment.ticket_id
+		LEFT JOIN ap_objects target_scope ON target_scope.ap_id = activity.target_ap_id
+		LEFT JOIN tickets target_ticket
+			ON target_scope.local_ref_table = 'tickets'
+			AND target_ticket.id = target_scope.local_ref_id
+		LEFT JOIN comments target_comment
+			ON target_scope.local_ref_table = 'comments'
+			AND target_comment.id = target_scope.local_ref_id
+		LEFT JOIN tickets target_comment_ticket ON target_comment_ticket.id = target_comment.ticket_id
+		WHERE activity.id = $1
 		ON CONFLICT (activity_id, target_inbox_url) DO NOTHING
 		RETURNING id::text
 	`, activityID, targetInboxURL, maxAttempts).Scan(&id)
@@ -157,7 +199,7 @@ func (r *PgRepository) ProjectDeliveries(ctx context.Context, projectID string, 
 		return nil, err
 	}
 
-	role, err := r.projectMemberRole(ctx, r.db, projectID, userID)
+	role, err := r.projectDeliveryRole(ctx, r.db, projectID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -166,10 +208,11 @@ func (r *PgRepository) ProjectDeliveries(ctx context.Context, projectID string, 
 	var deliveries []ProjectDelivery
 	err = r.db.SelectContext(ctx, &deliveries, `
 		WITH project_scope AS (
-			SELECT project.id, actor.ap_id
-			FROM projects project
-			JOIN actors actor ON actor.id = project.id
-			WHERE project.id = $1
+			SELECT actor.id, actor.ap_id
+			FROM actors actor
+			WHERE actor.id = $1
+				AND actor.type = 'Group'
+				AND actor.is_local = true
 		)
 		SELECT
 			d.id::text,
@@ -189,46 +232,8 @@ func (r *PgRepository) ProjectDeliveries(ctx context.Context, projectID string, 
 			d.updated_at
 		FROM activity_deliveries d
 		JOIN ap_activities a ON a.id = d.activity_id
-		JOIN project_scope project ON true
-		WHERE (
-			a.object_ap_id = project.ap_id
-			OR a.target_ap_id = project.ap_id
-			OR EXISTS (
-				SELECT 1
-				FROM ap_objects object
-				JOIN tickets ticket ON ticket.id = object.local_ref_id
-				WHERE object.ap_id = a.object_ap_id
-					AND object.local_ref_table = 'tickets'
-					AND ticket.project_id = project.id
-			)
-			OR EXISTS (
-				SELECT 1
-				FROM ap_objects target
-				JOIN tickets ticket ON ticket.id = target.local_ref_id
-				WHERE target.ap_id = a.target_ap_id
-					AND target.local_ref_table = 'tickets'
-					AND ticket.project_id = project.id
-			)
-			OR EXISTS (
-				SELECT 1
-				FROM ap_objects object
-				JOIN comments comment ON comment.id = object.local_ref_id
-				JOIN tickets ticket ON ticket.id = comment.ticket_id
-				WHERE object.ap_id = a.object_ap_id
-					AND object.local_ref_table = 'comments'
-					AND ticket.project_id = project.id
-			)
-			OR EXISTS (
-				SELECT 1
-				FROM ap_objects target
-				JOIN comments comment ON comment.id = target.local_ref_id
-				JOIN tickets ticket ON ticket.id = comment.ticket_id
-				WHERE target.ap_id = a.target_ap_id
-					AND target.local_ref_table = 'comments'
-					AND ticket.project_id = project.id
-			)
-		)
-		AND ($2 = '' OR d.state = $2)
+		JOIN project_scope project ON project.id = d.project_actor_id
+		WHERE ($2 = '' OR d.state = $2)
 		ORDER BY d.updated_at DESC, d.created_at DESC
 		LIMIT $4
 	`, projectID, options.State, canRetry, options.Limit)
@@ -236,7 +241,7 @@ func (r *PgRepository) ProjectDeliveries(ctx context.Context, projectID string, 
 }
 
 func (r *PgRepository) ProjectDeliverySummary(ctx context.Context, projectID string, userID string) (*ProjectDeliverySummary, error) {
-	role, err := r.projectMemberRole(ctx, r.db, projectID, userID)
+	role, err := r.projectDeliveryRole(ctx, r.db, projectID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -244,54 +249,16 @@ func (r *PgRepository) ProjectDeliverySummary(ctx context.Context, projectID str
 	var summary ProjectDeliverySummary
 	err = r.db.GetContext(ctx, &summary, `
 		WITH project_scope AS (
-			SELECT project.id, actor.ap_id
-			FROM projects project
-			JOIN actors actor ON actor.id = project.id
-			WHERE project.id = $1
+			SELECT actor.id, actor.ap_id
+			FROM actors actor
+			WHERE actor.id = $1
+				AND actor.type = 'Group'
+				AND actor.is_local = true
 		),
 		scoped_deliveries AS (
 			SELECT d.state
 			FROM activity_deliveries d
-			JOIN ap_activities a ON a.id = d.activity_id
-			JOIN project_scope project ON true
-			WHERE (
-				a.object_ap_id = project.ap_id
-				OR a.target_ap_id = project.ap_id
-				OR EXISTS (
-					SELECT 1
-					FROM ap_objects object
-					JOIN tickets ticket ON ticket.id = object.local_ref_id
-					WHERE object.ap_id = a.object_ap_id
-						AND object.local_ref_table = 'tickets'
-						AND ticket.project_id = project.id
-				)
-				OR EXISTS (
-					SELECT 1
-					FROM ap_objects target
-					JOIN tickets ticket ON ticket.id = target.local_ref_id
-					WHERE target.ap_id = a.target_ap_id
-						AND target.local_ref_table = 'tickets'
-						AND ticket.project_id = project.id
-				)
-				OR EXISTS (
-					SELECT 1
-					FROM ap_objects object
-					JOIN comments comment ON comment.id = object.local_ref_id
-					JOIN tickets ticket ON ticket.id = comment.ticket_id
-					WHERE object.ap_id = a.object_ap_id
-						AND object.local_ref_table = 'comments'
-						AND ticket.project_id = project.id
-				)
-				OR EXISTS (
-					SELECT 1
-					FROM ap_objects target
-					JOIN comments comment ON comment.id = target.local_ref_id
-					JOIN tickets ticket ON ticket.id = comment.ticket_id
-					WHERE target.ap_id = a.target_ap_id
-						AND target.local_ref_table = 'comments'
-						AND ticket.project_id = project.id
-				)
-			)
+			JOIN project_scope project ON project.id = d.project_actor_id
 		)
 		SELECT
 			COUNT(*)::int AS total,
@@ -317,7 +284,7 @@ func (r *PgRepository) RetryProjectDelivery(ctx context.Context, projectID strin
 	}
 	defer tx.Rollback()
 
-	role, err := r.projectMemberRole(ctx, tx, projectID, userID)
+	role, err := r.projectDeliveryRole(ctx, tx, projectID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -328,53 +295,16 @@ func (r *PgRepository) RetryProjectDelivery(ctx context.Context, projectID strin
 	var state string
 	err = tx.GetContext(ctx, &state, `
 		WITH project_scope AS (
-			SELECT project.id, actor.ap_id
-			FROM projects project
-			JOIN actors actor ON actor.id = project.id
-			WHERE project.id = $1
+			SELECT actor.id
+			FROM actors actor
+			WHERE actor.id = $1
+				AND actor.type = 'Group'
+				AND actor.is_local = true
 		)
 		SELECT d.state
 		FROM activity_deliveries d
-		JOIN ap_activities a ON a.id = d.activity_id
-		JOIN project_scope project ON true
-		WHERE d.id = $2 AND (
-			a.object_ap_id = project.ap_id
-			OR a.target_ap_id = project.ap_id
-			OR EXISTS (
-				SELECT 1
-				FROM ap_objects object
-				JOIN tickets ticket ON ticket.id = object.local_ref_id
-				WHERE object.ap_id = a.object_ap_id
-					AND object.local_ref_table = 'tickets'
-					AND ticket.project_id = project.id
-			)
-			OR EXISTS (
-				SELECT 1
-				FROM ap_objects target
-				JOIN tickets ticket ON ticket.id = target.local_ref_id
-				WHERE target.ap_id = a.target_ap_id
-					AND target.local_ref_table = 'tickets'
-					AND ticket.project_id = project.id
-			)
-			OR EXISTS (
-				SELECT 1
-				FROM ap_objects object
-				JOIN comments comment ON comment.id = object.local_ref_id
-				JOIN tickets ticket ON ticket.id = comment.ticket_id
-				WHERE object.ap_id = a.object_ap_id
-					AND object.local_ref_table = 'comments'
-					AND ticket.project_id = project.id
-			)
-			OR EXISTS (
-				SELECT 1
-				FROM ap_objects target
-				JOIN comments comment ON comment.id = target.local_ref_id
-				JOIN tickets ticket ON ticket.id = comment.ticket_id
-				WHERE target.ap_id = a.target_ap_id
-					AND target.local_ref_table = 'comments'
-					AND ticket.project_id = project.id
-			)
-		)
+		JOIN project_scope project ON project.id = d.project_actor_id
+		WHERE d.id = $2
 		FOR UPDATE OF d
 	`, projectID, deliveryID)
 	if err != nil {
@@ -544,6 +474,38 @@ func deliverySelect() string {
 		JOIN ap_activities a ON a.id = d.activity_id
 		JOIN actors actor ON actor.id = d.actor_id
 	`
+}
+
+func (r *PgRepository) projectDeliveryRole(ctx context.Context, q sqlx.QueryerContext, projectID string, userID string) (string, error) {
+	role, err := r.projectMemberRole(ctx, q, projectID, userID)
+	if err == nil {
+		return role, nil
+	}
+	if !errors.Is(err, ErrProjectAccessDenied) {
+		return "", err
+	}
+
+	var deletedByUser bool
+	if err := sqlx.GetContext(ctx, q, &deletedByUser, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM activity_deliveries delivery
+			JOIN ap_activities activity ON activity.id = delivery.activity_id
+			JOIN actors project_actor ON project_actor.id = delivery.project_actor_id
+			WHERE delivery.project_actor_id = $1
+				AND activity.activity_type = 'Delete'
+				AND activity.object_ap_id = project_actor.ap_id
+				AND activity.actor_id = $2
+				AND project_actor.type = 'Group'
+				AND project_actor.is_local = true
+		)
+	`, projectID, userID); err != nil {
+		return "", err
+	}
+	if deletedByUser {
+		return "owner", nil
+	}
+	return "", ErrProjectAccessDenied
 }
 
 func (r *PgRepository) projectMemberRole(ctx context.Context, q sqlx.QueryerContext, projectID string, userID string) (string, error) {
