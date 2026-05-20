@@ -64,7 +64,9 @@ func (r *PgRepository) Create(ctx context.Context, activityID string, targetInbo
 				object_ticket.project_id,
 				target_ticket.project_id,
 				object_comment_ticket.project_id,
-				target_comment_ticket.project_id
+				target_comment_ticket.project_id,
+				object_invite.project_id,
+				target_invite.project_id
 			),
 			$2,
 			$3
@@ -97,6 +99,8 @@ func (r *PgRepository) Create(ctx context.Context, activityID string, targetInbo
 			ON target_scope.local_ref_table = 'comments'
 			AND target_comment.id = target_scope.local_ref_id
 		LEFT JOIN tickets target_comment_ticket ON target_comment_ticket.id = target_comment.ticket_id
+		LEFT JOIN project_invites object_invite ON object_invite.ap_id = activity.object_ap_id
+		LEFT JOIN project_invites target_invite ON target_invite.ap_id = activity.target_ap_id
 		WHERE activity.id = $1
 		ON CONFLICT (activity_id, target_inbox_url) DO NOTHING
 		RETURNING id::text

@@ -63,14 +63,20 @@ func (m *MockRepository) Delete(ctx context.Context, id string, actorID string) 
 	return args.Get(0).(*DeleteResult), args.Error(1)
 }
 
-func (m *MockRepository) RemoveMember(ctx context.Context, projectID, actorID, targetUserID string) error {
+func (m *MockRepository) RemoveMember(ctx context.Context, projectID, actorID, targetUserID string) (*MembershipResult, error) {
 	args := m.Called(ctx, projectID, actorID, targetUserID)
-	return args.Error(0)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*MembershipResult), args.Error(1)
 }
 
-func (m *MockRepository) CreateInvite(ctx context.Context, invite *ProjectInvite) error {
+func (m *MockRepository) CreateInvite(ctx context.Context, invite *ProjectInvite) (*MembershipResult, error) {
 	args := m.Called(ctx, invite)
-	return args.Error(0)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*MembershipResult), args.Error(1)
 }
 
 func (m *MockRepository) GetInviteByID(ctx context.Context, inviteID string) (*ProjectInvite, error) {
@@ -81,17 +87,26 @@ func (m *MockRepository) GetInviteByID(ctx context.Context, inviteID string) (*P
 	return args.Get(0).(*ProjectInvite), args.Error(1)
 }
 
-func (m *MockRepository) AcceptInvite(ctx context.Context, inviteID, userID string) error {
+func (m *MockRepository) AcceptInvite(ctx context.Context, inviteID, userID string) (*MembershipResult, error) {
 	args := m.Called(ctx, inviteID, userID)
-	return args.Error(0)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*MembershipResult), args.Error(1)
 }
 
-func (m *MockRepository) RejectInvite(ctx context.Context, inviteID, userID string) error {
+func (m *MockRepository) RejectInvite(ctx context.Context, inviteID, userID string) (*MembershipResult, error) {
 	args := m.Called(ctx, inviteID, userID)
-	return args.Error(0)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*MembershipResult), args.Error(1)
 }
 
-func (m *MockRepository) RevokeInvite(ctx context.Context, inviteID, userID string) error {
+func (m *MockRepository) RevokeInvite(ctx context.Context, inviteID, userID string) (*MembershipResult, error) {
 	args := m.Called(ctx, inviteID, userID)
-	return args.Error(0)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*MembershipResult), args.Error(1)
 }

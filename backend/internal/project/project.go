@@ -53,6 +53,12 @@ type DeleteResult struct {
 	RecipientInboxes []string
 }
 
+type MembershipResult struct {
+	ActivityID       string
+	ProjectID        string
+	RecipientInboxes []string
+}
+
 func IsValidRole(role string) bool {
 	switch role {
 	case RoleOwner, RoleManager, RoleDeveloper, RoleViewer:

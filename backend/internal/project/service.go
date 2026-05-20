@@ -146,6 +146,17 @@ func (s *Service) enqueueActivityRecipientInboxes(ctx context.Context, projectID
 	}
 }
 
+func (s *Service) removeMember(ctx context.Context, projectID, actorID, targetUserID string) error {
+	result, err := s.repo.RemoveMember(ctx, projectID, actorID, targetUserID)
+	if err != nil {
+		return err
+	}
+	if result != nil {
+		s.enqueueActivityRecipientInboxes(ctx, result.ProjectID, result.ActivityID, result.RecipientInboxes)
+	}
+	return nil
+}
+
 func (s *Service) RemoveMemberFromProject(ctx context.Context, projectID, actorID, targetUserID string) error {
 	actorRole, err := s.repo.GetUserRole(ctx, actorID, projectID)
 	if err != nil {
@@ -157,15 +168,15 @@ func (s *Service) RemoveMemberFromProject(ctx context.Context, projectID, actorI
 	}
 
 	if actorID == targetUserID {
-		return s.repo.RemoveMember(ctx, projectID, actorID, targetUserID)
+		return s.removeMember(ctx, projectID, actorID, targetUserID)
 	}
 
 	switch actorRole {
 	case RoleOwner:
-		return s.repo.RemoveMember(ctx, projectID, actorID, targetUserID)
+		return s.removeMember(ctx, projectID, actorID, targetUserID)
 	case RoleManager:
 		if targetRole == RoleDeveloper || targetRole == RoleViewer {
-			return s.repo.RemoveMember(ctx, projectID, actorID, targetUserID)
+			return s.removeMember(ctx, projectID, actorID, targetUserID)
 		}
 		return errors.New("insufficient permissions: managers can only remove developers or viewers")
 	default:
@@ -219,18 +230,36 @@ func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUser
 		Role:           role,
 		Status:         "pending",
 	}
-	if err := s.repo.CreateInvite(ctx, invite); err != nil {
+	result, err := s.repo.CreateInvite(ctx, invite)
+	if err != nil {
 		return nil, err
+	}
+	if result != nil {
+		s.enqueueActivityRecipientInboxes(ctx, result.ProjectID, result.ActivityID, result.RecipientInboxes)
 	}
 	return invite, nil
 }
 
 func (s *Service) AcceptInvite(ctx context.Context, inviteID, userID string) error {
-	return s.repo.AcceptInvite(ctx, inviteID, userID)
+	result, err := s.repo.AcceptInvite(ctx, inviteID, userID)
+	if err != nil {
+		return err
+	}
+	if result != nil {
+		s.enqueueActivityRecipientInboxes(ctx, result.ProjectID, result.ActivityID, result.RecipientInboxes)
+	}
+	return nil
 }
 
 func (s *Service) RejectInvite(ctx context.Context, inviteID, userID string) error {
-	return s.repo.RejectInvite(ctx, inviteID, userID)
+	result, err := s.repo.RejectInvite(ctx, inviteID, userID)
+	if err != nil {
+		return err
+	}
+	if result != nil {
+		s.enqueueActivityRecipientInboxes(ctx, result.ProjectID, result.ActivityID, result.RecipientInboxes)
+	}
+	return nil
 }
 
 func (s *Service) RevokeInvite(ctx context.Context, inviteID, userID string) error {
@@ -248,5 +277,12 @@ func (s *Service) RevokeInvite(ctx context.Context, inviteID, userID string) err
 	if invite.Role == RoleOwner && role != RoleOwner {
 		return errors.New("insufficient permissions: only owners can revoke owner invites")
 	}
-	return s.repo.RevokeInvite(ctx, inviteID, userID)
+	result, err := s.repo.RevokeInvite(ctx, inviteID, userID)
+	if err != nil {
+		return err
+	}
+	if result != nil {
+		s.enqueueActivityRecipientInboxes(ctx, result.ProjectID, result.ActivityID, result.RecipientInboxes)
+	}
+	return nil
 }

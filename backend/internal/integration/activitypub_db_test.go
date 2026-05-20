@@ -159,6 +159,16 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	`, remoteFollower.ID, project.ID)
 	require.NoError(t, err)
 
+	remoteInvitee := createRemoteActorWithPublicKey(t, ctx, db, "https://remote.example/users/invitee", "invitee", "public key")
+	remoteInvite, err := projectService.AddMemberToProject(ctx, project.ID, owner.ID, remoteInvitee.ID, "viewer")
+	require.NoError(t, err)
+	requireActivityType(t, db, remoteInvite.APID, "Invite")
+	requireDeliveryForObject(t, db, "Invite", project.APID, remoteInvitee.InboxURL)
+	require.NoError(t, projectService.RevokeInvite(ctx, remoteInvite.ID, owner.ID))
+	requireInviteStatus(t, db, remoteInvite.ID, "revoked")
+	requireActivityForObjectAndActor(t, db, "Undo", remoteInvite.APID, owner.ID)
+	requireDeliveryForObject(t, db, "Undo", remoteInvite.APID, remoteInvitee.InboxURL)
+
 	createdTicket, err := ticketService.CreateTicket(ctx, ticket.CreateTicketRequest{
 		Title:       "Design local outbox",
 		Description: "Persist local AP activities",
@@ -299,6 +309,7 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, projectService.AcceptInvite(ctx, managerInvite.ID, manager.ID))
 	requireProjectRole(t, db, manager.ID, project.ID, "manager")
+	requireDeliveryForObject(t, db, "Accept", managerInvite.APID, remoteInbox)
 
 	updatedProjectName := "Federated Board Renamed"
 	updatedProjectDescription := "A manager-published ActivityPub board update"
@@ -350,6 +361,7 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	requireActivityForObjectAndActor(t, db, "Remove", removableDev.APID, manager.ID)
 	requireInboxItem(t, db, project.ID, "Remove", removableDev.APID)
 	requireInboxItem(t, db, removableDev.ID, "Remove", removableDev.APID)
+	requireDeliveryForObject(t, db, "Remove", removableDev.APID, remoteInbox)
 	_, err = projectService.GetProjectByID(ctx, project.ID, removableDev.ID)
 	require.Error(t, err)
 
@@ -365,6 +377,7 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	requireActivityForObjectAndTarget(t, db, "Undo", project.APID, project.APID)
 	requireActivityForObjectAndActor(t, db, "Undo", project.APID, viewer.ID)
 	requireOutboxItem(t, db, viewer.ID, "Undo", project.APID)
+	requireDeliveryForObject(t, db, "Undo", project.APID, remoteInbox)
 	_, err = projectService.GetProjectByID(ctx, project.ID, viewer.ID)
 	require.Error(t, err)
 
