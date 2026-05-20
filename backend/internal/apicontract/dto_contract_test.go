@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
+	"github.com/antonovs105/project-management-system-go/internal/activitypub/moderation"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
 	"github.com/antonovs105/project-management-system-go/internal/project"
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
@@ -154,6 +155,19 @@ func TestRESTDTOsUseStableSnakeCaseFields(t *testing.T) {
 				"state", "attempts", "max_attempts", "next_attempt_at", "last_error", "created_at", "updated_at",
 			},
 			forbidKeys: []string{"document", "activityID", "actorAPID", "targetInboxURL", "maxAttempts"},
+		},
+		{
+			name: "federation domain block",
+			value: moderation.DomainBlock{
+				ID:        "block-1",
+				Domain:    "remote.example",
+				Reason:    "spam",
+				CreatedBy: &assigneeID,
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+			wantKeys:   []string{"id", "domain", "reason", "created_by", "created_at", "updated_at"},
+			forbidKeys: []string{"createdBy"},
 		},
 	}
 

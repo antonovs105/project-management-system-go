@@ -12,6 +12,7 @@ tags:
   - name: Tickets
   - name: Comments
   - name: Delivery
+  - name: Federation Moderation
   - name: WebFinger
   - name: ActivityPub
 paths:
@@ -465,6 +466,60 @@ paths:
                 $ref: "#/components/schemas/Delivery"
         "409":
           $ref: "#/components/responses/Error"
+  /api/admin/federation/domain-blocks:
+    get:
+      tags: [Federation Moderation]
+      operationId: listFederationDomainBlocks
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Blocked federation domains.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FederationDomainBlock"
+        "403":
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [Federation Moderation]
+      operationId: blockFederationDomain
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: "#/components/requestBodies/BlockFederationDomain"
+      responses:
+        "201":
+          description: Domain block created or updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationDomainBlock"
+        "400":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+  /api/admin/federation/domain-blocks/{domain}:
+    parameters:
+      - name: domain
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      tags: [Federation Moderation]
+      operationId: unblockFederationDomain
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Domain block removed.
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
   /.well-known/webfinger:
     get:
       tags: [WebFinger]
@@ -756,6 +811,18 @@ components:
             properties:
               content:
                 type: string
+    BlockFederationDomain:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [domain]
+            properties:
+              domain:
+                type: string
+              reason:
+                type: string
     CreateProject:
       required: true
       content:
@@ -976,6 +1043,26 @@ components:
       properties:
         error:
           type: string
+    FederationDomainBlock:
+      type: object
+      required: [id, domain, reason, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        domain:
+          type: string
+        reason:
+          type: string
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
     GraphResponse:
       type: object
       required: [nodes, links]

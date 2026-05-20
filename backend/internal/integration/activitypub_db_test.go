@@ -18,6 +18,7 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/c2s"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/httpsig"
+	apmoderation "github.com/antonovs105/project-management-system-go/internal/activitypub/moderation"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteactor"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteinbox"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
@@ -1239,6 +1240,43 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		_, err = retryService.RetryProjectDelivery(ctx, project.ID, viewer.ID, finalDelivery.ID)
 		require.ErrorIs(t, err, delivery.ErrDeliveryRetryDenied)
 	})
+}
+
+func TestFederationDomainBlockModeration(t *testing.T) {
+	db := openIntegrationDB(t)
+	resetIntegrationDB(t, db)
+
+	ctx := context.Background()
+	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+	userService := user.NewService(user.NewRepository(db, cfg), []byte("integration-secret"), cfg)
+	moderationService := apmoderation.NewService(apmoderation.NewRepository(db))
+
+	admin, err := userService.RegisterUser(ctx, "domain-admin", "domain-admin@example.test", "password123")
+	require.NoError(t, err)
+	worker, err := userService.RegisterUser(ctx, "domain-worker", "domain-worker@example.test", "password123")
+	require.NoError(t, err)
+
+	_, err = moderationService.BlockDomain(ctx, worker.ID, "remote.example", "spam")
+	require.ErrorIs(t, err, apmoderation.ErrAdminRequired)
+	requireRowCount(t, db, "federation_domain_blocks", 0)
+
+	_, err = db.ExecContext(ctx, `UPDATE users SET role = 'admin' WHERE id = $1`, admin.ID)
+	require.NoError(t, err)
+
+	block, err := moderationService.BlockDomain(ctx, admin.ID, "HTTPS://Remote.Example/users/alice", " spam source ")
+	require.NoError(t, err)
+	assert.Equal(t, "remote.example", block.Domain)
+	assert.Equal(t, "spam source", block.Reason)
+	require.NotNil(t, block.CreatedBy)
+	assert.Equal(t, admin.ID, *block.CreatedBy)
+
+	blocks, err := moderationService.ListDomainBlocks(ctx, admin.ID)
+	require.NoError(t, err)
+	require.Len(t, blocks, 1)
+	assert.Equal(t, "remote.example", blocks[0].Domain)
+
+	require.NoError(t, moderationService.UnblockDomain(ctx, admin.ID, "Remote.Example"))
+	requireRowCount(t, db, "federation_domain_blocks", 0)
 }
 
 func TestRemoteInboxRefreshesRotatedActorKey(t *testing.T) {

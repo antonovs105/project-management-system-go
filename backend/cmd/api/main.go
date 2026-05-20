@@ -16,6 +16,7 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/c2s"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/httpsig"
+	apmoderation "github.com/antonovs105/project-management-system-go/internal/activitypub/moderation"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteactor"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteinbox"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
@@ -35,18 +36,19 @@ import (
 
 // Server structure
 type ApiServer struct {
-	db              *sqlx.DB
-	redisAddr       string
-	userHandler     *user.Handler
-	projectHandler  *project.Handler
-	ticketHandler   *ticket.Handler
-	commentHandler  *comment.Handler
-	apHandler       *activitypub.Handler
-	c2sHandler      *c2s.Handler
-	inboxHandler    *remoteinbox.Handler
-	deliveryHandler *delivery.Handler
-	deliverySvc     *delivery.Service
-	wfHandler       *webfinger.Handler
+	db                *sqlx.DB
+	redisAddr         string
+	userHandler       *user.Handler
+	projectHandler    *project.Handler
+	ticketHandler     *ticket.Handler
+	commentHandler    *comment.Handler
+	apHandler         *activitypub.Handler
+	c2sHandler        *c2s.Handler
+	inboxHandler      *remoteinbox.Handler
+	moderationHandler *apmoderation.Handler
+	deliveryHandler   *delivery.Handler
+	deliverySvc       *delivery.Service
+	wfHandler         *webfinger.Handler
 }
 
 type signatureActorVerifier struct {
@@ -240,6 +242,7 @@ func main() {
 		remoteinbox.WithBlockedDomains(splitCSVEnv("FEDERATION_BLOCKED_DOMAINS")),
 	)
 	inboxHandler := remoteinbox.NewHandler(inboxService, apConfig)
+	moderationHandler := apmoderation.NewHandler(apmoderation.NewService(apmoderation.NewRepository(db)))
 
 	// WebFinger discovery dependencies
 	wfRepo := webfinger.NewRepository(db)
@@ -248,18 +251,19 @@ func main() {
 
 	// Dependency injection
 	server := &ApiServer{
-		db:              db,
-		redisAddr:       redisAddr,
-		userHandler:     userHandler,
-		projectHandler:  projectHandler,
-		ticketHandler:   ticketHandler,
-		commentHandler:  commentHandler,
-		apHandler:       apHandler,
-		c2sHandler:      c2sHandler,
-		inboxHandler:    inboxHandler,
-		deliveryHandler: deliveryHandler,
-		deliverySvc:     deliveryService,
-		wfHandler:       wfHandler,
+		db:                db,
+		redisAddr:         redisAddr,
+		userHandler:       userHandler,
+		projectHandler:    projectHandler,
+		ticketHandler:     ticketHandler,
+		commentHandler:    commentHandler,
+		apHandler:         apHandler,
+		c2sHandler:        c2sHandler,
+		inboxHandler:      inboxHandler,
+		moderationHandler: moderationHandler,
+		deliveryHandler:   deliveryHandler,
+		deliverySvc:       deliveryService,
+		wfHandler:         wfHandler,
 	}
 
 	// New Echo
@@ -303,6 +307,7 @@ func main() {
 	server.ticketHandler.RegisterRoutes(api)
 	server.commentHandler.RegisterRoutes(api)
 	server.deliveryHandler.RegisterRoutes(api)
+	server.moderationHandler.RegisterRoutes(api)
 
 	e.Logger.Fatal(e.Start(":8080"))
 }
