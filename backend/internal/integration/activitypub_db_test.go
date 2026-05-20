@@ -135,6 +135,30 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	require.NoError(t, err)
 	requireProjectDelivery(t, memberDeliveries, "Create", createdTicket.APID, remoteInbox)
 
+	require.NoError(t, commentService.DeleteComment(ctx, createdComment.ID, owner.ID))
+	requireObjectDeleted(t, db, createdComment.APID)
+	requireObjectTombstone(t, db, createdComment.APID, "Note")
+	requireActivityForObject(t, db, "Delete", createdComment.APID)
+	requireOutboxItem(t, db, owner.ID, "Delete", createdComment.APID)
+	requireDeliveryForObject(t, db, "Delete", createdComment.APID, remoteInbox)
+
+	comments, err := commentService.ListComments(ctx, createdTicket.ID, owner.ID)
+	require.NoError(t, err)
+	require.Empty(t, comments)
+
+	ticketComment, err := commentService.CreateComment(ctx, createdTicket.ID, owner.ID, "Deleting this with the ticket.")
+	require.NoError(t, err)
+
+	require.NoError(t, ticketService.DeleteTicket(ctx, createdTicket.ID, owner.ID))
+	requireObjectDeleted(t, db, createdTicket.APID)
+	requireObjectTombstone(t, db, createdTicket.APID, "forge:Ticket")
+	requireObjectDeleted(t, db, ticketComment.APID)
+	requireObjectTombstone(t, db, ticketComment.APID, "Note")
+	requireActivityForObject(t, db, "Delete", createdTicket.APID)
+	requireOutboxItem(t, db, owner.ID, "Delete", createdTicket.APID)
+	requireDeliveryForObject(t, db, "Delete", createdTicket.APID, remoteInbox)
+	requireNoTicketByAPID(t, db, createdTicket.APID)
+
 	outsider, err := userService.RegisterUser(ctx, "outsider", "outsider@example.test", "password123")
 	require.NoError(t, err)
 	_, err = deliveryService.ListProjectDeliveries(ctx, project.ID, outsider.ID)
@@ -577,6 +601,10 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		require.NotNil(t, unassignedRemoteTicket)
 		assert.Nil(t, unassignedRemoteTicket.AssigneeID)
 
+		remoteTicketLocalComment, err := commentService.CreateComment(ctx, unassignedRemoteTicket.ID, owner.ID, "Local context on remote ticket.")
+		require.NoError(t, err)
+		requireObjectType(t, db, remoteTicketLocalComment.APID, "Note")
+
 		deleteTicketAPID := "https://remote.example/activities/delete-project-ticket"
 		deleteTicketBody := []byte(`{"id":"` + deleteTicketAPID + `","type":"Delete","actor":"` + remoteActor.APID + `","object":"` + remoteTicketAPID + `","target":"` + project.APID + `"}`)
 		deleteTicketReq, err := http.NewRequest(http.MethodPost, project.APID+"/inbox", bytes.NewReader(deleteTicketBody))
@@ -589,6 +617,9 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		requireActivityForObject(t, db, "Delete", remoteTicketAPID)
 		requireInboxItem(t, db, project.ID, "Delete", remoteTicketAPID)
 		requireObjectDeleted(t, db, remoteTicketAPID)
+		requireObjectTombstone(t, db, remoteTicketAPID, "forge:Ticket")
+		requireObjectDeleted(t, db, remoteTicketLocalComment.APID)
+		requireObjectTombstone(t, db, remoteTicketLocalComment.APID, "Note")
 		requireNoTicketByAPID(t, db, remoteTicketAPID)
 
 		tickets, err = ticketService.ListTicketsInProject(ctx, project.ID, owner.ID)
@@ -1315,6 +1346,34 @@ func requireObjectDeleted(t *testing.T, db *sqlx.DB, apID string) {
 	err := db.Get(&isDeleted, `SELECT is_deleted FROM ap_objects WHERE ap_id = $1`, apID)
 	require.NoError(t, err)
 	require.True(t, isDeleted)
+}
+
+func requireObjectTombstone(t *testing.T, db *sqlx.DB, apID, formerType string) {
+	t.Helper()
+
+	var stored struct {
+		ObjectType string `db:"object_type"`
+		Type       string `db:"type"`
+		FormerType string `db:"former_type"`
+		HasContent bool   `db:"has_content"`
+		HasName    bool   `db:"has_name"`
+	}
+	err := db.Get(&stored, `
+		SELECT
+			object_type,
+			document->>'type' AS type,
+			document->>'formerType' AS former_type,
+			document ? 'content' AS has_content,
+			document ? 'name' AS has_name
+		FROM ap_objects
+		WHERE ap_id = $1
+	`, apID)
+	require.NoError(t, err)
+	require.Equal(t, "Tombstone", stored.ObjectType)
+	require.Equal(t, "Tombstone", stored.Type)
+	require.Equal(t, formerType, stored.FormerType)
+	require.False(t, stored.HasContent)
+	require.False(t, stored.HasName)
 }
 
 func requireNoTicketByAPID(t *testing.T, db *sqlx.DB, apID string) {

@@ -178,6 +178,16 @@ func NoteDocument(apID, ticketAPID, attributedTo, content string, createdAt time
 	}
 }
 
+func TombstoneDocument(apID, formerType string, deletedAt time.Time) map[string]any {
+	return map[string]any{
+		"@context":   ActivityStreamsContext,
+		"id":         apID,
+		"type":       "Tombstone",
+		"formerType": formerType,
+		"deleted":    deletedAt.Format(time.RFC3339),
+	}
+}
+
 func ActivityDocument(activityType, apID, actorAPID string, object any, target any, createdAt time.Time) map[string]any {
 	doc := map[string]any{
 		"@context":  Context(),

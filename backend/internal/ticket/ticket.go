@@ -26,3 +26,8 @@ type TicketLink struct {
 	LinkType  string    `db:"link_type" json:"link_type"`
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
+
+type DeleteResult struct {
+	ActivityIDs      []string
+	RecipientInboxes []string
+}

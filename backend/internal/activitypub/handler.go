@@ -97,7 +97,7 @@ func (h *Handler) writeObject(c echo.Context, apID string) error {
 	if err := h.db.GetContext(c.Request().Context(), &raw, `
 		SELECT document
 		FROM ap_objects
-		WHERE ap_id = $1 AND is_deleted = false
+		WHERE ap_id = $1
 	`, apID); err != nil {
 		if err == sql.ErrNoRows {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "object not found"})

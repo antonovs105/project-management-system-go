@@ -775,11 +775,10 @@ func (r *PgRepository) deleteRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, ta
 		return ErrActivityConflict
 	}
 
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE ap_objects
-		SET is_deleted = true
-		WHERE ap_id = $1
-	`, ticketAPID); err != nil {
+	if err := tombstoneTicketCommentsTx(ctx, tx, storedTicket.ID); err != nil {
+		return err
+	}
+	if err := tombstoneObjectTx(ctx, tx, ticketAPID, "forge:Ticket"); err != nil {
 		return err
 	}
 
@@ -798,6 +797,40 @@ func (r *PgRepository) deleteRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, ta
 		return ErrInvalidActivity
 	}
 	return nil
+}
+
+func tombstoneTicketCommentsTx(ctx context.Context, tx *sqlx.Tx, ticketID string) error {
+	var commentAPIDs []string
+	if err := tx.SelectContext(ctx, &commentAPIDs, `
+		SELECT ap_id
+		FROM comments
+		WHERE ticket_id = $1
+	`, ticketID); err != nil {
+		return err
+	}
+	for _, apID := range commentAPIDs {
+		if err := tombstoneObjectTx(ctx, tx, apID, "Note"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func tombstoneObjectTx(ctx context.Context, tx *sqlx.Tx, apID string, formerType string) error {
+	rawDoc, err := json.Marshal(activitypub.TombstoneDocument(apID, formerType, time.Now().UTC()))
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
+		UPDATE ap_objects
+		SET object_type = 'Tombstone',
+			local_ref_table = NULL,
+			local_ref_id = NULL,
+			document = $2,
+			is_deleted = true
+		WHERE ap_id = $1
+	`, apID, rawDoc)
+	return err
 }
 
 func updateTicketAssignedToDocumentTx(ctx context.Context, tx *sqlx.Tx, ticketID, ticketAPID string) error {

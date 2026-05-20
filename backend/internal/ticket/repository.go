@@ -15,7 +15,7 @@ type Repository interface {
 	ListByProjectID(ctx context.Context, projectID string) ([]Ticket, error)
 	GetByID(ctx context.Context, id string) (*Ticket, error)
 	Update(ctx context.Context, ticket *Ticket) ([]string, error)
-	Delete(ctx context.Context, id string) ([]string, error)
+	Delete(ctx context.Context, id string, actorID string) (*DeleteResult, error)
 	CreateLink(ctx context.Context, link *TicketLink) error
 	DeleteLink(ctx context.Context, linkID string) error
 	GetLinksByProjectID(ctx context.Context, projectID string) ([]TicketLink, error)
@@ -71,7 +71,7 @@ func (r *PgRepository) Create(ctx context.Context, ticket *Ticket) ([]string, er
 	if err := r.writeTicketObject(ctx, tx, ticket); err != nil {
 		return nil, err
 	}
-	activityID, err := r.writeTicketActivity(ctx, tx, "Create", ticket, ticket.APID, nil)
+	activityID, err := r.writeTicketActivity(ctx, tx, "Create", ticket, ticket.ReporterID, ticket.APID, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +157,7 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket) ([]string, er
 		return nil, err
 	}
 	activityIDs := make([]string, 0, 2)
-	updateActivityID, err := r.writeTicketActivity(ctx, tx, "Update", ticket, ticket.APID, nil)
+	updateActivityID, err := r.writeTicketActivity(ctx, tx, "Update", ticket, ticket.ReporterID, ticket.APID, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +167,7 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket) ([]string, er
 		if err != nil {
 			return nil, err
 		}
-		addActivityID, err := r.writeTicketActivity(ctx, tx, "Add", ticket, assigneeAPID, ticket.APID)
+		addActivityID, err := r.writeTicketActivity(ctx, tx, "Add", ticket, ticket.ReporterID, assigneeAPID, ticket.APID)
 		if err != nil {
 			return nil, err
 		}
@@ -180,7 +180,7 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket) ([]string, er
 	return activityIDs, nil
 }
 
-func (r *PgRepository) Delete(ctx context.Context, id string) ([]string, error) {
+func (r *PgRepository) Delete(ctx context.Context, id string, actorID string) (*DeleteResult, error) {
 	t, err := r.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -190,6 +190,21 @@ func (r *PgRepository) Delete(ctx context.Context, id string) ([]string, error) 
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	recipientInboxes, err := r.remoteTicketRecipientInboxes(ctx, tx, t.ProjectID, t.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tombstoneTicketComments(ctx, tx, t.ID); err != nil {
+		return nil, err
+	}
+	if err := tombstoneObject(ctx, tx, t.APID, "forge:Ticket"); err != nil {
+		return nil, err
+	}
+	activityID, err := r.writeTicketActivity(ctx, tx, "Delete", t, actorID, t.APID, nil)
+	if err != nil {
+		return nil, err
+	}
 
 	result, err := tx.ExecContext(ctx, `DELETE FROM tickets WHERE id = $1`, id)
 	if err != nil {
@@ -202,17 +217,13 @@ func (r *PgRepository) Delete(ctx context.Context, id string) ([]string, error) 
 	if rowsAffected == 0 {
 		return nil, errors.New("ticket to delete not found")
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE ap_objects SET is_deleted = true WHERE ap_id = $1`, t.APID); err != nil {
-		return nil, err
-	}
-	activityID, err := r.writeTicketActivity(ctx, tx, "Delete", t, t.APID, nil)
-	if err != nil {
-		return nil, err
-	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return []string{activityID}, nil
+	return &DeleteResult{
+		ActivityIDs:      []string{activityID},
+		RecipientInboxes: recipientInboxes,
+	}, nil
 }
 
 func (r *PgRepository) CreateLink(ctx context.Context, link *TicketLink) error {
@@ -321,13 +332,13 @@ func (r *PgRepository) writeTicketObject(ctx context.Context, tx *sqlx.Tx, ticke
 	return err
 }
 
-func (r *PgRepository) writeTicketActivity(ctx context.Context, tx *sqlx.Tx, activityType string, ticket *Ticket, object any, target any) (string, error) {
+func (r *PgRepository) writeTicketActivity(ctx context.Context, tx *sqlx.Tx, activityType string, ticket *Ticket, actorID string, object any, target any) (string, error) {
 	activityID, err := activitypub.NewID()
 	if err != nil {
 		return "", err
 	}
 	activityAPID := activitypub.ActivityAPID(r.cfg, activityID)
-	reporterAPID, err := lookupActorAPID(ctx, tx, ticket.ReporterID)
+	actorAPID, err := lookupActorAPID(ctx, tx, actorID)
 	if err != nil {
 		return "", err
 	}
@@ -338,7 +349,7 @@ func (r *PgRepository) writeTicketActivity(ctx context.Context, tx *sqlx.Tx, act
 	if target == nil {
 		target = projectAPID
 	}
-	doc := activitypub.ActivityDocument(activityType, activityAPID, reporterAPID, object, target, time.Now().UTC())
+	doc := activitypub.ActivityDocument(activityType, activityAPID, actorAPID, object, target, time.Now().UTC())
 	rawDoc, err := json.Marshal(doc)
 	if err != nil {
 		return "", err
@@ -355,13 +366,13 @@ func (r *PgRepository) writeTicketActivity(ctx context.Context, tx *sqlx.Tx, act
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO ap_activities (id, ap_id, activity_type, actor_id, object_ap_id, target_ap_id, document)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, activityID, activityAPID, activityType, ticket.ReporterID, objectAPID, targetAPID, rawDoc); err != nil {
+	`, activityID, activityAPID, activityType, actorID, objectAPID, targetAPID, rawDoc); err != nil {
 		return "", err
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO actor_outbox_items (actor_id, activity_id, activity_ap_id)
 		VALUES ($1, $2, $3)
-	`, ticket.ReporterID, activityID, activityAPID); err != nil {
+	`, actorID, activityID, activityAPID); err != nil {
 		return "", err
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -417,4 +428,87 @@ func lookupAssigneeAPIDs(ctx context.Context, q sqlx.QueryerContext, ticketID st
 		ORDER BY ta.created_at ASC
 	`, ticketID)
 	return apIDs, err
+}
+
+func tombstoneObject(ctx context.Context, q sqlx.ExecerContext, apID string, formerType string) error {
+	rawDoc, err := json.Marshal(activitypub.TombstoneDocument(apID, formerType, time.Now().UTC()))
+	if err != nil {
+		return err
+	}
+	_, err = q.ExecContext(ctx, `
+		UPDATE ap_objects
+		SET object_type = 'Tombstone',
+			local_ref_table = NULL,
+			local_ref_id = NULL,
+			document = $2,
+			is_deleted = true
+		WHERE ap_id = $1
+	`, apID, rawDoc)
+	return err
+}
+
+func tombstoneTicketComments(ctx context.Context, tx *sqlx.Tx, ticketID string) error {
+	var commentAPIDs []string
+	if err := tx.SelectContext(ctx, &commentAPIDs, `
+		SELECT ap_id
+		FROM comments
+		WHERE ticket_id = $1
+	`, ticketID); err != nil {
+		return err
+	}
+	for _, apID := range commentAPIDs {
+		if err := tombstoneObject(ctx, tx, apID, "Note"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *PgRepository) remoteTicketRecipientInboxes(ctx context.Context, q sqlx.QueryerContext, projectID string, ticketID string) ([]string, error) {
+	var inboxes []string
+	err := sqlx.SelectContext(ctx, q, &inboxes, `
+		WITH recipients AS (
+			SELECT follower.inbox_url
+			FROM actor_follows f
+			JOIN actors follower ON follower.id = f.follower_actor_id
+			WHERE f.followed_actor_id = $1
+				AND f.state = 'accepted'
+				AND follower.is_local = false
+				AND follower.inbox_url <> ''
+
+			UNION
+
+			SELECT reporter.inbox_url
+			FROM tickets ticket
+			JOIN actors reporter ON reporter.id = ticket.reporter_id
+			WHERE ticket.project_id = $1
+				AND ticket.id = $2
+				AND reporter.is_local = false
+				AND reporter.inbox_url <> ''
+
+			UNION
+
+			SELECT assignee.inbox_url
+			FROM tickets ticket
+			JOIN ticket_assignees ta ON ta.ticket_id = ticket.id
+			JOIN actors assignee ON assignee.id = ta.actor_id
+			WHERE ticket.project_id = $1
+				AND ticket.id = $2
+				AND assignee.is_local = false
+				AND assignee.inbox_url <> ''
+
+			UNION
+
+			SELECT author.inbox_url
+			FROM comments comment
+			JOIN actors author ON author.id = comment.author_id
+			WHERE comment.ticket_id = $2
+				AND author.is_local = false
+				AND author.inbox_url <> ''
+		)
+		SELECT DISTINCT inbox_url
+		FROM recipients
+		ORDER BY inbox_url ASC
+	`, projectID, ticketID)
+	return inboxes, err
 }

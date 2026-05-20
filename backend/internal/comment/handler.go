@@ -17,6 +17,7 @@ func NewHandler(service *Service) *Handler {
 func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.POST("/tickets/:id/comments", h.Create)
 	api.GET("/tickets/:id/comments", h.List)
+	api.DELETE("/comments/:id", h.Delete)
 }
 
 type createCommentRequest struct {
@@ -50,4 +51,15 @@ func (h *Handler) List(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, comments)
+}
+
+func (h *Handler) Delete(c echo.Context) error {
+	commentID := c.Param("id")
+	userID := c.Get("userID").(string)
+
+	if err := h.service.DeleteComment(c.Request().Context(), commentID, userID); err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	}
+
+	return c.NoContent(http.StatusNoContent)
 }

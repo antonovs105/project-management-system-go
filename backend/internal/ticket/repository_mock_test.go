@@ -44,12 +44,12 @@ func (m *MockRepository) Update(ctx context.Context, ticket *Ticket) ([]string, 
 	return args.Get(0).([]string), args.Error(1)
 }
 
-func (m *MockRepository) Delete(ctx context.Context, id string) ([]string, error) {
-	args := m.Called(ctx, id)
+func (m *MockRepository) Delete(ctx context.Context, id string, actorID string) (*DeleteResult, error) {
+	args := m.Called(ctx, id, actorID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).([]string), args.Error(1)
+	return args.Get(0).(*DeleteResult), args.Error(1)
 }
 
 func (m *MockRepository) CreateLink(ctx context.Context, link *TicketLink) error {

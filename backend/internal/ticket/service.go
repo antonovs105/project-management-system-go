@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
 	"github.com/antonovs105/project-management-system-go/internal/project"
 )
 
@@ -22,6 +23,7 @@ type Service struct {
 }
 
 type DeliveryEnqueuer interface {
+	Enqueue(ctx context.Context, activityID string, targetInboxURL string) (*apdelivery.Delivery, error)
 	EnqueueProjectFollowers(ctx context.Context, projectID string, activityIDs ...string) error
 	EnqueueProjectTicketRecipients(ctx context.Context, projectID string, ticketID string, activityIDs ...string) error
 }
@@ -261,11 +263,11 @@ func (s *Service) DeleteTicket(ctx context.Context, ticketID, userID string) err
 		return err
 	}
 
-	activityIDs, err := s.repo.Delete(ctx, ticketID)
+	deleteResult, err := s.repo.Delete(ctx, ticketID, userID)
 	if err != nil {
 		return err
 	}
-	s.enqueueProjectTicketRecipients(ctx, ticket.ProjectID, ticket.ID, activityIDs...)
+	s.enqueueRecipientInboxes(ctx, ticket.ProjectID, deleteResult)
 	return nil
 }
 
@@ -356,6 +358,25 @@ func (s *Service) enqueueProjectTicketRecipients(ctx context.Context, projectID,
 	}
 	if err := s.delivery.EnqueueProjectTicketRecipients(ctx, projectID, ticketID, activityIDs...); err != nil {
 		log.Printf("failed to enqueue ActivityPub deliveries for project %s ticket %s: %v", projectID, ticketID, err)
+	}
+}
+
+func (s *Service) enqueueRecipientInboxes(ctx context.Context, projectID string, result *DeleteResult) {
+	if s.delivery == nil || result == nil || len(result.ActivityIDs) == 0 {
+		return
+	}
+	for _, activityID := range result.ActivityIDs {
+		if activityID == "" {
+			continue
+		}
+		for _, inbox := range result.RecipientInboxes {
+			if inbox == "" {
+				continue
+			}
+			if _, err := s.delivery.Enqueue(ctx, activityID, inbox); err != nil {
+				log.Printf("failed to enqueue ActivityPub delivery for project %s inbox %s: %v", projectID, inbox, err)
+			}
+		}
 	}
 }
 

@@ -47,6 +47,12 @@ func TestTicketNoteAndActivityDocuments(t *testing.T) {
 	assert.Equal(t, "Note", note["type"])
 	assert.Equal(t, ticket["id"], note["inReplyTo"])
 
+	tombstone := TombstoneDocument(ticket["id"].(string), "forge:Ticket", now)
+	assert.Equal(t, "Tombstone", tombstone["type"])
+	assert.Equal(t, "forge:Ticket", tombstone["formerType"])
+	assert.NotContains(t, tombstone, "content")
+	assert.NotContains(t, tombstone, "name")
+
 	create := ActivityDocument("Create", "https://example.test/activities/activity-1", "https://example.test/users/alice", ticket, nil, now)
 	assert.Equal(t, "Create", create["type"])
 	assert.Equal(t, ticket, create["object"])
