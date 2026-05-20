@@ -32,6 +32,33 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAdminBootstrapCreatesOnlyOneAdmin(t *testing.T) {
+	db := openIntegrationDB(t)
+	resetIntegrationDB(t, db)
+
+	ctx := context.Background()
+	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+	userService := user.NewService(user.NewRepository(db, cfg), []byte("integration-secret"), cfg)
+
+	admin, err := userService.BootstrapAdmin(ctx, "admin", "admin@example.test", "password123")
+	require.NoError(t, err)
+	assert.Equal(t, user.RoleAdmin, admin.Role)
+	assert.Empty(t, admin.PasswordHash)
+	requireObjectType(t, db, admin.APID, "Person")
+	requireRowCount(t, db, "actors", 1)
+	requireRowCount(t, db, "actor_keys", 1)
+	requireRowCount(t, db, "ap_objects", 1)
+
+	var storedRole string
+	require.NoError(t, db.GetContext(ctx, &storedRole, `SELECT role FROM users WHERE id = $1`, admin.ID))
+	assert.Equal(t, user.RoleAdmin, storedRole)
+
+	duplicate, err := userService.BootstrapAdmin(ctx, "second-admin", "second-admin@example.test", "password123")
+	require.ErrorIs(t, err, user.ErrAdminAlreadyExists)
+	assert.Nil(t, duplicate)
+	requireRowCount(t, db, "users", 1)
+}
+
 func TestActivityPubFoundationFlow(t *testing.T) {
 	db := openIntegrationDB(t)
 	resetIntegrationDB(t, db)
@@ -1260,7 +1287,7 @@ func TestFederationDomainBlockModeration(t *testing.T) {
 	userService := user.NewService(user.NewRepository(db, cfg), []byte("integration-secret"), cfg)
 	moderationService := apmoderation.NewService(apmoderation.NewRepository(db))
 
-	admin, err := userService.RegisterUser(ctx, "domain-admin", "domain-admin@example.test", "password123")
+	admin, err := userService.BootstrapAdmin(ctx, "domain-admin", "domain-admin@example.test", "password123")
 	require.NoError(t, err)
 	worker, err := userService.RegisterUser(ctx, "domain-worker", "domain-worker@example.test", "password123")
 	require.NoError(t, err)
@@ -1268,9 +1295,6 @@ func TestFederationDomainBlockModeration(t *testing.T) {
 	_, err = moderationService.BlockDomain(ctx, worker.ID, "remote.example", "spam")
 	require.ErrorIs(t, err, apmoderation.ErrAdminRequired)
 	requireRowCount(t, db, "federation_domain_blocks", 0)
-
-	_, err = db.ExecContext(ctx, `UPDATE users SET role = 'admin' WHERE id = $1`, admin.ID)
-	require.NoError(t, err)
 
 	block, err := moderationService.BlockDomain(ctx, admin.ID, "HTTPS://Remote.Example/users/alice", " spam source ")
 	require.NoError(t, err)
@@ -1299,11 +1323,9 @@ func TestFederationModerationInspection(t *testing.T) {
 	ticketService := ticket.NewService(ticket.NewRepository(db, cfg), projectService, cfg)
 	moderationService := apmoderation.NewService(apmoderation.NewRepository(db))
 
-	admin, err := userService.RegisterUser(ctx, "ops-admin", "ops-admin@example.test", "password123")
+	admin, err := userService.BootstrapAdmin(ctx, "ops-admin", "ops-admin@example.test", "password123")
 	require.NoError(t, err)
 	owner, err := userService.RegisterUser(ctx, "ops-owner", "ops-owner@example.test", "password123")
-	require.NoError(t, err)
-	_, err = db.ExecContext(ctx, `UPDATE users SET role = 'admin' WHERE id = $1`, admin.ID)
 	require.NoError(t, err)
 
 	remoteActor := createRemoteActorWithPublicKey(t, ctx, db, "https://ops-remote.example/users/reviewer", "ops-reviewer", "public key")

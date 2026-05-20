@@ -87,7 +87,7 @@ func splitCSVEnv(name string) []string {
 	return values
 }
 
-func validateRuntimeConfig(production bool, jwtSecret, publicBaseURL, localDomain string) error {
+func validateRuntimeConfig(production bool, jwtSecret, publicBaseURL, localDomain, adminBootstrapToken string) error {
 	parsedBaseURL, err := url.Parse(strings.TrimSpace(publicBaseURL))
 	if err != nil || parsedBaseURL.Scheme == "" || parsedBaseURL.Host == "" {
 		return fmt.Errorf("PUBLIC_BASE_URL must be an absolute HTTP URL")
@@ -110,6 +110,9 @@ func validateRuntimeConfig(production bool, jwtSecret, publicBaseURL, localDomai
 	}
 	if isLocalHost(parsedBaseURL.Hostname()) || isLocalHost(localDomain) {
 		return fmt.Errorf("PUBLIC_BASE_URL and LOCAL_DOMAIN must not use localhost in production")
+	}
+	if adminBootstrapToken != "" && len(adminBootstrapToken) < 32 {
+		return fmt.Errorf("ADMIN_BOOTSTRAP_TOKEN must be at least 32 characters in production")
 	}
 	return nil
 }
@@ -146,7 +149,8 @@ func main() {
 	if localDomain == "" {
 		log.Fatal("LOCAL_DOMAIN environment variable is not set")
 	}
-	if err := validateRuntimeConfig(production, jwtSecret, publicBaseURL, localDomain); err != nil {
+	adminBootstrapToken := strings.TrimSpace(os.Getenv("ADMIN_BOOTSTRAP_TOKEN"))
+	if err := validateRuntimeConfig(production, jwtSecret, publicBaseURL, localDomain, adminBootstrapToken); err != nil {
 		log.Fatal(err)
 	}
 	apConfig := activitypub.NewConfig(publicBaseURL, localDomain)
@@ -163,7 +167,7 @@ func main() {
 	// User dependencies
 	userRepo := user.NewRepository(db, apConfig)
 	userService := user.NewService(userRepo, []byte(jwtSecret), apConfig)
-	userHandler := user.NewHandler(userService)
+	userHandler := user.NewHandler(userService, adminBootstrapToken)
 
 	// project dependencies
 	projectRepo := project.NewRepository(db, apConfig)
@@ -281,7 +285,7 @@ func main() {
 	}
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins: corsOrigins,
-		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization, user.AdminBootstrapTokenHeader},
 	}))
 
 	// Routes

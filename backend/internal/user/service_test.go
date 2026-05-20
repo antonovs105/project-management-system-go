@@ -30,6 +30,7 @@ func TestService_RegisterUser(t *testing.T) {
 		assert.NotNil(t, user)
 		assert.Equal(t, username, user.Username)
 		assert.Equal(t, email, user.Email)
+		assert.Equal(t, RoleWorker, user.Role)
 		assert.Empty(t, user.PasswordHash) // Password hash should be cleared
 		mockRepo.AssertExpectations(t)
 	})
@@ -52,6 +53,51 @@ func TestService_RegisterUser(t *testing.T) {
 
 		assert.ErrorIs(t, err, ErrInvalidUserInput)
 		assert.Nil(t, user)
+	})
+}
+
+func TestService_BootstrapAdmin(t *testing.T) {
+	ctx := context.Background()
+	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+
+	t.Run("Success", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, []byte("secret"), cfg)
+		mockRepo.On("CreateAdminIfNoAdmin", ctx, mock.AnythingOfType("*user.User")).Return(nil).Once()
+
+		admin, err := service.BootstrapAdmin(ctx, "admin", "admin@example.com", "password123")
+
+		assert.NoError(t, err)
+		assert.NotNil(t, admin)
+		assert.Equal(t, "admin", admin.Username)
+		assert.Equal(t, RoleAdmin, admin.Role)
+		assert.Empty(t, admin.PasswordHash)
+		assert.NotEmpty(t, admin.PublicKeyPEM)
+		assert.NotEmpty(t, admin.PrivateKeyPEM)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("AlreadyExists", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, []byte("secret"), cfg)
+		mockRepo.On("CreateAdminIfNoAdmin", ctx, mock.AnythingOfType("*user.User")).Return(ErrAdminAlreadyExists).Once()
+
+		admin, err := service.BootstrapAdmin(ctx, "admin", "admin@example.com", "password123")
+
+		assert.ErrorIs(t, err, ErrAdminAlreadyExists)
+		assert.Nil(t, admin)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("InvalidInput", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, []byte("secret"), cfg)
+
+		admin, err := service.BootstrapAdmin(ctx, "bad/name", "admin@example.com", "password123")
+
+		assert.ErrorIs(t, err, ErrInvalidUserInput)
+		assert.Nil(t, admin)
+		mockRepo.AssertNotCalled(t, "CreateAdminIfNoAdmin")
 	})
 }
 

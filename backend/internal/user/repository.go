@@ -12,6 +12,7 @@ import (
 // Repository interface defines methods for user data access
 type Repository interface {
 	CreateUser(ctx context.Context, user *User) error
+	CreateAdminIfNoAdmin(ctx context.Context, user *User) error
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
 }
 
@@ -31,12 +32,46 @@ func NewRepository(db *sqlx.DB, cfg activitypub.Config) Repository {
 
 // Add new user
 func (r *PgRepository) CreateUser(ctx context.Context, user *User) error {
+	return r.createUserInTx(ctx, user, nil)
+}
+
+func (r *PgRepository) CreateAdminIfNoAdmin(ctx context.Context, user *User) error {
+	return r.createUserInTx(ctx, user, func(tx *sqlx.Tx) error {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('admin-bootstrap'))`); err != nil {
+			return err
+		}
+
+		var exists bool
+		if err := tx.GetContext(ctx, &exists, `SELECT EXISTS (SELECT 1 FROM users WHERE role = $1)`, RoleAdmin); err != nil {
+			return err
+		}
+		if exists {
+			return ErrAdminAlreadyExists
+		}
+		return nil
+	})
+}
+
+func (r *PgRepository) createUserInTx(ctx context.Context, user *User, beforeInsert func(*sqlx.Tx) error) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
+	if beforeInsert != nil {
+		if err := beforeInsert(tx); err != nil {
+			return err
+		}
+	}
+	if err := r.insertUserGraph(ctx, tx, user); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (r *PgRepository) insertUserGraph(ctx context.Context, tx *sqlx.Tx, user *User) error {
 	actorQuery := `
 		INSERT INTO actors (
 			id, ap_id, type, preferred_username, handle, name, summary,
@@ -102,7 +137,7 @@ func (r *PgRepository) CreateUser(ctx context.Context, user *User) error {
 		return err
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 // GetUserByEmail finds user by email

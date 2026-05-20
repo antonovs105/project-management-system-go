@@ -1,26 +1,38 @@
 package user
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 )
 
+const AdminBootstrapTokenHeader = "X-Admin-Bootstrap-Token"
+
 // Depends on service to call business logic
 type Handler struct {
-	service *Service
+	service             *Service
+	adminBootstrapToken string
 }
 
 // constructor for UserHandler.
-func NewHandler(service *Service) *Handler {
+func NewHandler(service *Service, adminBootstrapToken ...string) *Handler {
+	token := ""
+	if len(adminBootstrapToken) > 0 {
+		token = strings.TrimSpace(adminBootstrapToken[0])
+	}
 	return &Handler{
-		service: service,
+		service:             service,
+		adminBootstrapToken: token,
 	}
 }
 
 func (h *Handler) RegisterRoutes(e *echo.Echo) {
+	e.POST("/setup/admin", h.BootstrapAdmin)
 	e.POST("/register", h.Register)
 	e.POST("/login", h.Login)
 }
@@ -30,6 +42,46 @@ type RegisterRequest struct {
 	Username string `json:"username"`
 	Email    string `json:"email"`
 	Password string `json:"password"`
+}
+
+type BootstrapAdminRequest struct {
+	Username string `json:"username"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+func (h *Handler) BootstrapAdmin(c echo.Context) error {
+	if h.adminBootstrapToken == "" {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "admin bootstrap disabled"})
+	}
+	if !sameSecret(h.adminBootstrapToken, c.Request().Header.Get(AdminBootstrapTokenHeader)) {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid admin bootstrap token"})
+	}
+
+	var req BootstrapAdminRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+
+	admin, err := h.service.BootstrapAdmin(c.Request().Context(), req.Username, req.Email, req.Password)
+	if err != nil {
+		if errors.Is(err, ErrInvalidUserInput) {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		}
+		if errors.Is(err, ErrAdminAlreadyExists) {
+			return c.JSON(http.StatusConflict, map[string]string{"error": "admin user already exists"})
+		}
+		log.Printf("Error bootstrapping admin user: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not bootstrap admin"})
+	}
+
+	return c.JSON(http.StatusCreated, admin)
+}
+
+func sameSecret(expected, actual string) bool {
+	expectedHash := sha256.Sum256([]byte(expected))
+	actualHash := sha256.Sum256([]byte(actual))
+	return subtle.ConstantTimeCompare(expectedHash[:], actualHash[:]) == 1
 }
 
 // Register method for POST /register.

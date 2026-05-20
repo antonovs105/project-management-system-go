@@ -2,12 +2,11 @@ package user
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/mail"
 	"strings"
-
-	"errors"
 	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
@@ -16,6 +15,12 @@ import (
 )
 
 var ErrInvalidUserInput = errors.New("invalid user input")
+var ErrAdminAlreadyExists = errors.New("admin user already exists")
+
+const (
+	RoleAdmin  = "admin"
+	RoleWorker = "worker"
+)
 
 // Service incapsulates business logic for working with users
 // Depends on repository for data access
@@ -37,6 +42,38 @@ func NewService(repo Repository, jwtSecret []byte, apConfig activitypub.Config) 
 // RegisterUser - service method for user registration
 // Hashing password and adds user via repository
 func (s *Service) RegisterUser(ctx context.Context, username, email, password string) (*User, error) {
+	newUser, err := s.newLocalUser(username, email, password, RoleWorker)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.repo.CreateUser(ctx, newUser)
+	if err != nil {
+		return nil, err
+	}
+
+	newUser.PasswordHash = ""
+	return newUser, nil
+}
+
+// BootstrapAdmin creates the first local admin account. The repository enforces
+// the one-admin bootstrap guard transactionally.
+func (s *Service) BootstrapAdmin(ctx context.Context, username, email, password string) (*User, error) {
+	newUser, err := s.newLocalUser(username, email, password, RoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.repo.CreateAdminIfNoAdmin(ctx, newUser)
+	if err != nil {
+		return nil, err
+	}
+
+	newUser.PasswordHash = ""
+	return newUser, nil
+}
+
+func (s *Service) newLocalUser(username, email, password, role string) (*User, error) {
 	username = strings.TrimSpace(username)
 	email = strings.TrimSpace(email)
 	if err := validateRegistrationInput(username, email, password); err != nil {
@@ -65,25 +102,13 @@ func (s *Service) RegisterUser(ctx context.Context, username, email, password st
 		Username:      username,
 		Email:         email,
 		PasswordHash:  string(hashedPassword),
-		Role:          "worker",
+		Role:          role,
 		Handle:        activitypub.Handle(username, s.apConfig),
 		Name:          username,
 		Summary:       "",
 		PublicKeyPEM:  publicKey,
 		PrivateKeyPEM: privateKey,
 	}
-
-	// Saving User in DB
-	// Calling repository method for INSERT-query
-	err = s.repo.CreateUser(ctx, newUser)
-	if err != nil {
-		// TODO: error handling
-		// for now just returning error
-		return nil, err
-	}
-
-	// returning created User and clearing password hash
-	newUser.PasswordHash = ""
 
 	return newUser, nil
 }
