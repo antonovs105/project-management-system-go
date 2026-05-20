@@ -440,6 +440,33 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		assert.True(t, updatedRemoteTicket.IsResolved)
 		requireTicketResolved(t, db, updatedRemoteTicket.ID)
 
+		assignee, err := userService.RegisterUser(ctx, "assignee", "assignee@example.test", "password123")
+		require.NoError(t, err)
+		assigneeInvite, err := projectService.AddMemberToProject(ctx, project.ID, owner.ID, assignee.ID, "developer")
+		require.NoError(t, err)
+		require.NoError(t, projectService.AcceptInvite(ctx, assigneeInvite.ID, assignee.ID))
+
+		addAssigneeAPID := "https://remote.example/activities/add-project-ticket-assignee"
+		addAssigneeBody := []byte(`{"id":"` + addAssigneeAPID + `","type":"Add","actor":"` + remoteActor.APID + `","object":"` + assignee.APID + `","target":"` + remoteTicketAPID + `"}`)
+		addAssigneeReq, err := http.NewRequest(http.MethodPost, project.APID+"/inbox", bytes.NewReader(addAssigneeBody))
+		require.NoError(t, err)
+		require.NoError(t, signer.SignRequest(ctx, remoteActor.ID, addAssigneeReq, addAssigneeBody))
+
+		addedAssignee, err := receiver.Receive(ctx, addAssigneeReq, project.APID, addAssigneeBody)
+		require.NoError(t, err)
+		require.Equal(t, addAssigneeAPID, addedAssignee.ActivityAPID)
+		requireActivityForObjectAndTarget(t, db, "Add", assignee.APID, remoteTicketAPID)
+		requireInboxItemForTarget(t, db, project.ID, "Add", remoteTicketAPID)
+		requireTicketAssignee(t, db, remoteTicketAPID, assignee.ID)
+		requireTicketObjectAssignedTo(t, db, remoteTicketAPID, assignee.APID)
+
+		tickets, err = ticketService.ListTicketsInProject(ctx, project.ID, owner.ID)
+		require.NoError(t, err)
+		assignedRemoteTicket := findTicketByAPID(tickets, remoteTicketAPID)
+		require.NotNil(t, assignedRemoteTicket)
+		require.NotNil(t, assignedRemoteTicket.AssigneeID)
+		assert.Equal(t, assignee.ID, *assignedRemoteTicket.AssigneeID)
+
 		undoAPID := "https://remote.example/activities/undo-follow-project"
 		undoBody := []byte(`{"id":"` + undoAPID + `","type":"Undo","actor":"` + remoteActor.APID + `","object":{"id":"` + followAPID + `","type":"Follow","actor":"` + remoteActor.APID + `","object":"` + project.APID + `"}}`)
 		undoReq, err := http.NewRequest(http.MethodPost, project.APID+"/inbox", bytes.NewReader(undoBody))
@@ -648,6 +675,19 @@ func requireActivityForObject(t *testing.T, db *sqlx.DB, activityType, objectAPI
 	require.Greater(t, count, 0)
 }
 
+func requireActivityForObjectAndTarget(t *testing.T, db *sqlx.DB, activityType, objectAPID, targetAPID string) {
+	t.Helper()
+
+	var count int
+	err := db.Get(&count, `
+		SELECT count(*)
+		FROM ap_activities
+		WHERE activity_type = $1 AND object_ap_id = $2 AND target_ap_id = $3
+	`, activityType, objectAPID, targetAPID)
+	require.NoError(t, err)
+	require.Greater(t, count, 0)
+}
+
 func requireDeliveryForObject(t *testing.T, db *sqlx.DB, activityType, objectAPID, inboxURL string) {
 	t.Helper()
 
@@ -685,6 +725,22 @@ func requireInboxItem(t *testing.T, db *sqlx.DB, actorID, activityType, objectAP
 	requireBoxItem(t, db, "actor_inbox_items", actorID, activityType, objectAPID)
 }
 
+func requireInboxItemForTarget(t *testing.T, db *sqlx.DB, actorID, activityType, targetAPID string) {
+	t.Helper()
+
+	var count int
+	err := db.Get(&count, `
+		SELECT count(*)
+		FROM actor_inbox_items inbox
+		JOIN ap_activities activity ON activity.id = inbox.activity_id
+		WHERE inbox.actor_id = $1
+			AND activity.activity_type = $2
+			AND activity.target_ap_id = $3
+	`, actorID, activityType, targetAPID)
+	require.NoError(t, err)
+	require.Greater(t, count, 0)
+}
+
 func requireOutboxItem(t *testing.T, db *sqlx.DB, actorID, activityType, objectAPID string) {
 	t.Helper()
 	requireBoxItem(t, db, "actor_outbox_items", actorID, activityType, objectAPID)
@@ -718,6 +774,33 @@ func requireTicketResolved(t *testing.T, db *sqlx.DB, ticketID string) {
 	require.NoError(t, err)
 	require.True(t, resolved.Valid)
 	require.True(t, resolved.Bool)
+}
+
+func requireTicketAssignee(t *testing.T, db *sqlx.DB, ticketAPID, assigneeID string) {
+	t.Helper()
+
+	var count int
+	err := db.Get(&count, `
+		SELECT count(*)
+		FROM ticket_assignees assignee
+		JOIN tickets ticket ON ticket.id = assignee.ticket_id
+		WHERE ticket.ap_id = $1 AND assignee.actor_id = $2
+	`, ticketAPID, assigneeID)
+	require.NoError(t, err)
+	require.Greater(t, count, 0)
+}
+
+func requireTicketObjectAssignedTo(t *testing.T, db *sqlx.DB, ticketAPID, assigneeAPID string) {
+	t.Helper()
+
+	var assigned bool
+	err := db.Get(&assigned, `
+		SELECT COALESCE(document->'forge:assignedTo' ? $2, false)
+		FROM ap_objects
+		WHERE ap_id = $1
+	`, ticketAPID, assigneeAPID)
+	require.NoError(t, err)
+	require.True(t, assigned)
 }
 
 func TestIntegrationDBSourceLooksSafe(t *testing.T) {

@@ -19,6 +19,7 @@ type Repository interface {
 	StoreInboundCreateNote(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	StoreInboundCreateTicket(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	StoreInboundUpdateTicket(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
+	StoreInboundAddTicketAssignee(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	AcceptProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) (*FollowResponse, error)
 	UndoProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) error
 }
@@ -144,6 +145,32 @@ func (r *PgRepository) StoreInboundUpdateTicket(ctx context.Context, targetActor
 	}
 	if !accepted.Duplicate {
 		if err := r.updateRemoteTicketTx(ctx, tx, targetActorID, activity); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return accepted, nil
+}
+
+func (r *PgRepository) StoreInboundAddTicketAssignee(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
+	if activity.ObjectAPID == nil || activity.TargetAPID == nil {
+		return nil, ErrInvalidActivity
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	accepted, err := r.storeInboundActivityTx(ctx, tx, targetActorID, activity)
+	if err != nil {
+		return nil, err
+	}
+	if !accepted.Duplicate {
+		if err := r.insertRemoteTicketAssigneeTx(ctx, tx, targetActorID, activity); err != nil {
 			return nil, err
 		}
 	}
@@ -491,6 +518,145 @@ func (r *PgRepository) updateRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, ta
 			document = EXCLUDED.document,
 			is_deleted = false
 	`, ticket.ID, activity.ActorID, stored.ID, ticket.Document)
+	return err
+}
+
+func (r *PgRepository) insertRemoteTicketAssigneeTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity) error {
+	assigneeAPID := *activity.ObjectAPID
+	ticketAPID := *activity.TargetAPID
+
+	var acceptedFollower bool
+	if err := tx.GetContext(ctx, &acceptedFollower, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM actor_follows
+			WHERE follower_actor_id = $1
+				AND followed_actor_id = $2
+				AND state = 'accepted'
+		)
+	`, activity.ActorID, targetActorID); err != nil {
+		return err
+	}
+	if !acceptedFollower {
+		return ErrForbiddenActor
+	}
+
+	var storedTicket struct {
+		ID         string `db:"id"`
+		ProjectID  string `db:"project_id"`
+		ReporterID string `db:"reporter_id"`
+	}
+	if err := tx.GetContext(ctx, &storedTicket, `
+		SELECT id::text, project_id::text, reporter_id::text
+		FROM tickets
+		WHERE ap_id = $1
+		FOR UPDATE
+	`, ticketAPID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrInvalidActivity
+		}
+		return err
+	}
+	if storedTicket.ProjectID != targetActorID || storedTicket.ReporterID != activity.ActorID {
+		return ErrActivityConflict
+	}
+
+	var assigneeID string
+	if err := tx.GetContext(ctx, &assigneeID, `
+		SELECT id::text
+		FROM actors
+		WHERE ap_id = $1
+	`, assigneeAPID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrInvalidActivity
+		}
+		return err
+	}
+
+	var projectParticipant bool
+	if err := tx.GetContext(ctx, &projectParticipant, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM project_members
+			WHERE user_id = $1 AND project_id = $2
+		) OR EXISTS(
+			SELECT 1
+			FROM actor_follows
+			WHERE follower_actor_id = $1
+				AND followed_actor_id = $2
+				AND state = 'accepted'
+		)
+	`, assigneeID, targetActorID); err != nil {
+		return err
+	}
+	if !projectParticipant {
+		return ErrForbiddenActor
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO ticket_assignees (ticket_id, actor_id)
+		VALUES ($1, $2)
+		ON CONFLICT DO NOTHING
+	`, storedTicket.ID, assigneeID); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE tickets
+		SET updated_at = now()
+		WHERE id = $1
+	`, storedTicket.ID); err != nil {
+		return err
+	}
+
+	return updateTicketAssignedToDocumentTx(ctx, tx, storedTicket.ID, ticketAPID)
+}
+
+func updateTicketAssignedToDocumentTx(ctx context.Context, tx *sqlx.Tx, ticketID, ticketAPID string) error {
+	var rawDocument []byte
+	if err := tx.GetContext(ctx, &rawDocument, `
+		SELECT document
+		FROM ap_objects
+		WHERE ap_id = $1
+		FOR UPDATE
+	`, ticketAPID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrInvalidActivity
+		}
+		return err
+	}
+
+	var document map[string]any
+	if err := json.Unmarshal(rawDocument, &document); err != nil {
+		return err
+	}
+
+	var assigneeAPIDs []string
+	if err := tx.SelectContext(ctx, &assigneeAPIDs, `
+		SELECT actor.ap_id
+		FROM ticket_assignees assignee
+		JOIN actors actor ON actor.id = assignee.actor_id
+		WHERE assignee.ticket_id = $1
+		ORDER BY assignee.created_at ASC, actor.ap_id ASC
+	`, ticketID); err != nil {
+		return err
+	}
+	if len(assigneeAPIDs) == 0 {
+		delete(document, "forge:assignedTo")
+	} else {
+		document["forge:assignedTo"] = assigneeAPIDs
+	}
+
+	updatedDocument, err := json.Marshal(document)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
+		UPDATE ap_objects
+		SET document = $2,
+			is_deleted = false
+		WHERE ap_id = $1
+	`, ticketAPID, updatedDocument)
 	return err
 }
 

@@ -115,6 +115,10 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 	if err != nil {
 		return nil, err
 	}
+	isProjectAddTicketAssignee, err := s.isProjectAddTicketAssignee(ctx, targetActorID, targetAPID, activity)
+	if err != nil {
+		return nil, err
+	}
 
 	if isProjectCreateNote {
 		return s.repo.StoreInboundCreateNote(ctx, targetActorID, activity)
@@ -124,6 +128,9 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 	}
 	if isProjectUpdateTicket {
 		return s.repo.StoreInboundUpdateTicket(ctx, targetActorID, activity)
+	}
+	if isProjectAddTicketAssignee {
+		return s.repo.StoreInboundAddTicketAssignee(ctx, targetActorID, activity)
 	}
 
 	accepted, err := s.repo.StoreInboundActivity(ctx, targetActorID, activity)
@@ -145,6 +152,29 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 		}
 	}
 	return accepted, nil
+}
+
+func (s *Service) isProjectAddTicketAssignee(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
+	if activity.Type != "Add" {
+		return false, nil
+	}
+	isProjectActor, err := s.repo.IsProjectActor(ctx, targetActorID)
+	if err != nil {
+		return false, err
+	}
+	if !isProjectActor {
+		return false, nil
+	}
+	if activity.ObjectAPID == nil || !isAbsoluteURI(*activity.ObjectAPID) {
+		return false, fmt.Errorf("%w: add object must be an assignee actor", ErrInvalidActivity)
+	}
+	if activity.TargetAPID == nil || !isAbsoluteURI(*activity.TargetAPID) {
+		return false, fmt.Errorf("%w: add target must be a ticket", ErrInvalidActivity)
+	}
+	if *activity.TargetAPID == targetAPID {
+		return false, fmt.Errorf("%w: add target must be a ticket", ErrInvalidActivity)
+	}
+	return true, nil
 }
 
 func (s *Service) isProjectUpdateTicket(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
