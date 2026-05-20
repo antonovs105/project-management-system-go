@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -307,6 +308,80 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		assert.True(t, second.Duplicate)
 
 		requireInboxItem(t, db, project.ID, "Create", objectAPID)
+	})
+
+	t.Run("remote inbox resolves unknown actor key", func(t *testing.T) {
+		publicKey, privateKey, err := activitypub.GenerateRSAKeyPair()
+		require.NoError(t, err)
+
+		var server *httptest.Server
+		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/users/unknown-key" {
+				http.NotFound(w, r)
+				return
+			}
+
+			doc := activitypub.ActorDocument(
+				"Person",
+				server.URL+"/users/unknown-key",
+				"unknown-key",
+				"Unknown Key",
+				"Resolved during signature verification.",
+				publicKey,
+			)
+			rawDoc, err := activitypub.MarshalDocument(doc)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/activity+json")
+			_, _ = w.Write(rawDoc)
+		}))
+		defer server.Close()
+
+		actorAPID := server.URL + "/users/unknown-key"
+		followAPID := server.URL + "/activities/follow-unknown-key-project"
+		body := []byte(`{"id":"` + followAPID + `","type":"Follow","actor":"` + actorAPID + `","object":"` + project.APID + `"}`)
+		req, err := http.NewRequest(http.MethodPost, project.APID+"/inbox", bytes.NewReader(body))
+		require.NoError(t, err)
+
+		keyID := activitypub.KeyID(actorAPID)
+		signer := httpsig.NewService(singleKeyRepo{key: &httpsig.ActorKey{
+			ActorID:       "remote-unknown-key-before-cache",
+			ActorAPID:     actorAPID,
+			KeyID:         keyID,
+			Algorithm:     httpsig.AlgorithmRSAV15SHA256,
+			PublicKeyPEM:  publicKey,
+			PrivateKeyPEM: privateKey,
+		}})
+		require.NoError(t, signer.SignRequest(ctx, "remote-unknown-key-before-cache", req, body))
+
+		remoteActorService := remoteactor.NewService(
+			remoteactor.NewRepository(db),
+			remoteactor.WithHTTPClient(server.Client()),
+		)
+		receiver := remoteinbox.NewService(
+			remoteinbox.NewRepository(db, cfg),
+			httpsig.NewService(
+				httpsig.NewRepository(db),
+				httpsig.WithMissingKeyResolver(remoteActorService.ResolveKey),
+			),
+		)
+
+		accepted, err := receiver.Receive(ctx, req, project.APID, body)
+		require.NoError(t, err)
+		require.Equal(t, followAPID, accepted.ActivityAPID)
+		require.NotEmpty(t, accepted.ResponseActivityID)
+
+		var storedActorID string
+		require.NoError(t, db.GetContext(ctx, &storedActorID, `
+			SELECT id::text
+			FROM actors
+			WHERE ap_id = $1 AND is_local = false
+		`, actorAPID))
+		requireFollow(t, db, storedActorID, project.ID, "accepted")
+		requireActivityForObject(t, db, "Accept", followAPID)
+		requireOutboxItem(t, db, project.ID, "Accept", followAPID)
 	})
 
 	t.Run("remote inbox accepts project follow and queues response", func(t *testing.T) {
