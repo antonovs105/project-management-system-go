@@ -17,6 +17,7 @@ const (
 	ActivityStreamsContext = "https://www.w3.org/ns/activitystreams"
 	ForgeFedContext        = "https://forgefed.org/ns"
 	PublicCollection       = "https://www.w3.org/ns/activitystreams#Public"
+	ActivityJSONMediaType  = "application/activity+json"
 )
 
 type Config struct {
@@ -214,6 +215,37 @@ func CollectionDocument(apID, collectionType string, items []map[string]any) map
 		"totalItems":   len(items),
 		"orderedItems": items,
 	}
+}
+
+func OrderedCollectionDocument(apID string, totalItems int, first string) map[string]any {
+	doc := map[string]any{
+		"@context":   ActivityStreamsContext,
+		"id":         apID,
+		"type":       "OrderedCollection",
+		"totalItems": totalItems,
+	}
+	if first != "" {
+		doc["first"] = first
+	}
+	return doc
+}
+
+func OrderedCollectionPageDocument(apID, partOf string, totalItems int, orderedItems []any, next, prev string) map[string]any {
+	doc := map[string]any{
+		"@context":     ActivityStreamsContext,
+		"id":           apID,
+		"type":         "OrderedCollectionPage",
+		"partOf":       partOf,
+		"totalItems":   totalItems,
+		"orderedItems": orderedItems,
+	}
+	if next != "" {
+		doc["next"] = next
+	}
+	if prev != "" {
+		doc["prev"] = prev
+	}
+	return doc
 }
 
 func GenerateRSAKeyPair() (publicPEM string, privatePEM string, err error) {

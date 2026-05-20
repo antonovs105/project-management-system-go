@@ -61,3 +61,35 @@ func TestTicketNoteAndActivityDocuments(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), "https://www.w3.org/ns/activitystreams")
 }
+
+func TestOrderedCollectionDocuments(t *testing.T) {
+	collection := OrderedCollectionDocument(
+		"https://example.test/projects/project-1/outbox",
+		42,
+		"https://example.test/projects/project-1/outbox?page=true&limit=20",
+	)
+	assert.Equal(t, ActivityStreamsContext, collection["@context"])
+	assert.Equal(t, "OrderedCollection", collection["type"])
+	assert.Equal(t, 42, collection["totalItems"])
+	assert.Equal(t, "https://example.test/projects/project-1/outbox?page=true&limit=20", collection["first"])
+	assert.NotContains(t, collection, "orderedItems")
+
+	page := OrderedCollectionPageDocument(
+		"https://example.test/projects/project-1/outbox?page=true&limit=2&offset=2",
+		"https://example.test/projects/project-1/outbox",
+		42,
+		[]any{
+			map[string]any{"id": "https://example.test/activities/activity-1", "type": "Create"},
+			"https://remote.example/users/follower",
+		},
+		"https://example.test/projects/project-1/outbox?page=true&limit=2&offset=4",
+		"https://example.test/projects/project-1/outbox?page=true&limit=2",
+	)
+	assert.Equal(t, ActivityStreamsContext, page["@context"])
+	assert.Equal(t, "OrderedCollectionPage", page["type"])
+	assert.Equal(t, "https://example.test/projects/project-1/outbox", page["partOf"])
+	assert.Equal(t, 42, page["totalItems"])
+	assert.Len(t, page["orderedItems"], 2)
+	assert.Equal(t, "https://example.test/projects/project-1/outbox?page=true&limit=2&offset=4", page["next"])
+	assert.Equal(t, "https://example.test/projects/project-1/outbox?page=true&limit=2", page["prev"])
+}

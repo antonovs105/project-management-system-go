@@ -3,15 +3,30 @@ package activitypub
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
 )
 
+const (
+	defaultCollectionPageLimit = 20
+	maxCollectionPageLimit     = 100
+)
+
 type Handler struct {
 	db  *sqlx.DB
 	cfg Config
+}
+
+type collectionPageRequest struct {
+	Page   bool
+	Limit  int
+	Offset int
 }
 
 func NewHandler(db *sqlx.DB, cfg Config) *Handler {
@@ -65,7 +80,7 @@ func (h *Handler) GetActivity(c echo.Context) error {
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load activity"})
 	}
-	return c.JSONBlob(http.StatusOK, raw)
+	return c.Blob(http.StatusOK, ActivityJSONMediaType, raw)
 }
 
 func (h *Handler) UserInbox(c echo.Context) error {
@@ -104,10 +119,15 @@ func (h *Handler) writeObject(c echo.Context, apID string) error {
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load object"})
 	}
-	return c.JSONBlob(http.StatusOK, raw)
+	return c.Blob(http.StatusOK, ActivityJSONMediaType, raw)
 }
 
 func (h *Handler) actorActivityCollection(c echo.Context, actorAPID, box string) error {
+	page, err := parseCollectionPageRequest(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
 	var actorID string
 	if err := h.db.GetContext(c.Request().Context(), &actorID, `
 		SELECT id::text FROM actors WHERE ap_id = $1
@@ -124,25 +144,56 @@ func (h *Handler) actorActivityCollection(c echo.Context, actorAPID, box string)
 		orderColumn = "published_at"
 	}
 
+	var totalItems int
+	if err := h.db.GetContext(c.Request().Context(), &totalItems, `
+		SELECT count(*)
+		FROM `+table+`
+		WHERE actor_id = $1
+	`, actorID); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load collection"})
+	}
+	if !page.Page {
+		return writeActivityJSON(c, http.StatusOK, OrderedCollectionDocument(
+			collectionID,
+			totalItems,
+			collectionPageURL(collectionID, page.Limit, 0),
+		))
+	}
+
 	query := `
 		SELECT a.document
 		FROM ` + table + ` i
 		JOIN ap_activities a ON a.id = i.activity_id
 		WHERE i.actor_id = $1
-		ORDER BY i.` + orderColumn + ` DESC
+		ORDER BY i.` + orderColumn + ` DESC, i.activity_id DESC
+		LIMIT $2 OFFSET $3
 	`
 	var raws []json.RawMessage
-	if err := h.db.SelectContext(c.Request().Context(), &raws, query, actorID); err != nil {
+	if err := h.db.SelectContext(c.Request().Context(), &raws, query, actorID, page.Limit, page.Offset); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load collection"})
 	}
 	items, err := decodeRawItems(raws)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to decode collection"})
 	}
-	return c.JSON(http.StatusOK, CollectionDocument(collectionID, "OrderedCollection", items))
+
+	next, prev := collectionPageLinks(collectionID, totalItems, page.Limit, page.Offset)
+	return writeActivityJSON(c, http.StatusOK, OrderedCollectionPageDocument(
+		collectionPageURL(collectionID, page.Limit, page.Offset),
+		collectionID,
+		totalItems,
+		items,
+		next,
+		prev,
+	))
 }
 
 func (h *Handler) followersCollection(c echo.Context, actorAPID string) error {
+	page, err := parseCollectionPageRequest(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
 	var actorID string
 	if err := h.db.GetContext(c.Request().Context(), &actorID, `
 		SELECT id::text FROM actors WHERE ap_id = $1
@@ -150,25 +201,117 @@ func (h *Handler) followersCollection(c echo.Context, actorAPID string) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "actor not found"})
 	}
 
-	var raws []json.RawMessage
-	if err := h.db.SelectContext(c.Request().Context(), &raws, `
-		SELECT o.document
+	collectionID := Followers(actorAPID)
+	var totalItems int
+	if err := h.db.GetContext(c.Request().Context(), &totalItems, `
+		SELECT count(*)
 		FROM actor_follows f
-		JOIN ap_objects o ON o.actor_id = f.follower_actor_id
 		WHERE f.followed_actor_id = $1 AND f.state = 'accepted'
-		ORDER BY f.created_at ASC
 	`, actorID); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load followers"})
 	}
-	items, err := decodeRawItems(raws)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to decode followers"})
+	if !page.Page {
+		return writeActivityJSON(c, http.StatusOK, OrderedCollectionDocument(
+			collectionID,
+			totalItems,
+			collectionPageURL(collectionID, page.Limit, 0),
+		))
 	}
-	return c.JSON(http.StatusOK, CollectionDocument(Followers(actorAPID), "Collection", items))
+
+	var followerAPIDs []string
+	if err := h.db.SelectContext(c.Request().Context(), &followerAPIDs, `
+		SELECT follower.ap_id
+		FROM actor_follows f
+		JOIN actors follower ON follower.id = f.follower_actor_id
+		WHERE f.followed_actor_id = $1 AND f.state = 'accepted'
+		ORDER BY f.created_at ASC, follower.ap_id ASC
+		LIMIT $2 OFFSET $3
+	`, actorID, page.Limit, page.Offset); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load followers"})
+	}
+	items := make([]any, 0, len(followerAPIDs))
+	for _, followerAPID := range followerAPIDs {
+		items = append(items, followerAPID)
+	}
+
+	next, prev := collectionPageLinks(collectionID, totalItems, page.Limit, page.Offset)
+	return writeActivityJSON(c, http.StatusOK, OrderedCollectionPageDocument(
+		collectionPageURL(collectionID, page.Limit, page.Offset),
+		collectionID,
+		totalItems,
+		items,
+		next,
+		prev,
+	))
 }
 
-func decodeRawItems(raws []json.RawMessage) ([]map[string]any, error) {
-	items := make([]map[string]any, 0, len(raws))
+func parseCollectionPageRequest(c echo.Context) (collectionPageRequest, error) {
+	request := collectionPageRequest{Limit: defaultCollectionPageLimit}
+	pageParam := strings.ToLower(strings.TrimSpace(c.QueryParam("page")))
+	switch pageParam {
+	case "", "false", "0":
+	case "true", "1":
+		request.Page = true
+	default:
+		return request, fmt.Errorf("invalid page parameter")
+	}
+
+	if limitParam := strings.TrimSpace(c.QueryParam("limit")); limitParam != "" {
+		limit, err := strconv.Atoi(limitParam)
+		if err != nil || limit < 1 {
+			return request, fmt.Errorf("invalid limit parameter")
+		}
+		if limit > maxCollectionPageLimit {
+			limit = maxCollectionPageLimit
+		}
+		request.Limit = limit
+	}
+
+	if offsetParam := strings.TrimSpace(c.QueryParam("offset")); offsetParam != "" {
+		offset, err := strconv.Atoi(offsetParam)
+		if err != nil || offset < 0 {
+			return request, fmt.Errorf("invalid offset parameter")
+		}
+		request.Offset = offset
+	}
+
+	return request, nil
+}
+
+func collectionPageURL(collectionID string, limit, offset int) string {
+	values := url.Values{}
+	values.Set("page", "true")
+	values.Set("limit", strconv.Itoa(limit))
+	if offset > 0 {
+		values.Set("offset", strconv.Itoa(offset))
+	}
+	return collectionID + "?" + values.Encode()
+}
+
+func collectionPageLinks(collectionID string, totalItems, limit, offset int) (next string, prev string) {
+	if offset+limit < totalItems {
+		next = collectionPageURL(collectionID, limit, offset+limit)
+	}
+	if offset > 0 {
+		previousOffset := offset - limit
+		if previousOffset < 0 {
+			previousOffset = 0
+		}
+		prev = collectionPageURL(collectionID, limit, previousOffset)
+	}
+	return next, prev
+}
+
+func writeActivityJSON(c echo.Context, status int, doc any) error {
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to encode activitypub document"})
+	}
+	return c.Blob(status, ActivityJSONMediaType, raw)
+}
+
+func decodeRawItems(raws []json.RawMessage) ([]any, error) {
+	items := make([]any, 0, len(raws))
 	for _, raw := range raws {
 		var item map[string]any
 		if err := json.Unmarshal(raw, &item); err != nil {

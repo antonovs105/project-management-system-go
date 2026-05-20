@@ -178,6 +178,11 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	require.NoError(t, err)
 	requireObjectType(t, db, createdTicket.APID, "Ticket")
 	requireActivityForObject(t, db, "Create", createdTicket.APID)
+	ticketDoc := requireActivityPubDocument(t, db, cfg, "/tickets/"+createdTicket.ID)
+	require.Equal(t, "forge:Ticket", ticketDoc["type"])
+	createTicketActivityAPID := requireActivityAPIDForObject(t, db, "Create", createdTicket.APID)
+	createTicketActivityDoc := requireActivityPubDocument(t, db, cfg, "/activities/"+strings.TrimPrefix(createTicketActivityAPID, cfg.BaseURL+"/activities/"))
+	require.Equal(t, "Create", createTicketActivityDoc["type"])
 	requireInboxItem(t, db, project.ID, "Create", createdTicket.APID)
 	requireOutboxItem(t, db, owner.ID, "Create", createdTicket.APID)
 	requireDeliveryForObject(t, db, "Create", createdTicket.APID, remoteInbox)
@@ -204,6 +209,7 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	requireActivityForObject(t, db, "Create", createdComment.APID)
 	requireOutboxItem(t, db, member.ID, "Create", createdComment.APID)
 	requireDeliveryForObject(t, db, "Create", createdComment.APID, remoteInbox)
+	requireProjectActivityPubCollections(t, db, cfg, project.ID, project.APID, remoteFollower.APID)
 
 	ownerDeliveries, err := deliveryService.ListProjectDeliveries(ctx, project.ID, owner.ID)
 	require.NoError(t, err)
@@ -1968,6 +1974,21 @@ func requireActivityForObject(t *testing.T, db *sqlx.DB, activityType, objectAPI
 	require.Greater(t, count, 0)
 }
 
+func requireActivityAPIDForObject(t *testing.T, db *sqlx.DB, activityType, objectAPID string) string {
+	t.Helper()
+
+	var apID string
+	err := db.Get(&apID, `
+		SELECT ap_id
+		FROM ap_activities
+		WHERE activity_type = $1 AND object_ap_id = $2
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, activityType, objectAPID)
+	require.NoError(t, err)
+	return apID
+}
+
 func requireActivityForObjectAndActor(t *testing.T, db *sqlx.DB, activityType, objectAPID, actorID string) {
 	t.Helper()
 
@@ -2162,6 +2183,93 @@ func requireProjectActorEndpointTombstone(t *testing.T, db *sqlx.DB, cfg activit
 	require.Equal(t, formerType, doc["formerType"])
 	require.NotContains(t, doc, "name")
 	require.NotContains(t, doc, "content")
+}
+
+func requireProjectActivityPubCollections(t *testing.T, db *sqlx.DB, cfg activitypub.Config, projectID, projectAPID, remoteFollowerAPID string) {
+	t.Helper()
+
+	outboxID := activitypub.Outbox(projectAPID)
+	outbox := requireActivityPubDocument(t, db, cfg, "/projects/"+projectID+"/outbox")
+	require.Equal(t, "OrderedCollection", outbox["type"])
+	require.Equal(t, outboxID, outbox["id"])
+	require.NotContains(t, outbox, "orderedItems")
+	require.Contains(t, outbox["first"], "page=true")
+	outboxTotal := requireJSONInt(t, outbox, "totalItems")
+	require.GreaterOrEqual(t, outboxTotal, 0)
+
+	outboxPage := requireActivityPubDocument(t, db, cfg, "/projects/"+projectID+"/outbox?page=true&limit=2")
+	require.Equal(t, "OrderedCollectionPage", outboxPage["type"])
+	require.Equal(t, outboxID, outboxPage["partOf"])
+	require.Equal(t, outbox["totalItems"], outboxPage["totalItems"])
+	outboxItems := requireOrderedItems(t, outboxPage)
+	require.LessOrEqual(t, len(outboxItems), 2)
+	if outboxTotal > len(outboxItems) {
+		require.Contains(t, outboxPage, "next")
+	}
+
+	inboxID := activitypub.Inbox(projectAPID)
+	inbox := requireActivityPubDocument(t, db, cfg, "/projects/"+projectID+"/inbox")
+	require.Equal(t, "OrderedCollection", inbox["type"])
+	require.Equal(t, inboxID, inbox["id"])
+	require.NotContains(t, inbox, "orderedItems")
+	inboxTotal := requireJSONInt(t, inbox, "totalItems")
+	require.GreaterOrEqual(t, inboxTotal, 1)
+
+	inboxPage := requireActivityPubDocument(t, db, cfg, "/projects/"+projectID+"/inbox?page=true&limit=2")
+	require.Equal(t, "OrderedCollectionPage", inboxPage["type"])
+	require.Equal(t, inboxID, inboxPage["partOf"])
+	require.Equal(t, inbox["totalItems"], inboxPage["totalItems"])
+	inboxItems := requireOrderedItems(t, inboxPage)
+	require.NotEmpty(t, inboxItems)
+	require.LessOrEqual(t, len(inboxItems), 2)
+	if inboxTotal > len(inboxItems) {
+		require.Contains(t, inboxPage, "next")
+	}
+
+	followersID := activitypub.Followers(projectAPID)
+	followers := requireActivityPubDocument(t, db, cfg, "/projects/"+projectID+"/followers")
+	require.Equal(t, "OrderedCollection", followers["type"])
+	require.Equal(t, followersID, followers["id"])
+	require.NotContains(t, followers, "orderedItems")
+	require.GreaterOrEqual(t, requireJSONInt(t, followers, "totalItems"), 3)
+
+	followersPage := requireActivityPubDocument(t, db, cfg, "/projects/"+projectID+"/followers?page=true&limit=50")
+	require.Equal(t, "OrderedCollectionPage", followersPage["type"])
+	require.Equal(t, followersID, followersPage["partOf"])
+	require.Contains(t, requireOrderedItems(t, followersPage), remoteFollowerAPID)
+}
+
+func requireActivityPubDocument(t *testing.T, db *sqlx.DB, cfg activitypub.Config, path string) map[string]any {
+	t.Helper()
+
+	e := echo.New()
+	activitypub.NewHandler(db, cfg).RegisterRoutes(e)
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Header().Get(echo.HeaderContentType), activitypub.ActivityJSONMediaType)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &doc))
+	return doc
+}
+
+func requireOrderedItems(t *testing.T, doc map[string]any) []any {
+	t.Helper()
+
+	items, ok := doc["orderedItems"].([]any)
+	require.True(t, ok, "orderedItems should be an array")
+	return items
+}
+
+func requireJSONInt(t *testing.T, doc map[string]any, key string) int {
+	t.Helper()
+
+	value, ok := doc[key].(float64)
+	require.True(t, ok, "%s should be a JSON number", key)
+	return int(value)
 }
 
 func requireTicketResolved(t *testing.T, db *sqlx.DB, ticketID string) {
