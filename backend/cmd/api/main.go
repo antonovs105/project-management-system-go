@@ -92,7 +92,7 @@ func main() {
 
 	// ActivityPub delivery dependencies. The worker runs in-process for now; the slice can be
 	// moved to a separate worker container later without changing delivery internals.
-	deliveryRepo := delivery.NewRepository(db)
+	deliveryRepo := delivery.NewRecipientRepository(db)
 	var deliveryQueue delivery.Queue = delivery.NoopQueue{}
 	redisAddr := os.Getenv("REDIS_ADDR")
 	if redisAddr != "" {
@@ -112,6 +112,8 @@ func main() {
 		log.Println("REDIS_ADDR is not set; ActivityPub delivery worker disabled")
 	}
 	deliveryService := delivery.NewService(deliveryRepo, deliveryQueue)
+	ticketService.SetDelivery(deliveryService)
+	commentService.SetDelivery(deliveryService)
 
 	// WebFinger discovery dependencies
 	wfRepo := webfinger.NewRepository(db)

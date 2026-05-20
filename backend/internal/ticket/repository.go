@@ -11,11 +11,11 @@ import (
 )
 
 type Repository interface {
-	Create(ctx context.Context, ticket *Ticket) error
+	Create(ctx context.Context, ticket *Ticket) ([]string, error)
 	ListByProjectID(ctx context.Context, projectID string) ([]Ticket, error)
 	GetByID(ctx context.Context, id string) (*Ticket, error)
-	Update(ctx context.Context, ticket *Ticket) error
-	Delete(ctx context.Context, id string) error
+	Update(ctx context.Context, ticket *Ticket) ([]string, error)
+	Delete(ctx context.Context, id string) ([]string, error)
 	CreateLink(ctx context.Context, link *TicketLink) error
 	DeleteLink(ctx context.Context, linkID string) error
 	GetLinksByProjectID(ctx context.Context, projectID string) ([]TicketLink, error)
@@ -30,10 +30,10 @@ func NewRepository(db *sqlx.DB, cfg activitypub.Config) Repository {
 	return &PgRepository{db: db, cfg: cfg}
 }
 
-func (r *PgRepository) Create(ctx context.Context, ticket *Ticket) error {
+func (r *PgRepository) Create(ctx context.Context, ticket *Ticket) ([]string, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
 
@@ -50,12 +50,12 @@ func (r *PgRepository) Create(ctx context.Context, ticket *Ticket) error {
 			CASE WHEN :is_resolved THEN CAST(:reporter_id AS uuid) ELSE NULL END
 		)
 	`, ticket); err != nil {
-		return err
+		return nil, err
 	}
 	if err := tx.QueryRowxContext(ctx, `
 		SELECT created_at, updated_at FROM tickets WHERE id = $1
 	`, ticket.ID).Scan(&ticket.CreatedAt, &ticket.UpdatedAt); err != nil {
-		return err
+		return nil, err
 	}
 
 	if ticket.AssigneeID != nil {
@@ -64,18 +64,22 @@ func (r *PgRepository) Create(ctx context.Context, ticket *Ticket) error {
 			VALUES ($1, $2)
 			ON CONFLICT DO NOTHING
 		`, ticket.ID, *ticket.AssigneeID); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	if err := r.writeTicketObject(ctx, tx, ticket); err != nil {
-		return err
+		return nil, err
 	}
-	if err := r.writeTicketActivity(ctx, tx, "Create", ticket, ticket.APID, nil); err != nil {
-		return err
+	activityID, err := r.writeTicketActivity(ctx, tx, "Create", ticket, ticket.APID, nil)
+	if err != nil {
+		return nil, err
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return []string{activityID}, nil
 }
 
 func (r *PgRepository) ListByProjectID(ctx context.Context, projectID string) ([]Ticket, error) {
@@ -97,10 +101,10 @@ func (r *PgRepository) GetByID(ctx context.Context, id string) (*Ticket, error) 
 	return &t, err
 }
 
-func (r *PgRepository) Update(ctx context.Context, ticket *Ticket) error {
+func (r *PgRepository) Update(ctx context.Context, ticket *Ticket) ([]string, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
 
@@ -127,76 +131,88 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket) error {
 		WHERE id = :id
 	`, ticket)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if rowsAffected == 0 {
-		return errors.New("ticket to update not found")
+		return nil, errors.New("ticket to update not found")
 	}
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM ticket_assignees WHERE ticket_id = $1`, ticket.ID); err != nil {
-		return err
+		return nil, err
 	}
 	if ticket.AssigneeID != nil {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO ticket_assignees (ticket_id, actor_id)
 			VALUES ($1, $2)
 		`, ticket.ID, *ticket.AssigneeID); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	if err := r.writeTicketObject(ctx, tx, ticket); err != nil {
-		return err
+		return nil, err
 	}
-	if err := r.writeTicketActivity(ctx, tx, "Update", ticket, ticket.APID, nil); err != nil {
-		return err
+	activityIDs := make([]string, 0, 2)
+	updateActivityID, err := r.writeTicketActivity(ctx, tx, "Update", ticket, ticket.APID, nil)
+	if err != nil {
+		return nil, err
 	}
+	activityIDs = append(activityIDs, updateActivityID)
 	if ticket.AssigneeID != nil {
 		assigneeAPID, err := lookupActorAPID(ctx, tx, *ticket.AssigneeID)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if err := r.writeTicketActivity(ctx, tx, "Add", ticket, assigneeAPID, ticket.APID); err != nil {
-			return err
+		addActivityID, err := r.writeTicketActivity(ctx, tx, "Add", ticket, assigneeAPID, ticket.APID)
+		if err != nil {
+			return nil, err
 		}
+		activityIDs = append(activityIDs, addActivityID)
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return activityIDs, nil
 }
 
-func (r *PgRepository) Delete(ctx context.Context, id string) error {
+func (r *PgRepository) Delete(ctx context.Context, id string) ([]string, error) {
 	t, err := r.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
 
 	result, err := tx.ExecContext(ctx, `DELETE FROM tickets WHERE id = $1`, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if rowsAffected == 0 {
-		return errors.New("ticket to delete not found")
+		return nil, errors.New("ticket to delete not found")
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE ap_objects SET is_deleted = true WHERE ap_id = $1`, t.APID); err != nil {
-		return err
+		return nil, err
 	}
-	if err := r.writeTicketActivity(ctx, tx, "Delete", t, t.APID, nil); err != nil {
-		return err
+	activityID, err := r.writeTicketActivity(ctx, tx, "Delete", t, t.APID, nil)
+	if err != nil {
+		return nil, err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return []string{activityID}, nil
 }
 
 func (r *PgRepository) CreateLink(ctx context.Context, link *TicketLink) error {
@@ -305,19 +321,19 @@ func (r *PgRepository) writeTicketObject(ctx context.Context, tx *sqlx.Tx, ticke
 	return err
 }
 
-func (r *PgRepository) writeTicketActivity(ctx context.Context, tx *sqlx.Tx, activityType string, ticket *Ticket, object any, target any) error {
+func (r *PgRepository) writeTicketActivity(ctx context.Context, tx *sqlx.Tx, activityType string, ticket *Ticket, object any, target any) (string, error) {
 	activityID, err := activitypub.NewID()
 	if err != nil {
-		return err
+		return "", err
 	}
 	activityAPID := activitypub.ActivityAPID(r.cfg, activityID)
 	reporterAPID, err := lookupActorAPID(ctx, tx, ticket.ReporterID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	projectAPID, err := lookupActorAPID(ctx, tx, ticket.ProjectID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if target == nil {
 		target = projectAPID
@@ -325,7 +341,7 @@ func (r *PgRepository) writeTicketActivity(ctx context.Context, tx *sqlx.Tx, act
 	doc := activitypub.ActivityDocument(activityType, activityAPID, reporterAPID, object, target, time.Now().UTC())
 	rawDoc, err := json.Marshal(doc)
 	if err != nil {
-		return err
+		return "", err
 	}
 	targetAPID := ""
 	if value, ok := target.(string); ok {
@@ -340,21 +356,21 @@ func (r *PgRepository) writeTicketActivity(ctx context.Context, tx *sqlx.Tx, act
 		INSERT INTO ap_activities (id, ap_id, activity_type, actor_id, object_ap_id, target_ap_id, document)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`, activityID, activityAPID, activityType, ticket.ReporterID, objectAPID, targetAPID, rawDoc); err != nil {
-		return err
+		return "", err
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO actor_outbox_items (actor_id, activity_id, activity_ap_id)
 		VALUES ($1, $2, $3)
 	`, ticket.ReporterID, activityID, activityAPID); err != nil {
-		return err
+		return "", err
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO actor_inbox_items (actor_id, activity_id, activity_ap_id)
 		VALUES ($1, $2, $3)
 	`, ticket.ProjectID, activityID, activityAPID); err != nil {
-		return err
+		return "", err
 	}
-	return nil
+	return activityID, nil
 }
 
 func ticketSelectBase() string {

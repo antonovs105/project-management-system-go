@@ -13,7 +13,9 @@ type serviceRepo struct {
 	activityID     string
 	targetInboxURL string
 	maxAttempts    int
+	inboxes        []string
 	delivery       *Delivery
+	created        []*Delivery
 	err            error
 }
 
@@ -24,7 +26,12 @@ func (r *serviceRepo) Create(ctx context.Context, activityID string, targetInbox
 	if r.err != nil {
 		return nil, false, r.err
 	}
-	return r.delivery, true, nil
+	if r.delivery != nil {
+		return r.delivery, true, nil
+	}
+	delivery := &Delivery{ID: "delivery-" + targetInboxURL, MaxAttempts: maxAttempts, State: StatePending}
+	r.created = append(r.created, delivery)
+	return delivery, true, nil
 }
 
 func (r *serviceRepo) StartAttempt(ctx context.Context, deliveryID string) (*Delivery, error) {
@@ -37,6 +44,13 @@ func (r *serviceRepo) MarkDelivered(ctx context.Context, deliveryID string) erro
 
 func (r *serviceRepo) MarkFailed(ctx context.Context, deliveryID string, message string, nextAttemptAt *time.Time) error {
 	return nil
+}
+
+func (r *serviceRepo) RemoteProjectFollowerInboxes(ctx context.Context, projectID string) ([]string, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	return r.inboxes, nil
 }
 
 type serviceQueue struct {
@@ -69,4 +83,18 @@ func TestServiceEnqueueCreatesDeliveryAndQueuesTask(t *testing.T) {
 	assert.Equal(t, DefaultMaxRetry, repo.maxAttempts)
 	assert.Equal(t, "delivery-1", queue.deliveryID)
 	assert.Equal(t, 10, queue.maxAttempts)
+}
+
+func TestServiceEnqueueProjectFollowersCreatesDeliveriesForRemoteInboxes(t *testing.T) {
+	repo := &serviceRepo{inboxes: []string{"https://remote.example/alice/inbox", "https://remote.example/bob/inbox"}}
+	queue := &serviceQueue{}
+	service := NewService(repo, queue)
+
+	err := service.EnqueueProjectFollowers(context.Background(), "project-1", "activity-1")
+
+	require.NoError(t, err)
+	assert.Len(t, repo.created, 2)
+	assert.Equal(t, "activity-1", repo.activityID)
+	assert.Equal(t, "https://remote.example/bob/inbox", repo.targetInboxURL)
+	assert.Equal(t, repo.created[1].ID, queue.deliveryID)
 }

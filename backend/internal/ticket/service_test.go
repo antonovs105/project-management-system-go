@@ -29,7 +29,7 @@ func TestService_CreateTicket(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		mockProject.On("GetProjectByID", ctx, projectID, reporterID).Return(&project.Project{ID: projectID}, nil).Once()
-		mockRepo.On("Create", ctx, mock.AnythingOfType("*ticket.Ticket")).Return(nil).Run(func(args mock.Arguments) {
+		mockRepo.On("Create", ctx, mock.AnythingOfType("*ticket.Ticket")).Return([]string{"activity-1"}, nil).Run(func(args mock.Arguments) {
 			ticket := args.Get(1).(*Ticket)
 			ticket.ID = "ticket-1"
 		}).Once()

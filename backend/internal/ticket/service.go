@@ -3,6 +3,7 @@ package ticket
 import (
 	"context"
 	"errors"
+	"log"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/antonovs105/project-management-system-go/internal/project"
@@ -17,6 +18,11 @@ type Service struct {
 	repo           Repository
 	projectService ProjectChecker
 	apConfig       activitypub.Config
+	delivery       DeliveryEnqueuer
+}
+
+type DeliveryEnqueuer interface {
+	EnqueueProjectFollowers(ctx context.Context, projectID string, activityIDs ...string) error
 }
 
 func NewService(repo Repository, projectService ProjectChecker, apConfig activitypub.Config) *Service {
@@ -25,6 +31,10 @@ func NewService(repo Repository, projectService ProjectChecker, apConfig activit
 		projectService: projectService,
 		apConfig:       apConfig,
 	}
+}
+
+func (s *Service) SetDelivery(delivery DeliveryEnqueuer) {
+	s.delivery = delivery
 }
 
 // CreateTicketRequest DTO for ticket creation
@@ -111,10 +121,11 @@ func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, pro
 		AssigneeID:  req.AssigneeID,
 	}
 
-	err = s.repo.Create(ctx, t)
+	activityIDs, err := s.repo.Create(ctx, t)
 	if err != nil {
 		return nil, err
 	}
+	s.enqueueProjectFollowers(ctx, projectID, activityIDs...)
 
 	return t, nil
 }
@@ -233,18 +244,28 @@ func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, tic
 		ticketToUpdate.AssigneeID = *req.AssigneeID
 	}
 
-	return s.repo.Update(ctx, ticketToUpdate)
+	activityIDs, err := s.repo.Update(ctx, ticketToUpdate)
+	if err != nil {
+		return err
+	}
+	s.enqueueProjectFollowers(ctx, ticketToUpdate.ProjectID, activityIDs...)
+	return nil
 }
 
 // DeleteTicket logic for deleting
 func (s *Service) DeleteTicket(ctx context.Context, ticketID, userID string) error {
 	// check access
-	_, err := s.GetTicketByID(ctx, ticketID, userID)
+	ticket, err := s.GetTicketByID(ctx, ticketID, userID)
 	if err != nil {
 		return err
 	}
 
-	return s.repo.Delete(ctx, ticketID)
+	activityIDs, err := s.repo.Delete(ctx, ticketID)
+	if err != nil {
+		return err
+	}
+	s.enqueueProjectFollowers(ctx, ticket.ProjectID, activityIDs...)
+	return nil
 }
 
 // AddTicketLink adds a link and checks for cycles
@@ -317,6 +338,15 @@ func hasPath(adj map[string][]string, start, end string) bool {
 		}
 	}
 	return false
+}
+
+func (s *Service) enqueueProjectFollowers(ctx context.Context, projectID string, activityIDs ...string) {
+	if s.delivery == nil || len(activityIDs) == 0 {
+		return
+	}
+	if err := s.delivery.EnqueueProjectFollowers(ctx, projectID, activityIDs...); err != nil {
+		log.Printf("failed to enqueue ActivityPub deliveries for project %s: %v", projectID, err)
+	}
 }
 
 // RemoveTicketLink removes a link

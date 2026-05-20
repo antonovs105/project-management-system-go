@@ -12,9 +12,12 @@ type MockRepository struct {
 	mock.Mock
 }
 
-func (m *MockRepository) Create(ctx context.Context, ticket *Ticket) error {
+func (m *MockRepository) Create(ctx context.Context, ticket *Ticket) ([]string, error) {
 	args := m.Called(ctx, ticket)
-	return args.Error(0)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]string), args.Error(1)
 }
 
 func (m *MockRepository) ListByProjectID(ctx context.Context, projectID string) ([]Ticket, error) {
@@ -33,14 +36,20 @@ func (m *MockRepository) GetByID(ctx context.Context, id string) (*Ticket, error
 	return args.Get(0).(*Ticket), args.Error(1)
 }
 
-func (m *MockRepository) Update(ctx context.Context, ticket *Ticket) error {
+func (m *MockRepository) Update(ctx context.Context, ticket *Ticket) ([]string, error) {
 	args := m.Called(ctx, ticket)
-	return args.Error(0)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]string), args.Error(1)
 }
 
-func (m *MockRepository) Delete(ctx context.Context, id string) error {
+func (m *MockRepository) Delete(ctx context.Context, id string) ([]string, error) {
 	args := m.Called(ctx, id)
-	return args.Error(0)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]string), args.Error(1)
 }
 
 func (m *MockRepository) CreateLink(ctx context.Context, link *TicketLink) error {

@@ -10,7 +10,7 @@ import (
 )
 
 type Repository interface {
-	Create(ctx context.Context, comment *Comment) error
+	Create(ctx context.Context, comment *Comment) (string, error)
 	ListByTicketID(ctx context.Context, ticketID string) ([]Comment, error)
 }
 
@@ -23,10 +23,10 @@ func NewRepository(db *sqlx.DB, cfg activitypub.Config) Repository {
 	return &PgRepository{db: db, cfg: cfg}
 }
 
-func (r *PgRepository) Create(ctx context.Context, comment *Comment) error {
+func (r *PgRepository) Create(ctx context.Context, comment *Comment) (string, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer tx.Rollback()
 
@@ -34,12 +34,12 @@ func (r *PgRepository) Create(ctx context.Context, comment *Comment) error {
 		INSERT INTO comments (id, ap_id, ticket_id, author_id, content)
 		VALUES (:id, :ap_id, :ticket_id, :author_id, :content)
 	`, comment); err != nil {
-		return err
+		return "", err
 	}
 	if err := tx.QueryRowxContext(ctx, `
 		SELECT created_at, updated_at FROM comments WHERE id = $1
 	`, comment.ID).Scan(&comment.CreatedAt, &comment.UpdatedAt); err != nil {
-		return err
+		return "", err
 	}
 
 	var ticket struct {
@@ -51,59 +51,62 @@ func (r *PgRepository) Create(ctx context.Context, comment *Comment) error {
 		FROM tickets
 		WHERE id = $1
 	`, comment.TicketID); err != nil {
-		return err
+		return "", err
 	}
 	authorAPID, err := lookupActorAPID(ctx, tx, comment.AuthorID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	projectAPID, err := lookupActorAPID(ctx, tx, ticket.ProjectID)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	noteDoc := activitypub.NoteDocument(comment.APID, ticket.APID, authorAPID, comment.Content, comment.CreatedAt)
 	noteRaw, err := json.Marshal(noteDoc)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO ap_objects (ap_id, object_type, actor_id, local_ref_table, local_ref_id, document)
 		VALUES ($1, 'Note', $2, 'comments', $3, $4)
 	`, comment.APID, comment.AuthorID, comment.ID, noteRaw); err != nil {
-		return err
+		return "", err
 	}
 
 	activityID, err := activitypub.NewID()
 	if err != nil {
-		return err
+		return "", err
 	}
 	activityAPID := activitypub.ActivityAPID(r.cfg, activityID)
 	activityDoc := activitypub.ActivityDocument("Create", activityAPID, authorAPID, noteDoc, projectAPID, time.Now().UTC())
 	activityRaw, err := json.Marshal(activityDoc)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO ap_activities (id, ap_id, activity_type, actor_id, object_ap_id, target_ap_id, document)
 		VALUES ($1, $2, 'Create', $3, $4, $5, $6)
 	`, activityID, activityAPID, comment.AuthorID, comment.APID, projectAPID, activityRaw); err != nil {
-		return err
+		return "", err
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO actor_outbox_items (actor_id, activity_id, activity_ap_id)
 		VALUES ($1, $2, $3)
 	`, comment.AuthorID, activityID, activityAPID); err != nil {
-		return err
+		return "", err
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO actor_inbox_items (actor_id, activity_id, activity_ap_id)
 		VALUES ($1, $2, $3)
 	`, ticket.ProjectID, activityID, activityAPID); err != nil {
-		return err
+		return "", err
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return activityID, nil
 }
 
 func (r *PgRepository) ListByTicketID(ctx context.Context, ticketID string) ([]Comment, error) {

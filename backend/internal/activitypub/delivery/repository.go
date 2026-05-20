@@ -16,11 +16,20 @@ type Repository interface {
 	MarkFailed(ctx context.Context, deliveryID string, message string, nextAttemptAt *time.Time) error
 }
 
+type RecipientRepository interface {
+	Repository
+	RemoteProjectFollowerInboxes(ctx context.Context, projectID string) ([]string, error)
+}
+
 type PgRepository struct {
 	db *sqlx.DB
 }
 
 func NewRepository(db *sqlx.DB) Repository {
+	return &PgRepository{db: db}
+}
+
+func NewRecipientRepository(db *sqlx.DB) RecipientRepository {
 	return &PgRepository{db: db}
 }
 
@@ -132,6 +141,21 @@ func (r *PgRepository) MarkFailed(ctx context.Context, deliveryID string, messag
 		WHERE id = $1
 	`, deliveryID, StateFailed, message, nextAttemptAt)
 	return err
+}
+
+func (r *PgRepository) RemoteProjectFollowerInboxes(ctx context.Context, projectID string) ([]string, error) {
+	var inboxes []string
+	err := r.db.SelectContext(ctx, &inboxes, `
+		SELECT DISTINCT follower.inbox_url
+		FROM actor_follows f
+		JOIN actors follower ON follower.id = f.follower_actor_id
+		WHERE f.followed_actor_id = $1
+			AND f.state = 'accepted'
+			AND follower.is_local = false
+			AND follower.inbox_url <> ''
+		ORDER BY follower.inbox_url ASC
+	`, projectID)
+	return inboxes, err
 }
 
 func loadByActivityTarget(ctx context.Context, q sqlx.QueryerContext, activityID string, targetInboxURL string) (*Delivery, error) {

@@ -46,6 +46,10 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	commentRepo := comment.NewRepository(db, cfg)
 	commentService := comment.NewService(commentRepo, ticketService, cfg)
 
+	deliveryService := delivery.NewService(delivery.NewRecipientRepository(db), delivery.NoopQueue{})
+	ticketService.SetDelivery(deliveryService)
+	commentService.SetDelivery(deliveryService)
+
 	owner, err := userService.RegisterUser(ctx, "owner", "owner@example.test", "password123")
 	require.NoError(t, err)
 	member, err := userService.RegisterUser(ctx, "member", "member@example.test", "password123")
@@ -69,6 +73,26 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	requireProjectRole(t, db, member.ID, project.ID, "developer")
 	requireFollow(t, db, member.ID, project.ID, "accepted")
 
+	remoteInbox := "https://remote.example/users/follower/inbox"
+	remoteFollower := &remoteactor.Actor{
+		APID:              "https://remote.example/users/follower",
+		Type:              "Person",
+		PreferredUsername: "follower",
+		Handle:            "follower@remote.example",
+		Name:              "Remote Follower",
+		InboxURL:          remoteInbox,
+		OutboxURL:         "https://remote.example/users/follower/outbox",
+		PublicKeyID:       "https://remote.example/users/follower#main-key",
+		PublicKeyPEM:      "public key",
+		Document:          []byte(`{"id":"https://remote.example/users/follower","type":"Person"}`),
+	}
+	require.NoError(t, remoteactor.NewRepository(db).UpsertRemoteActor(ctx, remoteFollower))
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO actor_follows (follower_actor_id, followed_actor_id, state)
+		VALUES ($1, $2, 'accepted')
+	`, remoteFollower.ID, project.ID)
+	require.NoError(t, err)
+
 	createdTicket, err := ticketService.CreateTicket(ctx, ticket.CreateTicketRequest{
 		Title:       "Design local outbox",
 		Description: "Persist local AP activities",
@@ -80,6 +104,7 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	requireActivityForObject(t, db, "Create", createdTicket.APID)
 	requireInboxItem(t, db, project.ID, "Create", createdTicket.APID)
 	requireOutboxItem(t, db, owner.ID, "Create", createdTicket.APID)
+	requireDeliveryForObject(t, db, "Create", createdTicket.APID, remoteInbox)
 
 	status := "done"
 	assigneeID := member.ID
@@ -89,6 +114,7 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 		AssigneeID: &assigneePatch,
 	}, createdTicket.ID, owner.ID))
 	requireActivityForObject(t, db, "Update", createdTicket.APID)
+	requireDeliveryForObject(t, db, "Update", createdTicket.APID, remoteInbox)
 	requireTicketResolved(t, db, createdTicket.ID)
 
 	createdComment, err := commentService.CreateComment(ctx, createdTicket.ID, member.ID, "This is ready.")
@@ -96,6 +122,7 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	requireObjectType(t, db, createdComment.APID, "Note")
 	requireActivityForObject(t, db, "Create", createdComment.APID)
 	requireOutboxItem(t, db, member.ID, "Create", createdComment.APID)
+	requireDeliveryForObject(t, db, "Create", createdComment.APID, remoteInbox)
 }
 
 func TestActivityPubFoundationConstraints(t *testing.T) {
@@ -401,6 +428,22 @@ func requireActivityForObject(t *testing.T, db *sqlx.DB, activityType, objectAPI
 		FROM ap_activities
 		WHERE activity_type = $1 AND object_ap_id = $2
 	`, activityType, objectAPID)
+	require.NoError(t, err)
+	require.Greater(t, count, 0)
+}
+
+func requireDeliveryForObject(t *testing.T, db *sqlx.DB, activityType, objectAPID, inboxURL string) {
+	t.Helper()
+
+	var count int
+	err := db.Get(&count, `
+		SELECT count(*)
+		FROM activity_deliveries delivery
+		JOIN ap_activities activity ON activity.id = delivery.activity_id
+		WHERE activity.activity_type = $1
+			AND activity.object_ap_id = $2
+			AND delivery.target_inbox_url = $3
+	`, activityType, objectAPID, inboxURL)
 	require.NoError(t, err)
 	require.Greater(t, count, 0)
 }
