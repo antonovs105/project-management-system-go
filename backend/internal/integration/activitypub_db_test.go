@@ -1897,12 +1897,26 @@ func openIntegrationDB(t *testing.T) *sqlx.DB {
 		t.Skip("set TEST_DB_SOURCE to run integration tests against a migrated PostgreSQL database")
 	}
 
-	db, err := sqlx.Connect("postgres", source)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		require.NoError(t, db.Close())
-	})
-	return db
+	return newSchemaIntegrationDB(t, context.Background(), source, integrationTestSchemaName(t.Name()))
+}
+
+func integrationTestSchemaName(name string) string {
+	var schema strings.Builder
+	schema.WriteString("test_")
+	for _, r := range strings.ToLower(name) {
+		switch {
+		case r >= 'a' && r <= 'z':
+			schema.WriteRune(r)
+		case r >= '0' && r <= '9':
+			schema.WriteRune(r)
+		default:
+			schema.WriteByte('_')
+		}
+		if schema.Len() >= 54 {
+			break
+		}
+	}
+	return strings.TrimRight(schema.String(), "_")
 }
 
 func resetIntegrationDB(t *testing.T, db *sqlx.DB) {
