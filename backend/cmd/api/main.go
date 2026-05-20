@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/httpsig"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteinbox"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
@@ -14,6 +15,7 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
 	"github.com/antonovs105/project-management-system-go/internal/user"
 	"github.com/antonovs105/project-management-system-go/internal/webfinger"
+	"github.com/hibiken/asynq"
 	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
@@ -30,6 +32,7 @@ type ApiServer struct {
 	commentHandler *comment.Handler
 	apHandler      *activitypub.Handler
 	inboxHandler   *remoteinbox.Handler
+	deliverySvc    *delivery.Service
 	wfHandler      *webfinger.Handler
 }
 
@@ -87,6 +90,29 @@ func main() {
 	inboxService := remoteinbox.NewService(inboxRepo, sigService)
 	inboxHandler := remoteinbox.NewHandler(inboxService, apConfig)
 
+	// ActivityPub delivery dependencies. The worker runs in-process for now; the slice can be
+	// moved to a separate worker container later without changing delivery internals.
+	deliveryRepo := delivery.NewRepository(db)
+	var deliveryQueue delivery.Queue = delivery.NoopQueue{}
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr != "" {
+		redisOpt := asynq.RedisClientOpt{Addr: redisAddr}
+		deliveryQueue = delivery.NewAsynqQueue(redisOpt)
+		defer deliveryQueue.Close()
+
+		deliveryWorker := delivery.NewWorker(deliveryRepo, sigService, nil)
+		deliveryServer := delivery.NewAsynqServer(redisOpt)
+		if err := deliveryServer.Start(delivery.NewServeMux(deliveryWorker)); err != nil {
+			log.Fatalf("Can't start ActivityPub delivery worker: %v", err)
+		}
+		defer deliveryServer.Shutdown()
+
+		log.Printf("ActivityPub delivery worker started with Redis at %s", redisAddr)
+	} else {
+		log.Println("REDIS_ADDR is not set; ActivityPub delivery worker disabled")
+	}
+	deliveryService := delivery.NewService(deliveryRepo, deliveryQueue)
+
 	// WebFinger discovery dependencies
 	wfRepo := webfinger.NewRepository(db)
 	wfService := webfinger.NewService(wfRepo, apConfig)
@@ -101,6 +127,7 @@ func main() {
 		commentHandler: commentHandler,
 		apHandler:      apHandler,
 		inboxHandler:   inboxHandler,
+		deliverySvc:    deliveryService,
 		wfHandler:      wfHandler,
 	}
 

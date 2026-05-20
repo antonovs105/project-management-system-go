@@ -27,6 +27,18 @@ services:
       db:
         condition: service_healthy
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: ./backend
@@ -38,9 +50,12 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-your_secret_key_here}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       LOCAL_DOMAIN: ${LOCAL_DOMAIN:-localhost:8080}
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
     depends_on:
       migrations:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
 
   frontend:
     build:
@@ -55,3 +70,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:

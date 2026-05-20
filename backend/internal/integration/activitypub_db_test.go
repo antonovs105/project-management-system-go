@@ -10,8 +10,10 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/httpsig"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteactor"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteinbox"
@@ -119,6 +121,7 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 			"actor_keys",
 			"ap_objects",
 			"ap_activities",
+			"activity_deliveries",
 			"actor_inbox_items",
 			"actor_outbox_items",
 			"project_members",
@@ -243,6 +246,43 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 
 		requireInboxItem(t, db, project.ID, "Create", objectAPID)
 	})
+
+	t.Run("outbox delivery ledger tracks attempts", func(t *testing.T) {
+		var activityID string
+		require.NoError(t, db.GetContext(ctx, &activityID, `
+			SELECT id::text
+			FROM ap_activities
+			WHERE activity_type = 'Create' AND object_ap_id = $1
+			LIMIT 1
+		`, project.APID))
+
+		repo := delivery.NewRepository(db)
+		created, isNew, err := repo.Create(ctx, activityID, "https://remote.example/users/bot/inbox", 3)
+		require.NoError(t, err)
+		assert.True(t, isNew)
+		assert.Equal(t, delivery.StatePending, created.State)
+
+		duplicate, isNew, err := repo.Create(ctx, activityID, "https://remote.example/users/bot/inbox", 3)
+		require.NoError(t, err)
+		assert.False(t, isNew)
+		assert.Equal(t, created.ID, duplicate.ID)
+
+		started, err := repo.StartAttempt(ctx, created.ID)
+		require.NoError(t, err)
+		assert.Equal(t, delivery.StateProcessing, started.State)
+		assert.Equal(t, 1, started.Attempts)
+
+		nextAttempt := time.Now().UTC().Add(time.Minute)
+		require.NoError(t, repo.MarkFailed(ctx, created.ID, "remote 503", &nextAttempt))
+
+		retried, err := repo.StartAttempt(ctx, created.ID)
+		require.NoError(t, err)
+		assert.Equal(t, 2, retried.Attempts)
+
+		require.NoError(t, repo.MarkDelivered(ctx, created.ID))
+		_, err = repo.StartAttempt(ctx, created.ID)
+		require.ErrorIs(t, err, delivery.ErrDeliveryDone)
+	})
 }
 
 type singleKeyRepo struct {
@@ -281,6 +321,7 @@ func resetIntegrationDB(t *testing.T, db *sqlx.DB) {
 			actor_outbox_items,
 			actor_inbox_items,
 			project_invites,
+			activity_deliveries,
 			ap_activities,
 			ap_objects,
 			comments,
