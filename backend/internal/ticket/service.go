@@ -100,7 +100,6 @@ func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, pro
 		}
 	}
 
-	// TODO: check is AssigneeID a project member
 	if req.Priority == "" {
 		req.Priority = "medium"
 	}
@@ -247,7 +246,7 @@ func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, tic
 		ticketToUpdate.AssigneeID = *req.AssigneeID
 	}
 
-	activityIDs, err := s.repo.Update(ctx, ticketToUpdate)
+	activityIDs, err := s.repo.Update(ctx, ticketToUpdate, userID)
 	if err != nil {
 		return err
 	}

@@ -36,8 +36,8 @@ func (m *MockRepository) GetByID(ctx context.Context, id string) (*Ticket, error
 	return args.Get(0).(*Ticket), args.Error(1)
 }
 
-func (m *MockRepository) Update(ctx context.Context, ticket *Ticket) ([]string, error) {
-	args := m.Called(ctx, ticket)
+func (m *MockRepository) Update(ctx context.Context, ticket *Ticket, actorID string) ([]string, error) {
+	args := m.Called(ctx, ticket, actorID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

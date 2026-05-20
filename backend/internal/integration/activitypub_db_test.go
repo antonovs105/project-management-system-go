@@ -113,10 +113,15 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	require.NoError(t, ticketService.UpdateTicket(ctx, ticket.UpdateTicketRequest{
 		Status:     &status,
 		AssigneeID: &assigneePatch,
-	}, createdTicket.ID, owner.ID))
+	}, createdTicket.ID, member.ID))
 	requireActivityForObject(t, db, "Update", createdTicket.APID)
+	requireActivityForObjectAndActor(t, db, "Update", createdTicket.APID, member.ID)
+	requireActivityForObjectAndTarget(t, db, "Add", member.APID, createdTicket.APID)
+	requireActivityForObjectAndActor(t, db, "Add", member.APID, member.ID)
+	requireOutboxItem(t, db, member.ID, "Update", createdTicket.APID)
 	requireDeliveryForObject(t, db, "Update", createdTicket.APID, remoteInbox)
 	requireTicketResolved(t, db, createdTicket.ID)
+	requireTicketResolvedBy(t, db, createdTicket.ID, member.ID)
 
 	createdComment, err := commentService.CreateComment(ctx, createdTicket.ID, member.ID, "This is ready.")
 	require.NoError(t, err)
@@ -161,6 +166,28 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 
 	outsider, err := userService.RegisterUser(ctx, "outsider", "outsider@example.test", "password123")
 	require.NoError(t, err)
+	_, err = ticketService.CreateTicket(ctx, ticket.CreateTicketRequest{
+		Title:       "Invalid assignee",
+		Description: "Should not assign a non-participant",
+		Priority:    "medium",
+		Type:        "task",
+		AssigneeID:  &outsider.ID,
+	}, project.ID, owner.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "assignee must be a project participant")
+
+	assignmentTarget, err := ticketService.CreateTicket(ctx, ticket.CreateTicketRequest{
+		Title:       "Assignment guard target",
+		Description: "Used for update permission validation",
+		Priority:    "medium",
+		Type:        "task",
+	}, project.ID, owner.ID)
+	require.NoError(t, err)
+	outsiderPatch := &outsider.ID
+	err = ticketService.UpdateTicket(ctx, ticket.UpdateTicketRequest{AssigneeID: &outsiderPatch}, assignmentTarget.ID, owner.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "assignee must be a project participant")
+
 	_, err = deliveryService.ListProjectDeliveries(ctx, project.ID, outsider.ID)
 	require.ErrorIs(t, err, delivery.ErrProjectAccessDenied)
 }
@@ -1491,6 +1518,21 @@ func requireActivityForObject(t *testing.T, db *sqlx.DB, activityType, objectAPI
 	require.Greater(t, count, 0)
 }
 
+func requireActivityForObjectAndActor(t *testing.T, db *sqlx.DB, activityType, objectAPID, actorID string) {
+	t.Helper()
+
+	var count int
+	err := db.Get(&count, `
+		SELECT count(*)
+		FROM ap_activities
+		WHERE activity_type = $1
+			AND object_ap_id = $2
+			AND actor_id = $3
+	`, activityType, objectAPID, actorID)
+	require.NoError(t, err)
+	require.Greater(t, count, 0)
+}
+
 func requireActivityForObjectAndTarget(t *testing.T, db *sqlx.DB, activityType, objectAPID, targetAPID string) {
 	t.Helper()
 
@@ -1619,6 +1661,15 @@ func requireTicketResolved(t *testing.T, db *sqlx.DB, ticketID string) {
 	require.NoError(t, err)
 	require.True(t, resolved.Valid)
 	require.True(t, resolved.Bool)
+}
+
+func requireTicketResolvedBy(t *testing.T, db *sqlx.DB, ticketID, actorID string) {
+	t.Helper()
+
+	var resolvedBy string
+	err := db.Get(&resolvedBy, `SELECT resolved_by_actor_id::text FROM tickets WHERE id = $1`, ticketID)
+	require.NoError(t, err)
+	require.Equal(t, actorID, resolvedBy)
 }
 
 func requireTicketAssignee(t *testing.T, db *sqlx.DB, ticketAPID, assigneeID string) {

@@ -2,6 +2,7 @@ package ticket
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"time"
@@ -14,7 +15,7 @@ type Repository interface {
 	Create(ctx context.Context, ticket *Ticket) ([]string, error)
 	ListByProjectID(ctx context.Context, projectID string) ([]Ticket, error)
 	GetByID(ctx context.Context, id string) (*Ticket, error)
-	Update(ctx context.Context, ticket *Ticket) ([]string, error)
+	Update(ctx context.Context, ticket *Ticket, actorID string) ([]string, error)
 	Delete(ctx context.Context, id string, actorID string) (*DeleteResult, error)
 	CreateLink(ctx context.Context, link *TicketLink) error
 	DeleteLink(ctx context.Context, linkID string) error
@@ -59,6 +60,9 @@ func (r *PgRepository) Create(ctx context.Context, ticket *Ticket) ([]string, er
 	}
 
 	if ticket.AssigneeID != nil {
+		if err := ensureProjectParticipant(ctx, tx, ticket.ProjectID, *ticket.AssigneeID); err != nil {
+			return nil, err
+		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO ticket_assignees (ticket_id, actor_id)
 			VALUES ($1, $2)
@@ -101,35 +105,70 @@ func (r *PgRepository) GetByID(ctx context.Context, id string) (*Ticket, error) 
 	return &t, err
 }
 
-func (r *PgRepository) Update(ctx context.Context, ticket *Ticket) ([]string, error) {
+func (r *PgRepository) Update(ctx context.Context, ticket *Ticket, actorID string) ([]string, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
+	var wasResolved bool
+	if err := tx.GetContext(ctx, &wasResolved, `
+		SELECT is_resolved
+		FROM tickets
+		WHERE id = $1
+		FOR UPDATE
+	`, ticket.ID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("ticket to update not found")
+		}
+		return nil, err
+	}
+
+	existingAssigneeIDs, err := lookupAssigneeActorIDs(ctx, tx, ticket.ID)
+	if err != nil {
+		return nil, err
+	}
+	if ticket.AssigneeID != nil {
+		if err := ensureProjectParticipant(ctx, tx, ticket.ProjectID, *ticket.AssigneeID); err != nil {
+			return nil, err
+		}
+	}
+
 	ticket.IsResolved = ticket.Status == "done"
-	result, err := tx.NamedExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, `
 		UPDATE tickets
 		SET
-			title = :title,
-			description = :description,
-			status = :status,
-			priority = :priority,
-			type = :type,
-			parent_id = :parent_id,
-			is_resolved = :is_resolved,
+			title = $2,
+			description = $3,
+			status = $4,
+			priority = $5,
+			type = $6,
+			parent_id = $7,
+			is_resolved = $8,
 			resolved_at = CASE
-				WHEN :is_resolved AND resolved_at IS NULL THEN now()
-				WHEN NOT :is_resolved THEN NULL
+				WHEN $8 AND resolved_at IS NULL THEN now()
+				WHEN NOT $8 THEN NULL
 				ELSE resolved_at
 			END,
 			resolved_by_actor_id = CASE
-				WHEN :is_resolved THEN CAST(:reporter_id AS uuid)
+				WHEN $8 AND NOT $9 THEN CAST($10 AS uuid)
+				WHEN $8 THEN resolved_by_actor_id
 				ELSE NULL
 			END
-		WHERE id = :id
-	`, ticket)
+		WHERE id = $1
+	`,
+		ticket.ID,
+		ticket.Title,
+		ticket.Description,
+		ticket.Status,
+		ticket.Priority,
+		ticket.Type,
+		ticket.ParentID,
+		ticket.IsResolved,
+		wasResolved,
+		actorID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -157,17 +196,17 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket) ([]string, er
 		return nil, err
 	}
 	activityIDs := make([]string, 0, 2)
-	updateActivityID, err := r.writeTicketActivity(ctx, tx, "Update", ticket, ticket.ReporterID, ticket.APID, nil)
+	updateActivityID, err := r.writeTicketActivity(ctx, tx, "Update", ticket, actorID, ticket.APID, nil)
 	if err != nil {
 		return nil, err
 	}
 	activityIDs = append(activityIDs, updateActivityID)
-	if ticket.AssigneeID != nil {
+	if ticket.AssigneeID != nil && !containsString(existingAssigneeIDs, *ticket.AssigneeID) {
 		assigneeAPID, err := lookupActorAPID(ctx, tx, *ticket.AssigneeID)
 		if err != nil {
 			return nil, err
 		}
-		addActivityID, err := r.writeTicketActivity(ctx, tx, "Add", ticket, ticket.ReporterID, assigneeAPID, ticket.APID)
+		addActivityID, err := r.writeTicketActivity(ctx, tx, "Add", ticket, actorID, assigneeAPID, ticket.APID)
 		if err != nil {
 			return nil, err
 		}
@@ -428,6 +467,49 @@ func lookupAssigneeAPIDs(ctx context.Context, q sqlx.QueryerContext, ticketID st
 		ORDER BY ta.created_at ASC
 	`, ticketID)
 	return apIDs, err
+}
+
+func lookupAssigneeActorIDs(ctx context.Context, q sqlx.QueryerContext, ticketID string) ([]string, error) {
+	var actorIDs []string
+	err := sqlx.SelectContext(ctx, q, &actorIDs, `
+		SELECT actor_id::text
+		FROM ticket_assignees
+		WHERE ticket_id = $1
+		ORDER BY created_at ASC, actor_id ASC
+	`, ticketID)
+	return actorIDs, err
+}
+
+func ensureProjectParticipant(ctx context.Context, q sqlx.QueryerContext, projectID string, actorID string) error {
+	var participant bool
+	if err := sqlx.GetContext(ctx, q, &participant, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM project_members
+			WHERE user_id = $1 AND project_id = $2
+		) OR EXISTS(
+			SELECT 1
+			FROM actor_follows
+			WHERE follower_actor_id = $1
+				AND followed_actor_id = $2
+				AND state = 'accepted'
+		)
+	`, actorID, projectID); err != nil {
+		return err
+	}
+	if !participant {
+		return errors.New("assignee must be a project participant")
+	}
+	return nil
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func tombstoneObject(ctx context.Context, q sqlx.ExecerContext, apID string, formerType string) error {

@@ -93,6 +93,42 @@ func TestService_GetTicketByID(t *testing.T) {
 	})
 }
 
+func TestService_UpdateTicketUsesActingUser(t *testing.T) {
+	mockRepo := new(MockRepository)
+	mockProject := new(MockProjectChecker)
+	service := NewService(mockRepo, mockProject, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+
+	ctx := context.Background()
+	projectID := "project-1"
+	ticketID := "ticket-1"
+	reporterID := "reporter-1"
+	actorID := "member-1"
+	status := "done"
+
+	storedTicket := &Ticket{
+		ID:          ticketID,
+		ProjectID:   projectID,
+		ReporterID:  reporterID,
+		Title:       "Ticket",
+		Description: "Description",
+		Status:      "open",
+		Priority:    "medium",
+		Type:        "task",
+	}
+
+	mockRepo.On("GetByID", ctx, ticketID).Return(storedTicket, nil).Once()
+	mockProject.On("GetProjectByID", ctx, projectID, actorID).Return(&project.Project{ID: projectID}, nil).Once()
+	mockRepo.On("Update", ctx, mock.MatchedBy(func(t *Ticket) bool {
+		return t.ID == ticketID && t.Status == status && t.ReporterID == reporterID
+	}), actorID).Return([]string{"activity-1"}, nil).Once()
+
+	err := service.UpdateTicket(ctx, UpdateTicketRequest{Status: &status}, ticketID, actorID)
+
+	assert.NoError(t, err)
+	mockRepo.AssertExpectations(t)
+	mockProject.AssertExpectations(t)
+}
+
 func TestService_AddTicketLink(t *testing.T) {
 	mockRepo := new(MockRepository)
 	mockProject := new(MockProjectChecker)
