@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -38,6 +39,18 @@ type ApiServer struct {
 	deliveryHandler *delivery.Handler
 	deliverySvc     *delivery.Service
 	wfHandler       *webfinger.Handler
+}
+
+type signatureActorVerifier struct {
+	service *httpsig.Service
+}
+
+func (v signatureActorVerifier) VerifyActorID(ctx context.Context, req *http.Request) (string, error) {
+	verified, err := v.service.VerifyRequest(ctx, req, nil)
+	if err != nil {
+		return "", err
+	}
+	return verified.ActorID, nil
 }
 
 func main() {
@@ -85,7 +98,6 @@ func main() {
 	commentHandler := comment.NewHandler(commentService)
 
 	// ActivityPub JSON-LD read dependencies
-	apHandler := activitypub.NewHandler(db, apConfig)
 	c2sHandler := c2s.NewHandler(db, apConfig, ticketService, commentService)
 
 	// Remote ActivityPub signing/discovery dependencies
@@ -96,6 +108,11 @@ func main() {
 		sigRepo,
 		httpsig.WithMissingKeyResolver(remoteActorService.ResolveKey),
 		httpsig.WithKeyRefreshResolver(remoteActorService.RefreshKey),
+	)
+	apHandler := activitypub.NewHandlerWithAuthorizer(
+		db,
+		apConfig,
+		activitypub.NewAccessAuthorizer(db, []byte(jwtSecret), signatureActorVerifier{service: sigService}),
 	)
 
 	// ActivityPub delivery dependencies. The worker runs in-process for now; the slice can be

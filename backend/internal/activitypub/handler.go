@@ -1,8 +1,10 @@
 package activitypub
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -19,8 +21,14 @@ const (
 )
 
 type Handler struct {
-	db  *sqlx.DB
-	cfg Config
+	db         *sqlx.DB
+	cfg        Config
+	authorizer Authorizer
+}
+
+type Authorizer interface {
+	AuthorizeActor(ctx context.Context, req *http.Request, actorID string) error
+	AuthorizeProject(ctx context.Context, req *http.Request, projectID string) error
 }
 
 type collectionPageRequest struct {
@@ -31,6 +39,10 @@ type collectionPageRequest struct {
 
 func NewHandler(db *sqlx.DB, cfg Config) *Handler {
 	return &Handler{db: db, cfg: cfg}
+}
+
+func NewHandlerWithAuthorizer(db *sqlx.DB, cfg Config, authorizer Authorizer) *Handler {
+	return &Handler{db: db, cfg: cfg, authorizer: authorizer}
 }
 
 func (h *Handler) RegisterRoutes(e *echo.Echo) {
@@ -70,18 +82,68 @@ func (h *Handler) GetComment(c echo.Context) error {
 
 func (h *Handler) GetActivity(c echo.Context) error {
 	apID := ActivityAPID(h.cfg, c.Param("id"))
-	var raw json.RawMessage
-	if err := h.db.GetContext(c.Request().Context(), &raw, `
-		SELECT document
-		FROM ap_activities
-		WHERE ap_id = $1
+	var activity struct {
+		Document  json.RawMessage `db:"document"`
+		ProjectID sql.NullString  `db:"project_id"`
+	}
+	if err := h.db.GetContext(c.Request().Context(), &activity, `
+		SELECT
+			activity.document,
+			COALESCE(
+				target_project_actor.id::text,
+				object_project_actor.id::text,
+				activity_project_actor.id::text,
+				object_ticket.project_id::text,
+				target_ticket.project_id::text,
+				object_comment_ticket.project_id::text,
+				target_comment_ticket.project_id::text,
+				object_invite.project_id::text,
+				target_invite.project_id::text
+			) AS project_id
+		FROM ap_activities activity
+		LEFT JOIN actors target_project_actor
+			ON target_project_actor.ap_id = activity.target_ap_id
+			AND target_project_actor.type = 'Group'
+			AND target_project_actor.is_local = true
+		LEFT JOIN actors object_project_actor
+			ON object_project_actor.ap_id = activity.object_ap_id
+			AND object_project_actor.type = 'Group'
+			AND object_project_actor.is_local = true
+		LEFT JOIN actors activity_project_actor
+			ON activity_project_actor.id = activity.actor_id
+			AND activity_project_actor.type = 'Group'
+			AND activity_project_actor.is_local = true
+		LEFT JOIN ap_objects object_scope ON object_scope.ap_id = activity.object_ap_id
+		LEFT JOIN tickets object_ticket
+			ON object_scope.local_ref_table = 'tickets'
+			AND object_ticket.id = object_scope.local_ref_id
+		LEFT JOIN comments object_comment
+			ON object_scope.local_ref_table = 'comments'
+			AND object_comment.id = object_scope.local_ref_id
+		LEFT JOIN tickets object_comment_ticket ON object_comment_ticket.id = object_comment.ticket_id
+		LEFT JOIN ap_objects target_scope ON target_scope.ap_id = activity.target_ap_id
+		LEFT JOIN tickets target_ticket
+			ON target_scope.local_ref_table = 'tickets'
+			AND target_ticket.id = target_scope.local_ref_id
+		LEFT JOIN comments target_comment
+			ON target_scope.local_ref_table = 'comments'
+			AND target_comment.id = target_scope.local_ref_id
+		LEFT JOIN tickets target_comment_ticket ON target_comment_ticket.id = target_comment.ticket_id
+		LEFT JOIN project_invites object_invite ON object_invite.ap_id = activity.object_ap_id
+		LEFT JOIN project_invites target_invite ON target_invite.ap_id = activity.target_ap_id
+		WHERE activity.ap_id = $1
 	`, apID); err != nil {
 		if err == sql.ErrNoRows {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "activity not found"})
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load activity"})
 	}
-	return c.Blob(http.StatusOK, ActivityJSONMediaType, raw)
+	if activity.ProjectID.Valid {
+		if err := h.requireProjectAccess(c, activity.ProjectID.String); err != nil {
+			return err
+		}
+	}
+	return c.Blob(http.StatusOK, ActivityJSONMediaType, activity.Document)
 }
 
 func (h *Handler) UserInbox(c echo.Context) error {
@@ -113,9 +175,13 @@ func (h *Handler) ProjectTickets(c echo.Context) error {
 }
 
 func (h *Handler) writeObject(c echo.Context, apID string) error {
-	var raw json.RawMessage
-	if err := h.db.GetContext(c.Request().Context(), &raw, `
-		SELECT document
+	var object struct {
+		Document      json.RawMessage `db:"document"`
+		LocalRefTable sql.NullString  `db:"local_ref_table"`
+		LocalRefID    sql.NullString  `db:"local_ref_id"`
+	}
+	if err := h.db.GetContext(c.Request().Context(), &object, `
+		SELECT document, local_ref_table, local_ref_id::text AS local_ref_id
 		FROM ap_objects
 		WHERE ap_id = $1
 	`, apID); err != nil {
@@ -124,7 +190,10 @@ func (h *Handler) writeObject(c echo.Context, apID string) error {
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load object"})
 	}
-	return c.Blob(http.StatusOK, ActivityJSONMediaType, raw)
+	if err := h.authorizeObject(c, object.LocalRefTable, object.LocalRefID); err != nil {
+		return err
+	}
+	return c.Blob(http.StatusOK, ActivityJSONMediaType, object.Document)
 }
 
 func (h *Handler) actorActivityCollection(c echo.Context, actorAPID, box string) error {
@@ -133,11 +202,18 @@ func (h *Handler) actorActivityCollection(c echo.Context, actorAPID, box string)
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
-	var actorID string
-	if err := h.db.GetContext(c.Request().Context(), &actorID, `
-		SELECT id::text FROM actors WHERE ap_id = $1
+	var actor struct {
+		ID      string `db:"id"`
+		Type    string `db:"type"`
+		IsLocal bool   `db:"is_local"`
+	}
+	if err := h.db.GetContext(c.Request().Context(), &actor, `
+		SELECT id::text, type, is_local FROM actors WHERE ap_id = $1
 	`, actorAPID); err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "actor not found"})
+	}
+	if err := h.authorizeActorCollection(c, actor.ID, actor.Type, actor.IsLocal); err != nil {
+		return err
 	}
 
 	table := "actor_inbox_items"
@@ -154,7 +230,7 @@ func (h *Handler) actorActivityCollection(c echo.Context, actorAPID, box string)
 		SELECT count(*)
 		FROM `+table+`
 		WHERE actor_id = $1
-	`, actorID); err != nil {
+	`, actor.ID); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load collection"})
 	}
 	if !page.Page {
@@ -174,7 +250,7 @@ func (h *Handler) actorActivityCollection(c echo.Context, actorAPID, box string)
 		LIMIT $2 OFFSET $3
 	`
 	var raws []json.RawMessage
-	if err := h.db.SelectContext(c.Request().Context(), &raws, query, actorID, page.Limit, page.Offset); err != nil {
+	if err := h.db.SelectContext(c.Request().Context(), &raws, query, actor.ID, page.Limit, page.Offset); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load collection"})
 	}
 	items, err := decodeRawItems(raws)
@@ -199,11 +275,18 @@ func (h *Handler) followersCollection(c echo.Context, actorAPID string) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
-	var actorID string
-	if err := h.db.GetContext(c.Request().Context(), &actorID, `
-		SELECT id::text FROM actors WHERE ap_id = $1
+	var actor struct {
+		ID      string `db:"id"`
+		Type    string `db:"type"`
+		IsLocal bool   `db:"is_local"`
+	}
+	if err := h.db.GetContext(c.Request().Context(), &actor, `
+		SELECT id::text, type, is_local FROM actors WHERE ap_id = $1
 	`, actorAPID); err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "actor not found"})
+	}
+	if err := h.authorizeActorCollection(c, actor.ID, actor.Type, actor.IsLocal); err != nil {
+		return err
 	}
 
 	collectionID := Followers(actorAPID)
@@ -212,7 +295,7 @@ func (h *Handler) followersCollection(c echo.Context, actorAPID string) error {
 		SELECT count(*)
 		FROM actor_follows f
 		WHERE f.followed_actor_id = $1 AND f.state = 'accepted'
-	`, actorID); err != nil {
+	`, actor.ID); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load followers"})
 	}
 	if !page.Page {
@@ -231,7 +314,7 @@ func (h *Handler) followersCollection(c echo.Context, actorAPID string) error {
 		WHERE f.followed_actor_id = $1 AND f.state = 'accepted'
 		ORDER BY f.created_at ASC, follower.ap_id ASC
 		LIMIT $2 OFFSET $3
-	`, actorID, page.Limit, page.Offset); err != nil {
+	`, actor.ID, page.Limit, page.Offset); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load followers"})
 	}
 	next, prev := collectionPageLinks(collectionID, totalItems, page.Limit, page.Offset)
@@ -262,6 +345,9 @@ func (h *Handler) projectTicketsCollection(c echo.Context, projectAPID string) e
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "project not found"})
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load project"})
+	}
+	if err := h.requireProjectAccess(c, projectID); err != nil {
+		return err
 	}
 
 	collectionID := ProjectTickets(projectAPID)
@@ -301,6 +387,88 @@ func (h *Handler) projectTicketsCollection(c echo.Context, projectAPID string) e
 		next,
 		prev,
 	))
+}
+
+func (h *Handler) authorizeObject(c echo.Context, localRefTable, localRefID sql.NullString) error {
+	if h.authorizer == nil || !localRefTable.Valid || !localRefID.Valid {
+		return nil
+	}
+
+	var projectID string
+	switch localRefTable.String {
+	case "tickets":
+		if err := h.db.GetContext(c.Request().Context(), &projectID, `
+			SELECT project_id::text
+			FROM tickets
+			WHERE id = $1
+		`, localRefID.String); err != nil {
+			return h.objectScopeError(c, err)
+		}
+	case "comments":
+		if err := h.db.GetContext(c.Request().Context(), &projectID, `
+			SELECT ticket.project_id::text
+			FROM comments comment
+			JOIN tickets ticket ON ticket.id = comment.ticket_id
+			WHERE comment.id = $1
+		`, localRefID.String); err != nil {
+			return h.objectScopeError(c, err)
+		}
+	default:
+		return nil
+	}
+
+	return h.requireProjectAccess(c, projectID)
+}
+
+func (h *Handler) objectScopeError(c echo.Context, err error) error {
+	if errors.Is(err, sql.ErrNoRows) {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "object not found"})
+	}
+	return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load object scope"})
+}
+
+func (h *Handler) authorizeActorCollection(c echo.Context, actorID, actorType string, isLocal bool) error {
+	if h.authorizer == nil {
+		return nil
+	}
+	if actorType == "Group" && isLocal {
+		return h.requireProjectAccess(c, actorID)
+	}
+	if isLocal {
+		return h.requireActorAccess(c, actorID)
+	}
+	return nil
+}
+
+func (h *Handler) requireActorAccess(c echo.Context, actorID string) error {
+	if h.authorizer == nil {
+		return nil
+	}
+	if err := h.authorizer.AuthorizeActor(c.Request().Context(), c.Request(), actorID); err != nil {
+		return h.authorizationError(c, err)
+	}
+	return nil
+}
+
+func (h *Handler) requireProjectAccess(c echo.Context, projectID string) error {
+	if h.authorizer == nil {
+		return nil
+	}
+	if err := h.authorizer.AuthorizeProject(c.Request().Context(), c.Request(), projectID); err != nil {
+		return h.authorizationError(c, err)
+	}
+	return nil
+}
+
+func (h *Handler) authorizationError(c echo.Context, err error) error {
+	switch {
+	case errors.Is(err, ErrMissingAuthorization), errors.Is(err, ErrInvalidAuthorization):
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": err.Error()})
+	case errors.Is(err, ErrAccessDenied):
+		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+	default:
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to authorize activitypub request"})
+	}
 }
 
 func parseCollectionPageRequest(c echo.Context) (collectionPageRequest, error) {
