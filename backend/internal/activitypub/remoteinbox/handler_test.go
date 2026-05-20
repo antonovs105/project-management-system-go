@@ -208,6 +208,16 @@ func TestHandlerMapsInboxErrorsToStableResponses(t *testing.T) {
 			wantBody:   `{"error":"activity actor does not match signature actor"}`,
 		},
 		{
+			name: "blocked domain",
+			service: NewService(&memoryRepository{targetActorID: "target-actor"}, fakeVerifier{verified: &httpsig.VerifiedRequest{
+				ActorID:   "remote-actor",
+				ActorAPID: "https://blocked.example/users/alice",
+			}}, WithBlockedDomains([]string{"blocked.example"})),
+			body:       `{"id":"https://blocked.example/activities/1","type":"Follow","actor":"https://blocked.example/users/alice"}`,
+			wantStatus: http.StatusForbidden,
+			wantBody:   `{"error":"inbox activity actor domain is blocked"}`,
+		},
+		{
 			name: "invalid activity",
 			service: NewService(&memoryRepository{targetActorID: "target-actor"}, fakeVerifier{verified: &httpsig.VerifiedRequest{
 				ActorID:   "remote-actor",

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -22,10 +23,11 @@ type Verifier interface {
 }
 
 type Service struct {
-	repo         Repository
-	verifier     Verifier
-	delivery     DeliveryEnqueuer
-	maxBodyBytes int64
+	repo           Repository
+	verifier       Verifier
+	delivery       DeliveryEnqueuer
+	maxBodyBytes   int64
+	blockedDomains map[string]struct{}
 }
 
 type DeliveryEnqueuer interface {
@@ -61,8 +63,43 @@ func WithDelivery(delivery DeliveryEnqueuer) Option {
 	}
 }
 
+func WithBlockedDomains(domains []string) Option {
+	return func(s *Service) {
+		for _, domain := range domains {
+			normalized := normalizeBlockedDomain(domain)
+			if normalized == "" {
+				continue
+			}
+			if s.blockedDomains == nil {
+				s.blockedDomains = make(map[string]struct{})
+			}
+			s.blockedDomains[normalized] = struct{}{}
+		}
+	}
+}
+
 func (s *Service) MaxBodyBytes() int64 {
 	return s.maxBodyBytes
+}
+
+func (s *Service) isActorDomainBlocked(actorAPID string) bool {
+	if len(s.blockedDomains) == 0 {
+		return false
+	}
+	domain, err := domainFromAPID(actorAPID)
+	if err != nil {
+		return false
+	}
+	for {
+		if _, blocked := s.blockedDomains[domain]; blocked {
+			return true
+		}
+		dot := strings.IndexByte(domain, '.')
+		if dot < 0 {
+			return false
+		}
+		domain = domain[dot+1:]
+	}
 }
 
 func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID string, body []byte) (*AcceptedActivity, error) {
@@ -74,14 +111,17 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 		return nil, err
 	}
 
-	verified, err := s.verifier.VerifyRequest(ctx, req, body)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnauthorized, err)
-	}
-
 	activity, err := parseActivity(body)
 	if err != nil {
 		return nil, err
+	}
+	if s.isActorDomainBlocked(activity.ActorAPID) {
+		return nil, ErrBlockedDomain
+	}
+
+	verified, err := s.verifier.VerifyRequest(ctx, req, body)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrUnauthorized, err)
 	}
 	activity.ActorID = verified.ActorID
 
@@ -720,6 +760,32 @@ func optionalBoolValue(raw map[string]any, key string) (bool, bool, bool) {
 func isAbsoluteURI(value string) bool {
 	parsed, err := url.Parse(value)
 	return err == nil && parsed.Scheme != "" && parsed.Host != ""
+}
+
+func domainFromAPID(value string) (string, error) {
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Hostname() == "" {
+		return "", ErrInvalidActivity
+	}
+	return normalizeBlockedDomain(parsed.Hostname()), nil
+}
+
+func normalizeBlockedDomain(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return ""
+	}
+	if parsed, err := url.Parse(value); err == nil && parsed.Hostname() != "" {
+		value = parsed.Hostname()
+	}
+	if host, _, err := net.SplitHostPort(value); err == nil {
+		value = host
+	}
+	value = strings.Trim(strings.ToLower(strings.TrimSpace(value)), "[]")
+	if value == "" || strings.ContainsAny(value, " \t\r\n/") {
+		return ""
+	}
+	return value
 }
 
 func isActivityMediaType(value string) bool {

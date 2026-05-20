@@ -53,6 +53,8 @@ func (h *Handler) receive(c echo.Context, targetAPID string) error {
 			return c.JSON(http.StatusUnauthorized, errorResponse(ErrUnauthorized))
 		case errors.Is(err, ErrForbiddenActor):
 			return c.JSON(http.StatusForbidden, errorResponse(ErrForbiddenActor))
+		case errors.Is(err, ErrBlockedDomain):
+			return c.JSON(http.StatusForbidden, errorResponse(ErrBlockedDomain))
 		case errors.Is(err, ErrInvalidActivity):
 			return c.JSON(http.StatusBadRequest, errorResponse(ErrInvalidActivity))
 		case errors.Is(err, ErrUnsupportedActivity):

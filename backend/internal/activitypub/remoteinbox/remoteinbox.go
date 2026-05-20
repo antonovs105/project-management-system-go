@@ -11,6 +11,7 @@ var (
 	ErrUnsupportedMedia    = errors.New("unsupported inbox media type")
 	ErrUnauthorized        = errors.New("unauthorized inbox activity")
 	ErrForbiddenActor      = errors.New("activity actor does not match signature actor")
+	ErrBlockedDomain       = errors.New("inbox activity actor domain is blocked")
 	ErrTargetNotFound      = errors.New("inbox target actor not found")
 	ErrInvalidActivity     = errors.New("invalid inbox activity")
 	ErrUnsupportedActivity = errors.New("unsupported inbox activity type")

@@ -255,6 +255,16 @@ func (f fakeVerifier) VerifyRequest(ctx context.Context, req *http.Request, body
 	return f.verified, nil
 }
 
+type countingVerifier struct {
+	calls    int
+	verified *httpsig.VerifiedRequest
+}
+
+func (f *countingVerifier) VerifyRequest(ctx context.Context, req *http.Request, body []byte) (*httpsig.VerifiedRequest, error) {
+	f.calls++
+	return f.verified, nil
+}
+
 type fakeDelivery struct {
 	activityID     string
 	actorID        string
@@ -814,6 +824,22 @@ func TestServiceReceiveRejectsSignatureActorMismatch(t *testing.T) {
 	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/users/bob", body)
 
 	require.ErrorIs(t, err, ErrForbiddenActor)
+}
+
+func TestServiceReceiveRejectsBlockedActorDomainBeforeVerification(t *testing.T) {
+	repo := &memoryRepository{targetActorID: "target-actor"}
+	verifier := &countingVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-actor",
+		ActorAPID: "https://blocked.example/users/alice",
+	}}
+	service := NewService(repo, verifier, WithBlockedDomains([]string{"example"}))
+	body := []byte(`{"id":"https://blocked.example/activities/1","type":"Create","actor":"https://blocked.example/users/alice"}`)
+
+	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/users/bob", body)
+
+	require.ErrorIs(t, err, ErrBlockedDomain)
+	assert.Zero(t, verifier.calls)
+	assert.Nil(t, repo.stored)
 }
 
 func TestServiceReceiveMapsVerifierFailureToUnauthorized(t *testing.T) {

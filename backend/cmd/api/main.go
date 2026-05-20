@@ -233,7 +233,12 @@ func main() {
 
 	// Remote ActivityPub inbox dependencies
 	inboxRepo := remoteinbox.NewRepository(db, apConfig)
-	inboxService := remoteinbox.NewService(inboxRepo, sigService, remoteinbox.WithDelivery(deliveryService))
+	inboxService := remoteinbox.NewService(
+		inboxRepo,
+		sigService,
+		remoteinbox.WithDelivery(deliveryService),
+		remoteinbox.WithBlockedDomains(splitCSVEnv("FEDERATION_BLOCKED_DOMAINS")),
+	)
 	inboxHandler := remoteinbox.NewHandler(inboxService, apConfig)
 
 	// WebFinger discovery dependencies
