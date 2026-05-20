@@ -17,6 +17,7 @@ type Repository interface {
 	IsProjectActor(ctx context.Context, actorID string) (bool, error)
 	StoreInboundActivity(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	AcceptProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) (*FollowResponse, error)
+	UndoProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) error
 }
 
 type PgRepository struct {
@@ -200,4 +201,38 @@ func (r *PgRepository) AcceptProjectFollow(ctx context.Context, targetActorID st
 		ActivityAPID:   responseAPID,
 		TargetInboxURL: followerInbox,
 	}, nil
+}
+
+func (r *PgRepository) UndoProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var followerAPID string
+	if err := tx.QueryRowxContext(ctx, `
+		SELECT follower.ap_id
+		FROM actors target
+		JOIN projects project ON project.id = target.id
+		JOIN actors follower ON follower.id = $2
+		WHERE target.id = $1
+	`, targetActorID, activity.ActorID).Scan(&followerAPID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrUnsupportedActivity
+		}
+		return err
+	}
+	if followerAPID != activity.ActorAPID {
+		return ErrForbiddenActor
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM actor_follows
+		WHERE follower_actor_id = $1 AND followed_actor_id = $2
+	`, activity.ActorID, targetActorID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }

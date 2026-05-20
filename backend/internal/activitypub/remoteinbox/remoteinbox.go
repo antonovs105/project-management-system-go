@@ -18,13 +18,21 @@ var (
 )
 
 type InboundActivity struct {
-	ID         string          `json:"id"`
-	Type       string          `json:"type"`
-	ActorAPID  string          `json:"actor"`
-	ActorID    string          `json:"-"`
-	ObjectAPID *string         `json:"object,omitempty"`
-	TargetAPID *string         `json:"target,omitempty"`
-	Document   json.RawMessage `json:"-"`
+	ID             string            `json:"id"`
+	Type           string            `json:"type"`
+	ActorAPID      string            `json:"actor"`
+	ActorID        string            `json:"-"`
+	ObjectAPID     *string           `json:"object,omitempty"`
+	ObjectActivity *EmbeddedActivity `json:"-"`
+	TargetAPID     *string           `json:"target,omitempty"`
+	Document       json.RawMessage   `json:"-"`
+}
+
+type EmbeddedActivity struct {
+	ID         string
+	Type       string
+	ActorAPID  string
+	ObjectAPID string
 }
 
 type AcceptedActivity struct {

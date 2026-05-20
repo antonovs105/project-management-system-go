@@ -95,16 +95,13 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 		return nil, ErrForbiddenActor
 	}
 
-	isProjectFollow := false
-	if activity.Type == "Follow" {
-		if activity.ObjectAPID == nil || *activity.ObjectAPID != targetAPID {
-			return nil, fmt.Errorf("%w: follow object must match inbox actor", ErrInvalidActivity)
-		}
-		isProjectActor, err := s.repo.IsProjectActor(ctx, targetActorID)
-		if err != nil {
-			return nil, err
-		}
-		isProjectFollow = isProjectActor
+	isProjectFollow, err := s.isProjectFollow(ctx, targetActorID, targetAPID, activity)
+	if err != nil {
+		return nil, err
+	}
+	isProjectUndoFollow, err := s.isProjectUndoFollow(ctx, targetActorID, targetAPID, activity)
+	if err != nil {
+		return nil, err
 	}
 
 	accepted, err := s.repo.StoreInboundActivity(ctx, targetActorID, activity)
@@ -120,7 +117,49 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 		accepted.ResponseActivityAPID = response.ActivityAPID
 		s.enqueueFollowResponse(ctx, response)
 	}
+	if isProjectUndoFollow && !accepted.Duplicate {
+		if err := s.repo.UndoProjectFollow(ctx, targetActorID, activity); err != nil {
+			return nil, err
+		}
+	}
 	return accepted, nil
+}
+
+func (s *Service) isProjectFollow(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
+	if activity.Type != "Follow" {
+		return false, nil
+	}
+	if activity.ObjectAPID == nil || *activity.ObjectAPID != targetAPID {
+		return false, fmt.Errorf("%w: follow object must match inbox actor", ErrInvalidActivity)
+	}
+	return s.repo.IsProjectActor(ctx, targetActorID)
+}
+
+func (s *Service) isProjectUndoFollow(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
+	if activity.Type != "Undo" {
+		return false, nil
+	}
+	isProjectActor, err := s.repo.IsProjectActor(ctx, targetActorID)
+	if err != nil {
+		return false, err
+	}
+	if !isProjectActor {
+		return false, nil
+	}
+	follow := activity.ObjectActivity
+	if follow == nil || follow.Type != "Follow" || follow.ID == "" || !isAbsoluteURI(follow.ID) {
+		return false, fmt.Errorf("%w: undo object must be an embedded Follow activity", ErrInvalidActivity)
+	}
+	if follow.ActorAPID != activity.ActorAPID {
+		return false, ErrForbiddenActor
+	}
+	if follow.ObjectAPID != targetAPID {
+		return false, fmt.Errorf("%w: undo follow object must match inbox actor", ErrInvalidActivity)
+	}
+	if activity.TargetAPID != nil && *activity.TargetAPID != targetAPID {
+		return false, fmt.Errorf("%w: undo target must match inbox actor", ErrInvalidActivity)
+	}
+	return true, nil
 }
 
 func (s *Service) enqueueFollowResponse(ctx context.Context, response *FollowResponse) {
@@ -159,8 +198,15 @@ func parseActivity(body []byte) (*InboundActivity, error) {
 		ActorAPID: actorAPID,
 		Document:  append([]byte(nil), body...),
 	}
-	if objectAPID := extractAPID(raw["object"]); objectAPID != "" {
+	rawObject := raw["object"]
+	if objectAPID := extractAPID(rawObject); objectAPID != "" {
 		activity.ObjectAPID = &objectAPID
+	}
+	if objectActivity := extractEmbeddedActivity(rawObject); objectActivity != nil {
+		activity.ObjectActivity = objectActivity
+		if activity.Type == "Undo" && activity.TargetAPID == nil && objectActivity.ObjectAPID != "" {
+			activity.TargetAPID = &objectActivity.ObjectAPID
+		}
 	}
 	if targetAPID := extractAPID(raw["target"]); targetAPID != "" {
 		activity.TargetAPID = &targetAPID
@@ -203,6 +249,27 @@ func extractAPID(value any) string {
 		}
 	}
 	return ""
+}
+
+func extractEmbeddedActivity(value any) *EmbeddedActivity {
+	raw, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	activityType, err := extractActivityType(raw["type"])
+	if err != nil {
+		return nil
+	}
+	embedded := &EmbeddedActivity{
+		ID:         extractAPID(raw["id"]),
+		Type:       activityType,
+		ActorAPID:  extractAPID(raw["actor"]),
+		ObjectAPID: extractAPID(raw["object"]),
+	}
+	if embedded.ID == "" && embedded.ActorAPID == "" && embedded.ObjectAPID == "" {
+		return nil
+	}
+	return embedded
 }
 
 func isAbsoluteURI(value string) bool {

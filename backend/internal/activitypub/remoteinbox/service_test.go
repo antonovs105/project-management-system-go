@@ -23,9 +23,11 @@ type memoryRepository struct {
 	projectActor  bool
 	follow        *InboundActivity
 	followResult  *FollowResponse
+	undo          *InboundActivity
 	findErr       error
 	storeErr      error
 	followErr     error
+	undoErr       error
 }
 
 func (m *memoryRepository) FindLocalActorIDByAPID(ctx context.Context, apID string) (string, error) {
@@ -73,6 +75,15 @@ func (m *memoryRepository) AcceptProjectFollow(ctx context.Context, targetActorI
 		ActivityAPID:   "http://localhost:8080/activities/accept-activity",
 		TargetInboxURL: "https://remote.example/users/alice/inbox",
 	}, nil
+}
+
+func (m *memoryRepository) UndoProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) error {
+	if m.undoErr != nil {
+		return m.undoErr
+	}
+	copy := *activity
+	m.undo = &copy
+	return nil
 }
 
 type fakeVerifier struct {
@@ -158,6 +169,52 @@ func TestServiceReceiveRejectsProjectFollowWithWrongObject(t *testing.T) {
 		ActorAPID: "https://remote.example/users/alice",
 	}})
 	body := []byte(`{"id":"https://remote.example/activities/follow-1","type":"Follow","actor":"https://remote.example/users/alice","object":"http://localhost:8080/projects/other"}`)
+
+	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
+
+	require.ErrorIs(t, err, ErrInvalidActivity)
+}
+
+func TestServiceReceiveUndoProjectFollow(t *testing.T) {
+	repo := &memoryRepository{targetActorID: "project-actor", projectActor: true}
+	service := NewService(repo, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-actor",
+		ActorAPID: "https://remote.example/users/alice",
+	}})
+	body := []byte(`{"id":"https://remote.example/activities/undo-follow-1","type":"Undo","actor":"https://remote.example/users/alice","object":{"id":"https://remote.example/activities/follow-1","type":"Follow","actor":"https://remote.example/users/alice","object":"http://localhost:8080/projects/project-1"}}`)
+
+	accepted, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://remote.example/activities/undo-follow-1", accepted.ActivityAPID)
+	require.NotNil(t, repo.undo)
+	assert.Equal(t, "Undo", repo.undo.Type)
+	require.NotNil(t, repo.undo.ObjectActivity)
+	assert.Equal(t, "Follow", repo.undo.ObjectActivity.Type)
+	require.NotNil(t, repo.undo.ObjectAPID)
+	assert.Equal(t, "https://remote.example/activities/follow-1", *repo.undo.ObjectAPID)
+	require.NotNil(t, repo.undo.TargetAPID)
+	assert.Equal(t, "http://localhost:8080/projects/project-1", *repo.undo.TargetAPID)
+}
+
+func TestServiceReceiveRejectsUndoFollowActorMismatch(t *testing.T) {
+	service := NewService(&memoryRepository{targetActorID: "project-actor", projectActor: true}, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-actor",
+		ActorAPID: "https://remote.example/users/alice",
+	}})
+	body := []byte(`{"id":"https://remote.example/activities/undo-follow-1","type":"Undo","actor":"https://remote.example/users/alice","object":{"id":"https://remote.example/activities/follow-1","type":"Follow","actor":"https://remote.example/users/bob","object":"http://localhost:8080/projects/project-1"}}`)
+
+	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
+
+	require.ErrorIs(t, err, ErrForbiddenActor)
+}
+
+func TestServiceReceiveRejectsUndoFollowWrongObject(t *testing.T) {
+	service := NewService(&memoryRepository{targetActorID: "project-actor", projectActor: true}, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-actor",
+		ActorAPID: "https://remote.example/users/alice",
+	}})
+	body := []byte(`{"id":"https://remote.example/activities/undo-follow-1","type":"Undo","actor":"https://remote.example/users/alice","object":{"id":"https://remote.example/activities/follow-1","type":"Follow","actor":"https://remote.example/users/alice","object":"http://localhost:8080/projects/other"}}`)
 
 	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
 

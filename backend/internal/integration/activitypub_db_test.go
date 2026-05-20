@@ -322,6 +322,31 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		requireActivityForObject(t, db, "Accept", followAPID)
 		requireOutboxItem(t, db, project.ID, "Accept", followAPID)
 		requireDeliveryForObject(t, db, "Accept", followAPID, remoteActor.InboxURL)
+
+		undoAPID := "https://remote.example/activities/undo-follow-project"
+		undoBody := []byte(`{"id":"` + undoAPID + `","type":"Undo","actor":"` + remoteActor.APID + `","object":{"id":"` + followAPID + `","type":"Follow","actor":"` + remoteActor.APID + `","object":"` + project.APID + `"}}`)
+		undoReq, err := http.NewRequest(http.MethodPost, project.APID+"/inbox", bytes.NewReader(undoBody))
+		require.NoError(t, err)
+		require.NoError(t, signer.SignRequest(ctx, remoteActor.ID, undoReq, undoBody))
+
+		undo, err := receiver.Receive(ctx, undoReq, project.APID, undoBody)
+		require.NoError(t, err)
+		require.Empty(t, undo.ResponseActivityID)
+
+		requireNoFollow(t, db, remoteActor.ID, project.ID)
+		requireActivityForObject(t, db, "Undo", followAPID)
+		requireInboxItem(t, db, project.ID, "Undo", followAPID)
+
+		ticketService := ticket.NewService(ticket.NewRepository(db, cfg), projectService, cfg)
+		ticketService.SetDelivery(deliveryService)
+		ticketAfterUndo, err := ticketService.CreateTicket(ctx, ticket.CreateTicketRequest{
+			Title:       "No delivery after undo",
+			Description: "Remote follower opted out",
+			Priority:    "medium",
+			Type:        "task",
+		}, project.ID, owner.ID)
+		require.NoError(t, err)
+		requireNoDeliveryForObject(t, db, "Create", ticketAfterUndo.APID, remoteActor.InboxURL)
 	})
 
 	t.Run("outbox delivery ledger tracks attempts", func(t *testing.T) {
@@ -460,6 +485,19 @@ func requireFollow(t *testing.T, db *sqlx.DB, followerID, followedID, expectedSt
 	require.Equal(t, expectedState, state)
 }
 
+func requireNoFollow(t *testing.T, db *sqlx.DB, followerID, followedID string) {
+	t.Helper()
+
+	var count int
+	err := db.Get(&count, `
+		SELECT count(*)
+		FROM actor_follows
+		WHERE follower_actor_id = $1 AND followed_actor_id = $2
+	`, followerID, followedID)
+	require.NoError(t, err)
+	require.Zero(t, count)
+}
+
 func requireActivityType(t *testing.T, db *sqlx.DB, apID, expectedType string) {
 	t.Helper()
 
@@ -496,6 +534,22 @@ func requireDeliveryForObject(t *testing.T, db *sqlx.DB, activityType, objectAPI
 	`, activityType, objectAPID, inboxURL)
 	require.NoError(t, err)
 	require.Greater(t, count, 0)
+}
+
+func requireNoDeliveryForObject(t *testing.T, db *sqlx.DB, activityType, objectAPID, inboxURL string) {
+	t.Helper()
+
+	var count int
+	err := db.Get(&count, `
+		SELECT count(*)
+		FROM activity_deliveries delivery
+		JOIN ap_activities activity ON activity.id = delivery.activity_id
+		WHERE activity.activity_type = $1
+			AND activity.object_ap_id = $2
+			AND delivery.target_inbox_url = $3
+	`, activityType, objectAPID, inboxURL)
+	require.NoError(t, err)
+	require.Zero(t, count)
 }
 
 func requireInboxItem(t *testing.T, db *sqlx.DB, actorID, activityType, objectAPID string) {
