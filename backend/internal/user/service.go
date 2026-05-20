@@ -86,21 +86,11 @@ func (s *Service) Login(ctx context.Context, email, password string) (string, er
 		return "", errors.New("invalid credentials")
 	}
 
-	log.Println("---------------------------------")
-	log.Printf("[DEBUG] Attempting login for user ID: %s", user.ID)
-	log.Printf("[DEBUG] Email from request: '%s'", email)
-	log.Printf("[DEBUG] Password from request: '%s'", password)
-	log.Printf("[DEBUG] Hash from DB: '%s'", user.PasswordHash)
-	log.Println("---------------------------------")
-
 	// comparing hashes
 	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password))
 	if err != nil {
-		log.Printf("[DEBUG] Password comparison failed. Reason: %v", err)
 		return "", errors.New("invalid credentials")
 	}
-
-	log.Printf("[DEBUG] Password for user ID %s comparison successful!", user.ID)
 
 	// generating JWT
 	claims := jwt.MapClaims{
