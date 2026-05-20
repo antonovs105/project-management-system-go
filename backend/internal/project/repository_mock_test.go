@@ -52,8 +52,8 @@ func (m *MockRepository) Update(ctx context.Context, project *Project) error {
 	return args.Error(0)
 }
 
-func (m *MockRepository) Delete(ctx context.Context, id string) error {
-	args := m.Called(ctx, id)
+func (m *MockRepository) Delete(ctx context.Context, id string, actorID string) error {
+	args := m.Called(ctx, id, actorID)
 	return args.Error(0)
 }
 

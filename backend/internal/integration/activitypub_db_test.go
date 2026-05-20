@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -23,6 +24,7 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
 	"github.com/antonovs105/project-management-system-go/internal/user"
 	"github.com/jmoiron/sqlx"
+	"github.com/labstack/echo/v4"
 	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -350,6 +352,39 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 
 	_, err = deliveryService.ListProjectDeliveries(ctx, project.ID, outsider.ID)
 	require.ErrorIs(t, err, delivery.ErrProjectAccessDenied)
+
+	projectDeleteComment, err := commentService.CreateComment(ctx, assignmentTarget.ID, owner.ID, "Project delete should tombstone this note.")
+	require.NoError(t, err)
+
+	forbiddenDeleteCount := activityCount(t, db)
+	err = projectService.DeleteProject(ctx, project.ID, manager.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "only owners can delete projects")
+	requireActivityCount(t, db, forbiddenDeleteCount)
+
+	require.NoError(t, projectService.DeleteProject(ctx, project.ID, owner.ID))
+	requireObjectDeleted(t, db, project.APID)
+	requireObjectTombstone(t, db, project.APID, "Group")
+	requireObjectDeleted(t, db, assignmentTarget.APID)
+	requireObjectTombstone(t, db, assignmentTarget.APID, "forge:Ticket")
+	requireObjectDeleted(t, db, memberRemovalTicket.APID)
+	requireObjectTombstone(t, db, memberRemovalTicket.APID, "forge:Ticket")
+	requireObjectDeleted(t, db, projectDeleteComment.APID)
+	requireObjectTombstone(t, db, projectDeleteComment.APID, "Note")
+	requireActivityForObjectAndActor(t, db, "Delete", project.APID, owner.ID)
+	requireActivityForObjectAndTarget(t, db, "Delete", project.APID, project.APID)
+	requireOutboxItem(t, db, owner.ID, "Delete", project.APID)
+	requireInboxItem(t, db, project.ID, "Delete", project.APID)
+	requireNoProjectByID(t, db, project.ID)
+	requireNoTicketByAPID(t, db, assignmentTarget.APID)
+	requireNoTicketByAPID(t, db, memberRemovalTicket.APID)
+	requireNoFollow(t, db, owner.ID, project.ID)
+	requireNoFollow(t, db, member.ID, project.ID)
+	requireNoFollow(t, db, manager.ID, project.ID)
+	requireNoFollow(t, db, remoteFollower.ID, project.ID)
+	_, err = projectService.GetProjectByID(ctx, project.ID, owner.ID)
+	require.Error(t, err)
+	requireProjectActorEndpointTombstone(t, db, cfg, project.ID, "Group")
 }
 
 func TestActivityPubFoundationConstraints(t *testing.T) {
@@ -1629,6 +1664,15 @@ func requireNoProjectMember(t *testing.T, db *sqlx.DB, userID, projectID string)
 	require.Zero(t, count)
 }
 
+func requireNoProjectByID(t *testing.T, db *sqlx.DB, projectID string) {
+	t.Helper()
+
+	var count int
+	err := db.Get(&count, `SELECT count(*) FROM projects WHERE id = $1`, projectID)
+	require.NoError(t, err)
+	require.Zero(t, count)
+}
+
 func requireInviteStatus(t *testing.T, db *sqlx.DB, inviteID, expectedStatus string) {
 	t.Helper()
 
@@ -1852,6 +1896,27 @@ func requireBoxItem(t *testing.T, db *sqlx.DB, tableName, actorID, activityType,
 	`, actorID, activityType, objectAPID)
 	require.NoError(t, err)
 	require.Greater(t, count, 0)
+}
+
+func requireProjectActorEndpointTombstone(t *testing.T, db *sqlx.DB, cfg activitypub.Config, projectID, formerType string) {
+	t.Helper()
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/projects/"+projectID, nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues(projectID)
+
+	require.NoError(t, activitypub.NewHandler(db, cfg).GetProjectActor(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &doc))
+	require.Equal(t, "Tombstone", doc["type"])
+	require.Equal(t, formerType, doc["formerType"])
+	require.NotContains(t, doc, "name")
+	require.NotContains(t, doc, "content")
 }
 
 func requireTicketResolved(t *testing.T, db *sqlx.DB, ticketID string) {

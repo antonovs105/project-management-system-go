@@ -109,7 +109,7 @@ func (s *Service) DeleteProject(ctx context.Context, projectID, userID string) e
 	if !CanDeleteProject(role) {
 		return errors.New("insufficient permissions: only owners can delete projects")
 	}
-	return s.repo.Delete(ctx, projectID)
+	return s.repo.Delete(ctx, projectID, userID)
 }
 
 func (s *Service) RemoveMemberFromProject(ctx context.Context, projectID, actorID, targetUserID string) error {

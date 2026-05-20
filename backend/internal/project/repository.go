@@ -18,7 +18,7 @@ type Repository interface {
 	IsProjectMember(ctx context.Context, projectID, userID string) (bool, error)
 	HasPendingInvite(ctx context.Context, projectID, userID string) (bool, error)
 	Update(ctx context.Context, project *Project) error
-	Delete(ctx context.Context, id string) error
+	Delete(ctx context.Context, id string, actorID string) error
 	RemoveMember(ctx context.Context, projectID, actorID, targetUserID string) error
 	GetInviteByID(ctx context.Context, inviteID string) (*ProjectInvite, error)
 	CreateInvite(ctx context.Context, invite *ProjectInvite) error
@@ -283,8 +283,42 @@ func (r *PgRepository) Update(ctx context.Context, project *Project) error {
 	return tx.Commit()
 }
 
-func (r *PgRepository) Delete(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM actors WHERE id = $1`, id)
+func (r *PgRepository) Delete(ctx context.Context, id string, actorID string) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var stored struct {
+		ID   string `db:"id"`
+		APID string `db:"ap_id"`
+	}
+	if err := tx.GetContext(ctx, &stored, `
+		SELECT project.id::text, actor.ap_id
+		FROM projects project
+		JOIN actors actor ON actor.id = project.id
+		WHERE project.id = $1
+		FOR UPDATE OF project
+	`, id); err != nil {
+		return errors.New("project to delete not found")
+	}
+
+	if err := tombstoneProjectTree(ctx, tx, stored.ID, stored.APID); err != nil {
+		return err
+	}
+	if err := r.writeProjectDeleteActivity(ctx, tx, stored.ID, actorID, stored.APID); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM actor_follows
+		WHERE followed_actor_id = $1
+	`, stored.ID); err != nil {
+		return err
+	}
+
+	result, err := tx.ExecContext(ctx, `DELETE FROM projects WHERE id = $1`, stored.ID)
 	if err != nil {
 		return err
 	}
@@ -295,7 +329,77 @@ func (r *PgRepository) Delete(ctx context.Context, id string) error {
 	if rowsAffected == 0 {
 		return errors.New("project to delete not found")
 	}
-	return nil
+	return tx.Commit()
+}
+
+func tombstoneProjectTree(ctx context.Context, tx *sqlx.Tx, projectID, projectAPID string) error {
+	var commentAPIDs []string
+	if err := tx.SelectContext(ctx, &commentAPIDs, `
+		SELECT comment.ap_id
+		FROM comments comment
+		JOIN tickets ticket ON ticket.id = comment.ticket_id
+		WHERE ticket.project_id = $1
+		ORDER BY comment.created_at ASC, comment.id ASC
+	`, projectID); err != nil {
+		return err
+	}
+	for _, apID := range commentAPIDs {
+		if err := tombstoneObject(ctx, tx, apID, "Note"); err != nil {
+			return err
+		}
+	}
+
+	var ticketAPIDs []string
+	if err := tx.SelectContext(ctx, &ticketAPIDs, `
+		SELECT ap_id
+		FROM tickets
+		WHERE project_id = $1
+		ORDER BY created_at ASC, id ASC
+	`, projectID); err != nil {
+		return err
+	}
+	for _, apID := range ticketAPIDs {
+		if err := tombstoneObject(ctx, tx, apID, "forge:Ticket"); err != nil {
+			return err
+		}
+	}
+
+	return tombstoneObject(ctx, tx, projectAPID, "Group")
+}
+
+func (r *PgRepository) writeProjectDeleteActivity(ctx context.Context, tx *sqlx.Tx, projectID, actorID, projectAPID string) error {
+	actorAPID, err := lookupActorAPID(ctx, tx, actorID)
+	if err != nil {
+		return err
+	}
+	activityID, err := activitypub.NewID()
+	if err != nil {
+		return err
+	}
+	activityAPID := activitypub.ActivityAPID(r.cfg, activityID)
+	doc := activitypub.ActivityDocument("Delete", activityAPID, actorAPID, projectAPID, projectAPID, time.Now().UTC())
+	rawDoc, err := json.Marshal(doc)
+	if err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO ap_activities (id, ap_id, activity_type, actor_id, object_ap_id, target_ap_id, document)
+		VALUES ($1, $2, 'Delete', $3, $4, $5, $6)
+	`, activityID, activityAPID, actorID, projectAPID, projectAPID, rawDoc); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO actor_outbox_items (actor_id, activity_id, activity_ap_id)
+		VALUES ($1, $2, $3)
+	`, actorID, activityID, activityAPID); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO actor_inbox_items (actor_id, activity_id, activity_ap_id)
+		VALUES ($1, $2, $3)
+	`, projectID, activityID, activityAPID)
+	return err
 }
 
 func (r *PgRepository) RemoveMember(ctx context.Context, projectID, actorID, targetUserID string) error {
@@ -872,6 +976,23 @@ func updateTicketAssignedToDocument(ctx context.Context, tx *sqlx.Tx, ticketID, 
 			is_deleted = false
 		WHERE ap_id = $1
 	`, ticketAPID, updatedDocument)
+	return err
+}
+
+func tombstoneObject(ctx context.Context, q sqlx.ExecerContext, apID string, formerType string) error {
+	rawDoc, err := json.Marshal(activitypub.TombstoneDocument(apID, formerType, time.Now().UTC()))
+	if err != nil {
+		return err
+	}
+	_, err = q.ExecContext(ctx, `
+		UPDATE ap_objects
+		SET object_type = 'Tombstone',
+			local_ref_table = NULL,
+			local_ref_id = NULL,
+			document = $2,
+			is_deleted = true
+		WHERE ap_id = $1
+	`, apID, rawDoc)
 	return err
 }
 
