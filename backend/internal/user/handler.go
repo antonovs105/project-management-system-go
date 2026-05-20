@@ -19,6 +19,11 @@ func NewHandler(service *Service) *Handler {
 	}
 }
 
+func (h *Handler) RegisterRoutes(e *echo.Echo) {
+	e.POST("/register", h.Register)
+	e.POST("/login", h.Login)
+}
+
 // parsing register request
 type RegisterRequest struct {
 	Username string `json:"username"`

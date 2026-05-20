@@ -13,8 +13,7 @@ import (
 
 func TestService_CreateProject(t *testing.T) {
 	mockRepo := new(MockRepository)
-	mockPM := new(MockMemberService)
-	service := NewService(mockRepo, mockPM, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+	service := NewService(mockRepo, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
 
 	ctx := context.Background()
 	name := "Test Project"
@@ -51,8 +50,7 @@ func TestService_CreateProject(t *testing.T) {
 
 func TestService_GetProjectByID(t *testing.T) {
 	mockRepo := new(MockRepository)
-	mockPM := new(MockMemberService)
-	service := NewService(mockRepo, mockPM, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+	service := NewService(mockRepo, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
 
 	ctx := context.Background()
 	projectID := "project-1"
@@ -67,19 +65,18 @@ func TestService_GetProjectByID(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		mockRepo.On("GetByID", ctx, projectID).Return(expectedProject, nil).Once()
-		mockPM.On("GetUserRole", ctx, userID, projectID).Return("owner", nil).Once()
+		mockRepo.On("GetUserRole", ctx, userID, projectID).Return("owner", nil).Once()
 
 		p, err := service.GetProjectByID(ctx, projectID, userID)
 
 		assert.NoError(t, err)
 		assert.Equal(t, expectedProject, p)
 		mockRepo.AssertExpectations(t)
-		mockPM.AssertExpectations(t)
 	})
 
 	t.Run("AccessDenied", func(t *testing.T) {
 		mockRepo.On("GetByID", ctx, projectID).Return(expectedProject, nil).Once()
-		mockPM.On("GetUserRole", ctx, userID, projectID).Return("", errors.New("not a member")).Once()
+		mockRepo.On("GetUserRole", ctx, userID, projectID).Return("", errors.New("not a member")).Once()
 
 		p, err := service.GetProjectByID(ctx, projectID, userID)
 

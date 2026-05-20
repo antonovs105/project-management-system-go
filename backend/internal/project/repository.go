@@ -14,6 +14,7 @@ type Repository interface {
 	Create(ctx context.Context, project *Project) error
 	GetByID(ctx context.Context, id string) (*Project, error)
 	ListByOwnerID(ctx context.Context, ownerID string) ([]Project, error)
+	GetUserRole(ctx context.Context, userID, projectID string) (string, error)
 	Update(ctx context.Context, project *Project) error
 	Delete(ctx context.Context, id string) error
 	CreateInvite(ctx context.Context, invite *ProjectInvite) error
@@ -190,6 +191,16 @@ func (r *PgRepository) ListByOwnerID(ctx context.Context, ownerID string) ([]Pro
 		return nil, err
 	}
 	return projects, nil
+}
+
+func (r *PgRepository) GetUserRole(ctx context.Context, userID, projectID string) (string, error) {
+	var role string
+	err := r.db.GetContext(ctx, &role, `
+		SELECT role
+		FROM project_members
+		WHERE user_id = $1 AND project_id = $2
+	`, userID, projectID)
+	return role, err
 }
 
 func (r *PgRepository) Update(ctx context.Context, project *Project) error {

@@ -9,7 +9,6 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/comment"
 	authMiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
 	"github.com/antonovs105/project-management-system-go/internal/project"
-	"github.com/antonovs105/project-management-system-go/internal/projectmember"
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
 	"github.com/antonovs105/project-management-system-go/internal/user"
 	"github.com/jmoiron/sqlx"
@@ -58,13 +57,9 @@ func main() {
 	userService := user.NewService(userRepo, []byte(jwtSecret), apConfig)
 	userHandler := user.NewHandler(userService)
 
-	// projectmembers dependencies
-	projectMemberRepo := projectmember.NewRepository(db)
-	projectMemberService := projectmember.NewService(projectMemberRepo)
-
 	// project dependencies
 	projectRepo := project.NewRepository(db, apConfig)
-	projectService := project.NewService(projectRepo, projectMemberService, apConfig)
+	projectService := project.NewService(projectRepo, apConfig)
 	projectHandler := project.NewHandler(projectService)
 
 	// Ticket dependencies
@@ -106,22 +101,10 @@ func main() {
 	// Routes
 	e.GET("/health", server.healthCheck)
 
-	e.POST("/register", server.userHandler.Register)
-
-	e.POST("/login", server.userHandler.Login)
+	server.userHandler.RegisterRoutes(e)
 
 	// Local ActivityPub JSON-LD read routes. Remote inbox POST/S2S is a later milestone.
-	e.GET("/users/:username", server.apHandler.GetUserActor)
-	e.GET("/users/:username/inbox", server.apHandler.UserInbox)
-	e.GET("/users/:username/outbox", server.apHandler.UserOutbox)
-	e.GET("/users/:username/followers", server.apHandler.UserFollowers)
-	e.GET("/projects/:id", server.apHandler.GetProjectActor)
-	e.GET("/projects/:id/inbox", server.apHandler.ProjectInbox)
-	e.GET("/projects/:id/outbox", server.apHandler.ProjectOutbox)
-	e.GET("/projects/:id/followers", server.apHandler.ProjectFollowers)
-	e.GET("/tickets/:id", server.apHandler.GetTicket)
-	e.GET("/comments/:id", server.apHandler.GetComment)
-	e.GET("/activities/:id", server.apHandler.GetActivity)
+	server.apHandler.RegisterRoutes(e)
 
 	// protected routes
 	api := e.Group("/api")
@@ -130,23 +113,9 @@ func main() {
 
 	// routes that require auth
 	api.GET("/me", server.getProfile) // for test
-	api.POST("/projects", server.projectHandler.Create)
-	api.GET("/projects/:id", server.projectHandler.Get)
-	api.GET("/projects", server.projectHandler.List)
-	api.PATCH("/projects/:id", server.projectHandler.Update)
-	api.DELETE("/projects/:id", server.projectHandler.Delete)
-	api.POST("/projects/:id/members", server.projectHandler.AddMember)
-	api.POST("/invites/:id/accept", server.projectHandler.AcceptInvite)
-	api.POST("/projects/:projectID/tickets", server.ticketHandler.Create)
-	api.GET("/projects/:projectID/tickets", server.ticketHandler.List)
-	api.GET("/tickets/:id", server.ticketHandler.Get)
-	api.PATCH("/tickets/:id", server.ticketHandler.Update)
-	api.DELETE("/tickets/:id", server.ticketHandler.Delete)
-	api.POST("/tickets/:id/comments", server.commentHandler.Create)
-	api.GET("/tickets/:id/comments", server.commentHandler.List)
-	api.GET("/projects/:projectID/graph", server.ticketHandler.GetGraph)
-	api.POST("/tickets/:id/links", server.ticketHandler.AddLink)
-	api.DELETE("/links/:linkID", server.ticketHandler.RemoveLink)
+	server.projectHandler.RegisterRoutes(api)
+	server.ticketHandler.RegisterRoutes(api)
+	server.commentHandler.RegisterRoutes(api)
 
 	e.Logger.Fatal(e.Start(":8080"))
 }

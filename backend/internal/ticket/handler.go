@@ -14,6 +14,17 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
+func (h *Handler) RegisterRoutes(api *echo.Group) {
+	api.POST("/projects/:projectID/tickets", h.Create)
+	api.GET("/projects/:projectID/tickets", h.List)
+	api.GET("/tickets/:id", h.Get)
+	api.PATCH("/tickets/:id", h.Update)
+	api.DELETE("/tickets/:id", h.Delete)
+	api.GET("/projects/:projectID/graph", h.GetGraph)
+	api.POST("/tickets/:id/links", h.AddLink)
+	api.DELETE("/links/:linkID", h.RemoveLink)
+}
+
 type createTicketRequest struct {
 	Title       string  `json:"title"`
 	Description string  `json:"description"`

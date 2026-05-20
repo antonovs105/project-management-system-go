@@ -14,6 +14,11 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
+func (h *Handler) RegisterRoutes(api *echo.Group) {
+	api.POST("/tickets/:id/comments", h.Create)
+	api.GET("/tickets/:id/comments", h.List)
+}
+
 type createCommentRequest struct {
 	Content string `json:"content"`
 }

@@ -18,6 +18,20 @@ func NewHandler(db *sqlx.DB, cfg Config) *Handler {
 	return &Handler{db: db, cfg: cfg}
 }
 
+func (h *Handler) RegisterRoutes(e *echo.Echo) {
+	e.GET("/users/:username", h.GetUserActor)
+	e.GET("/users/:username/inbox", h.UserInbox)
+	e.GET("/users/:username/outbox", h.UserOutbox)
+	e.GET("/users/:username/followers", h.UserFollowers)
+	e.GET("/projects/:id", h.GetProjectActor)
+	e.GET("/projects/:id/inbox", h.ProjectInbox)
+	e.GET("/projects/:id/outbox", h.ProjectOutbox)
+	e.GET("/projects/:id/followers", h.ProjectFollowers)
+	e.GET("/tickets/:id", h.GetTicket)
+	e.GET("/comments/:id", h.GetComment)
+	e.GET("/activities/:id", h.GetActivity)
+}
+
 func (h *Handler) GetUserActor(c echo.Context) error {
 	apID := UserAPID(h.cfg, c.Param("username"))
 	return h.writeObject(c, apID)

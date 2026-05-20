@@ -6,25 +6,17 @@ import (
 	"log"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
-	"github.com/antonovs105/project-management-system-go/internal/projectmember"
 )
 
-type MemberAdder interface {
-	AddMember(ctx context.Context, userID, projectID string, role string) (*projectmember.ProjectMember, error)
-	GetUserRole(ctx context.Context, userID, projectID string) (string, error)
-}
-
 type Service struct {
-	repo                 Repository
-	projectMemberService MemberAdder
-	apConfig             activitypub.Config
+	repo     Repository
+	apConfig activitypub.Config
 }
 
-func NewService(repo Repository, pmService MemberAdder, apConfig activitypub.Config) *Service {
+func NewService(repo Repository, apConfig activitypub.Config) *Service {
 	return &Service{
-		repo:                 repo,
-		projectMemberService: pmService,
-		apConfig:             apConfig,
+		repo:     repo,
+		apConfig: apConfig,
 	}
 }
 
@@ -61,7 +53,7 @@ func (s *Service) GetProjectByID(ctx context.Context, projectID, userID string) 
 		return nil, err
 	}
 
-	role, err := s.projectMemberService.GetUserRole(ctx, userID, projectID)
+	role, err := s.repo.GetUserRole(ctx, userID, projectID)
 	if err != nil {
 		return nil, errors.New("project not found or access denied")
 	}
@@ -104,7 +96,7 @@ func (s *Service) DeleteProject(ctx context.Context, projectID, userID string) e
 }
 
 func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUserID, newUserID string, role string) (*ProjectInvite, error) {
-	currentUserRole, err := s.projectMemberService.GetUserRole(ctx, currentUserID, projectID)
+	currentUserRole, err := s.repo.GetUserRole(ctx, currentUserID, projectID)
 	if err != nil {
 		return nil, errors.New("access denied: you are not a member of this project")
 	}

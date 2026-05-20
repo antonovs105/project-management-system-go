@@ -32,6 +32,11 @@ func (m *MockRepository) ListByOwnerID(ctx context.Context, ownerID string) ([]P
 	return args.Get(0).([]Project), args.Error(1)
 }
 
+func (m *MockRepository) GetUserRole(ctx context.Context, userID, projectID string) (string, error) {
+	args := m.Called(ctx, userID, projectID)
+	return args.String(0), args.Error(1)
+}
+
 func (m *MockRepository) Update(ctx context.Context, project *Project) error {
 	args := m.Called(ctx, project)
 	return args.Error(0)
