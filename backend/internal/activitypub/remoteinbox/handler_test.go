@@ -36,10 +36,12 @@ func TestHandlerReceiveUserInbox(t *testing.T) {
 	e.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusAccepted, rec.Code)
+	assert.Contains(t, rec.Header().Get(echo.HeaderContentType), "application/json")
 	require.NotNil(t, repo.stored)
 	assert.Equal(t, "Follow", repo.stored.Type)
 	assert.Equal(t, "https://remote.example/activities/1", jsonField(t, rec.Body.String(), "activity_ap_id"))
 	assert.Equal(t, "stored-activity", jsonField(t, rec.Body.String(), "activity_id"))
+	assert.NotEmpty(t, jsonField(t, rec.Body.String(), "received_at"))
 }
 
 func TestHandlerReceiveProjectInbox(t *testing.T) {
@@ -63,6 +65,7 @@ func TestHandlerReceiveProjectInbox(t *testing.T) {
 	e.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusAccepted, rec.Code)
+	assert.Contains(t, rec.Header().Get(echo.HeaderContentType), "application/json")
 	require.NotNil(t, repo.stored)
 	assert.Equal(t, "Follow", repo.stored.Type)
 	assert.Equal(t, "https://remote.example/activities/project-follow", jsonField(t, rec.Body.String(), "activity_ap_id"))
@@ -82,6 +85,22 @@ func TestHandlerRejectsUnsupportedMediaType(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnsupportedMediaType, rec.Code)
 	assert.JSONEq(t, `{"error":"unsupported inbox media type"}`, rec.Body.String())
+}
+
+func TestHandlerRejectsMissingContentType(t *testing.T) {
+	repo := &memoryRepository{targetActorID: "target-actor"}
+	handler := NewHandler(NewService(repo, fakeVerifier{}), activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+	e := echo.New()
+	handler.RegisterRoutes(e)
+
+	req := httptest.NewRequest(http.MethodPost, "/users/bob/inbox", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusUnsupportedMediaType, rec.Code)
+	assert.JSONEq(t, `{"error":"unsupported inbox media type"}`, rec.Body.String())
+	assert.Nil(t, repo.stored)
 }
 
 func TestHandlerRejectsOversizedBody(t *testing.T) {
@@ -118,9 +137,10 @@ func TestHandlerRejectsBodyReadError(t *testing.T) {
 }
 
 func TestHandlerMapsUnauthorized(t *testing.T) {
+	repo := &memoryRepository{targetActorID: "target-actor"}
 	handler := NewHandler(
 		NewService(
-			&memoryRepository{targetActorID: "target-actor"},
+			repo,
 			fakeVerifier{err: context.Canceled},
 		),
 		activitypub.NewConfig("http://localhost:8080", "localhost:8080"),
@@ -138,6 +158,27 @@ func TestHandlerMapsUnauthorized(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	assert.JSONEq(t, `{"error":"unauthorized inbox activity"}`, rec.Body.String())
 	assert.NotContains(t, rec.Body.String(), "context canceled")
+	assert.Nil(t, repo.stored)
+}
+
+func TestHandlerRejectsMalformedActivityWithoutStore(t *testing.T) {
+	repo := &memoryRepository{targetActorID: "target-actor"}
+	handler := NewHandler(NewService(repo, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-actor",
+		ActorAPID: "https://remote.example/users/alice",
+	}}), activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+	e := echo.New()
+	handler.RegisterRoutes(e)
+
+	req := httptest.NewRequest(http.MethodPost, "/users/bob/inbox", strings.NewReader(`{"id":`))
+	req.Header.Set("Content-Type", "application/activity+json")
+	rec := httptest.NewRecorder()
+
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.JSONEq(t, `{"error":"invalid inbox activity"}`, rec.Body.String())
+	assert.Nil(t, repo.stored)
 }
 
 func TestHandlerMapsInboxErrorsToStableResponses(t *testing.T) {
