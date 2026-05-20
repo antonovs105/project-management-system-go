@@ -23,13 +23,13 @@ import { Button } from '@/components/ui/button';
 import { Network } from 'lucide-react';
 
 interface Ticket {
-    id: number;
+    id: string;
     title: string;
     description: string;
     status: string;
     priority: string;
     type: string;
-    parent_id?: number;
+    parent_id?: string;
 }
 
 const COLUMNS = [
@@ -55,7 +55,7 @@ export default function BoardPage() {
     });
 
     const updateTicketStatus = useMutation({
-        mutationFn: async ({ id, status }: { id: number; status: string }) => {
+        mutationFn: async ({ id, status }: { id: string; status: string }) => {
             await api.patch(`/api/tickets/${id}`, { status });
         },
         onMutate: async (newTicket) => {
@@ -127,7 +127,7 @@ export default function BoardPage() {
         const { active, over } = event;
         if (!over) return;
 
-        const activeId = active.id;
+        const activeId = String(active.id);
         const overId = over.id;
 
         if (activeId === overId) return;
@@ -144,7 +144,7 @@ export default function BoardPage() {
 
         // Get the current status from the cache to avoid redundant updates
         const currentTickets = queryClient.getQueryData<Ticket[]>(['tickets', projectId]) || [];
-        const ticketInCache = currentTickets.find(t => t.id.toString() === activeId);
+        const ticketInCache = currentTickets.find(t => t.id === activeId);
 
         if (ticketInCache && ticketInCache.status !== overColumnId) {
             // Live update the cache

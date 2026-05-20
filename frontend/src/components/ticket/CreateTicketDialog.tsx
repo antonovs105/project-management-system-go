@@ -32,13 +32,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 const formSchema = z.object({
     title: z.string().min(1, "Title is required"),
     description: z.string(),
-    priority: z.enum(["low", "medium", "high"]),
+    priority: z.enum(["low", "medium", "high", "urgent"]),
     type: z.enum(["epic", "task", "subtask"]),
-    parent_id: z.string().optional(), // We'll parse to number on submit
+    parent_id: z.string().optional(),
 });
 
 interface Ticket {
-    id: number;
+    id: string;
     title: string;
     type: string;
 }
@@ -89,8 +89,8 @@ export function CreateTicketDialog({ children }: { children?: React.ReactNode })
                 priority: values.priority,
                 type: values.type,
             };
-            if (values.parent_id && values.parent_id !== '0') {
-                payload.parent_id = parseInt(values.parent_id);
+            if (values.parent_id) {
+                payload.parent_id = values.parent_id;
             }
 
             await api.post(`/api/projects/${projectId}/tickets`, payload);
@@ -172,6 +172,7 @@ export function CreateTicketDialog({ children }: { children?: React.ReactNode })
                                                 <SelectItem value="low">Low</SelectItem>
                                                 <SelectItem value="medium">Medium</SelectItem>
                                                 <SelectItem value="high">High</SelectItem>
+                                                <SelectItem value="urgent">Urgent</SelectItem>
                                             </SelectContent>
                                         </Select>
                                         <FormMessage />
@@ -195,7 +196,7 @@ export function CreateTicketDialog({ children }: { children?: React.ReactNode })
                                             </FormControl>
                                             <SelectContent>
                                                 {filteredParents.map(p => (
-                                                    <SelectItem key={p.id} value={p.id.toString()}>
+                                                    <SelectItem key={p.id} value={p.id}>
                                                         {p.title}
                                                     </SelectItem>
                                                 ))}

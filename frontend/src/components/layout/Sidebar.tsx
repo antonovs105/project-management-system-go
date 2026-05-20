@@ -5,8 +5,8 @@ import { useQuery } from '@tanstack/react-query';
 import api from '@/lib/axios';
 
 interface Project {
-    ID: number;
-    Name: string;
+    id: string;
+    name: string;
 }
 
 export const Sidebar = () => {
@@ -43,15 +43,15 @@ export const Sidebar = () => {
                 <div className="space-y-1 pl-4">
                     {projects?.map((project) => (
                         <Link
-                            key={project.ID}
-                            to={`/projects/${project.ID}`}
-                            className={`flex items-center gap-3 px-4 py-2 text-sm rounded-lg transition-colors ${location.pathname === `/projects/${project.ID}`
+                            key={project.id}
+                            to={`/projects/${project.id}`}
+                            className={`flex items-center gap-3 px-4 py-2 text-sm rounded-lg transition-colors ${location.pathname === `/projects/${project.id}`
                                 ? 'bg-slate-800 text-blue-400'
                                 : 'hover:bg-slate-900 text-slate-500 hover:text-slate-300'
                                 }`}
                         >
                             <Folder size={16} />
-                            <span className="truncate">{project.Name}</span>
+                            <span className="truncate">{project.name}</span>
                         </Link>
                     ))}
                 </div>

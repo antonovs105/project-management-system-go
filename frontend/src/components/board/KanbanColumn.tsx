@@ -3,7 +3,7 @@ import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { KanbanCard } from './KanbanCard';
 
 interface Ticket {
-    id: number;
+    id: string;
     title: string;
     type: string;
     priority: string;
@@ -14,7 +14,7 @@ interface KanbanColumnProps {
     id: string;
     title: string;
     tickets: Ticket[];
-    onTicketClick?: (ticketId: number) => void;
+    onTicketClick?: (ticketId: string) => void;
 }
 
 export function KanbanColumn({ id, title, tickets, onTicketClick }: KanbanColumnProps) {
@@ -34,7 +34,7 @@ export function KanbanColumn({ id, title, tickets, onTicketClick }: KanbanColumn
             </div>
 
             <div ref={setNodeRef} className="flex-1 p-2 space-y-2 overflow-y-auto min-h-[100px]">
-                <SortableContext id={id} items={tickets.map(t => t.id.toString())} strategy={verticalListSortingStrategy}>
+                <SortableContext id={id} items={tickets.map(t => t.id)} strategy={verticalListSortingStrategy}>
                     {tickets.map((ticket) => (
                         <KanbanCard key={ticket.id} ticket={ticket} onClick={() => onTicketClick && onTicketClick(ticket.id)} />
                     ))}

@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { GripVertical } from 'lucide-react';
 
 interface Ticket {
-    id: number;
+    id: string;
     title: string;
     type: string;
     priority: string;
@@ -25,7 +25,7 @@ export function KanbanCard({ ticket, onClick }: KanbanCardProps) {
         transition,
         isDragging,
     } = useSortable({
-        id: ticket.id.toString(),
+        id: ticket.id,
         data: {
             type: 'Ticket',
             ticket,

@@ -5,7 +5,7 @@ import ForceGraph2D from 'react-force-graph-2d';
 import api from '@/lib/axios';
 
 interface GraphNode {
-    id: number;
+    id: string;
     label: string;
     type: string;
     status: string;
@@ -16,8 +16,8 @@ interface GraphNode {
 }
 
 interface GraphLink {
-    source: number | GraphNode;
-    target: number | GraphNode;
+    source: string | GraphNode;
+    target: string | GraphNode;
     type: string;
 }
 

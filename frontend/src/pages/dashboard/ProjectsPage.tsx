@@ -7,10 +7,10 @@ import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from '@/comp
 import { Plus, ArrowRight, Folder } from 'lucide-react';
 
 interface Project {
-    ID: number;
-    Name: string;
-    Description: string;
-    CreatedAt: string;
+    id: string;
+    name: string;
+    description: string;
+    created_at: string;
 }
 
 export default function ProjectsPage() {
@@ -41,21 +41,21 @@ export default function ProjectsPage() {
 
             <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
                 {projects?.map((project) => (
-                    <Card key={project.ID} className="felx flex-col justify-between hover:shadow-md transition-shadow">
+                    <Card key={project.id} className="felx flex-col justify-between hover:shadow-md transition-shadow">
                         <CardHeader>
                             <div className="flex items-start justify-between">
                                 <div className="bg-blue-100 p-2 rounded-lg text-blue-600 mb-2 w-fit">
                                     <Folder size={20} />
                                 </div>
                             </div>
-                            <CardTitle>{project.Name}</CardTitle>
+                            <CardTitle>{project.name}</CardTitle>
                             <CardDescription className="line-clamp-2">
-                                {project.Description || 'No description provided.'}
+                                {project.description || 'No description provided.'}
                             </CardDescription>
                         </CardHeader>
                         <CardFooter>
                             <Button asChild variant="outline" className="w-full justify-between group">
-                                <Link to={`/projects/${project.ID}`}>
+                                <Link to={`/projects/${project.id}`}>
                                     View Board
                                     <ArrowRight size={16} className="text-slate-400 group-hover:text-slate-900 transition-colors" />
                                 </Link>
