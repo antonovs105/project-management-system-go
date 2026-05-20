@@ -18,7 +18,7 @@ type Repository interface {
 	IsProjectMember(ctx context.Context, projectID, userID string) (bool, error)
 	HasPendingInvite(ctx context.Context, projectID, userID string) (bool, error)
 	Update(ctx context.Context, project *Project) error
-	Delete(ctx context.Context, id string, actorID string) error
+	Delete(ctx context.Context, id string, actorID string) (*DeleteResult, error)
 	RemoveMember(ctx context.Context, projectID, actorID, targetUserID string) error
 	GetInviteByID(ctx context.Context, inviteID string) (*ProjectInvite, error)
 	CreateInvite(ctx context.Context, invite *ProjectInvite) error
@@ -283,10 +283,10 @@ func (r *PgRepository) Update(ctx context.Context, project *Project) error {
 	return tx.Commit()
 }
 
-func (r *PgRepository) Delete(ctx context.Context, id string, actorID string) error {
+func (r *PgRepository) Delete(ctx context.Context, id string, actorID string) (*DeleteResult, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
 
@@ -301,35 +301,62 @@ func (r *PgRepository) Delete(ctx context.Context, id string, actorID string) er
 		WHERE project.id = $1
 		FOR UPDATE OF project
 	`, id); err != nil {
-		return errors.New("project to delete not found")
+		return nil, errors.New("project to delete not found")
 	}
 
-	if err := tombstoneProjectTree(ctx, tx, stored.ID, stored.APID); err != nil {
-		return err
+	recipientInboxes, err := remoteProjectFollowerInboxes(ctx, tx, stored.ID)
+	if err != nil {
+		return nil, err
 	}
-	if err := r.writeProjectDeleteActivity(ctx, tx, stored.ID, actorID, stored.APID); err != nil {
-		return err
+	if err := tombstoneProjectTree(ctx, tx, stored.ID, stored.APID); err != nil {
+		return nil, err
+	}
+	activityID, err := r.writeProjectDeleteActivity(ctx, tx, stored.ID, actorID, stored.APID)
+	if err != nil {
+		return nil, err
 	}
 
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM actor_follows
 		WHERE followed_actor_id = $1
 	`, stored.ID); err != nil {
-		return err
+		return nil, err
 	}
 
 	result, err := tx.ExecContext(ctx, `DELETE FROM projects WHERE id = $1`, stored.ID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if rowsAffected == 0 {
-		return errors.New("project to delete not found")
+		return nil, errors.New("project to delete not found")
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &DeleteResult{
+		ActivityID:       activityID,
+		ProjectID:        stored.ID,
+		RecipientInboxes: recipientInboxes,
+	}, nil
+}
+
+func remoteProjectFollowerInboxes(ctx context.Context, q sqlx.QueryerContext, projectID string) ([]string, error) {
+	var inboxes []string
+	err := sqlx.SelectContext(ctx, q, &inboxes, `
+		SELECT DISTINCT follower.inbox_url
+		FROM actor_follows follow
+		JOIN actors follower ON follower.id = follow.follower_actor_id
+		WHERE follow.followed_actor_id = $1
+			AND follow.state = 'accepted'
+			AND follower.is_local = false
+			AND follower.inbox_url <> ''
+		ORDER BY follower.inbox_url ASC
+	`, projectID)
+	return inboxes, err
 }
 
 func tombstoneProjectTree(ctx context.Context, tx *sqlx.Tx, projectID, projectAPID string) error {
@@ -367,39 +394,41 @@ func tombstoneProjectTree(ctx context.Context, tx *sqlx.Tx, projectID, projectAP
 	return tombstoneObject(ctx, tx, projectAPID, "Group")
 }
 
-func (r *PgRepository) writeProjectDeleteActivity(ctx context.Context, tx *sqlx.Tx, projectID, actorID, projectAPID string) error {
+func (r *PgRepository) writeProjectDeleteActivity(ctx context.Context, tx *sqlx.Tx, projectID, actorID, projectAPID string) (string, error) {
 	actorAPID, err := lookupActorAPID(ctx, tx, actorID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	activityID, err := activitypub.NewID()
 	if err != nil {
-		return err
+		return "", err
 	}
 	activityAPID := activitypub.ActivityAPID(r.cfg, activityID)
 	doc := activitypub.ActivityDocument("Delete", activityAPID, actorAPID, projectAPID, projectAPID, time.Now().UTC())
 	rawDoc, err := json.Marshal(doc)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO ap_activities (id, ap_id, activity_type, actor_id, object_ap_id, target_ap_id, document)
 		VALUES ($1, $2, 'Delete', $3, $4, $5, $6)
 	`, activityID, activityAPID, actorID, projectAPID, projectAPID, rawDoc); err != nil {
-		return err
+		return "", err
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO actor_outbox_items (actor_id, activity_id, activity_ap_id)
 		VALUES ($1, $2, $3)
 	`, actorID, activityID, activityAPID); err != nil {
-		return err
+		return "", err
 	}
-	_, err = tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO actor_inbox_items (actor_id, activity_id, activity_ap_id)
 		VALUES ($1, $2, $3)
-	`, projectID, activityID, activityAPID)
-	return err
+	`, projectID, activityID, activityAPID); err != nil {
+		return "", err
+	}
+	return activityID, nil
 }
 
 func (r *PgRepository) RemoveMember(ctx context.Context, projectID, actorID, targetUserID string) error {

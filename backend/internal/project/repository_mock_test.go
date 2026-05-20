@@ -52,9 +52,12 @@ func (m *MockRepository) Update(ctx context.Context, project *Project) error {
 	return args.Error(0)
 }
 
-func (m *MockRepository) Delete(ctx context.Context, id string, actorID string) error {
+func (m *MockRepository) Delete(ctx context.Context, id string, actorID string) (*DeleteResult, error) {
 	args := m.Called(ctx, id, actorID)
-	return args.Error(0)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*DeleteResult), args.Error(1)
 }
 
 func (m *MockRepository) RemoveMember(ctx context.Context, projectID, actorID, targetUserID string) error {

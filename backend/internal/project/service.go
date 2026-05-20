@@ -6,11 +6,17 @@ import (
 	"log"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
 )
 
 type Service struct {
 	repo     Repository
 	apConfig activitypub.Config
+	delivery DeliveryEnqueuer
+}
+
+type DeliveryEnqueuer interface {
+	Enqueue(ctx context.Context, activityID string, targetInboxURL string) (*apdelivery.Delivery, error)
 }
 
 func NewService(repo Repository, apConfig activitypub.Config) *Service {
@@ -18,6 +24,10 @@ func NewService(repo Repository, apConfig activitypub.Config) *Service {
 		repo:     repo,
 		apConfig: apConfig,
 	}
+}
+
+func (s *Service) SetDelivery(delivery DeliveryEnqueuer) {
+	s.delivery = delivery
 }
 
 func (s *Service) CreateProject(ctx context.Context, name, description string, userID string) (*Project, error) {
@@ -109,7 +119,26 @@ func (s *Service) DeleteProject(ctx context.Context, projectID, userID string) e
 	if !CanDeleteProject(role) {
 		return errors.New("insufficient permissions: only owners can delete projects")
 	}
-	return s.repo.Delete(ctx, projectID, userID)
+	deleteResult, err := s.repo.Delete(ctx, projectID, userID)
+	if err != nil {
+		return err
+	}
+	s.enqueueRecipientInboxes(ctx, deleteResult)
+	return nil
+}
+
+func (s *Service) enqueueRecipientInboxes(ctx context.Context, result *DeleteResult) {
+	if s.delivery == nil || result == nil || result.ActivityID == "" {
+		return
+	}
+	for _, inbox := range result.RecipientInboxes {
+		if inbox == "" {
+			continue
+		}
+		if _, err := s.delivery.Enqueue(ctx, result.ActivityID, inbox); err != nil {
+			log.Printf("failed to enqueue ActivityPub delivery for project %s inbox %s: %v", result.ProjectID, inbox, err)
+		}
+	}
 }
 
 func (s *Service) RemoveMemberFromProject(ctx context.Context, projectID, actorID, targetUserID string) error {

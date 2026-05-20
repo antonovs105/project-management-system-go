@@ -122,6 +122,7 @@ func main() {
 		log.Println("REDIS_ADDR is not set; ActivityPub delivery worker disabled")
 	}
 	deliveryService := delivery.NewService(deliveryRepo, deliveryQueue)
+	projectService.SetDelivery(deliveryService)
 	ticketService.SetDelivery(deliveryService)
 	commentService.SetDelivery(deliveryService)
 	deliveryHandler := delivery.NewHandler(deliveryService)

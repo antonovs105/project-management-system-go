@@ -41,6 +41,12 @@ type ProjectMember struct {
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
+type DeleteResult struct {
+	ActivityID       string
+	ProjectID        string
+	RecipientInboxes []string
+}
+
 func IsValidRole(role string) bool {
 	switch role {
 	case RoleOwner, RoleManager, RoleDeveloper, RoleViewer:

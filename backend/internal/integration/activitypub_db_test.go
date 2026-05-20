@@ -50,6 +50,7 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	commentService := comment.NewService(commentRepo, ticketService, cfg)
 
 	deliveryService := delivery.NewService(delivery.NewRecipientRepository(db), delivery.NoopQueue{})
+	projectService.SetDelivery(deliveryService)
 	ticketService.SetDelivery(deliveryService)
 	commentService.SetDelivery(deliveryService)
 
@@ -375,6 +376,7 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	requireActivityForObjectAndTarget(t, db, "Delete", project.APID, project.APID)
 	requireOutboxItem(t, db, owner.ID, "Delete", project.APID)
 	requireInboxItem(t, db, project.ID, "Delete", project.APID)
+	requireDeliveryForObject(t, db, "Delete", project.APID, remoteInbox)
 	requireNoProjectByID(t, db, project.ID)
 	requireNoTicketByAPID(t, db, assignmentTarget.APID)
 	requireNoTicketByAPID(t, db, memberRemovalTicket.APID)
