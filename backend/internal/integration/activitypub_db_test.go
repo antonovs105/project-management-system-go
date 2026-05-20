@@ -226,6 +226,41 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		assert.Nil(t, privateKey)
 	})
 
+	t.Run("remote actors can author tickets and comments", func(t *testing.T) {
+		remoteActor := &remoteactor.Actor{
+			APID:              "https://remote.example/users/author",
+			Type:              "Person",
+			PreferredUsername: "author",
+			Handle:            "author@remote.example",
+			Name:              "Remote Author",
+			Summary:           "",
+			InboxURL:          "https://remote.example/users/author/inbox",
+			OutboxURL:         "https://remote.example/users/author/outbox",
+			PublicKeyID:       "https://remote.example/users/author#main-key",
+			PublicKeyPEM:      "public key",
+			Document:          []byte(`{"id":"https://remote.example/users/author","type":"Person"}`),
+		}
+		require.NoError(t, remoteactor.NewRepository(db).UpsertRemoteActor(ctx, remoteActor))
+
+		ticketID, err := activitypub.NewID()
+		require.NoError(t, err)
+		_, err = db.ExecContext(ctx, `
+			INSERT INTO tickets (
+				id, ap_id, project_id, reporter_id, title, status, priority, type
+			)
+			VALUES ($1, $2, $3, $4, 'Remote authored ticket', 'open', 'medium', 'task')
+		`, ticketID, activitypub.TicketAPID(cfg, ticketID), project.ID, remoteActor.ID)
+		require.NoError(t, err)
+
+		commentID, err := activitypub.NewID()
+		require.NoError(t, err)
+		_, err = db.ExecContext(ctx, `
+			INSERT INTO comments (id, ap_id, ticket_id, author_id, content)
+			VALUES ($1, $2, $3, $4, 'Remote authored comment')
+		`, commentID, activitypub.CommentAPID(cfg, commentID), ticketID, remoteActor.ID)
+		require.NoError(t, err)
+	})
+
 	t.Run("remote inbox stores inbound activity idempotently", func(t *testing.T) {
 		publicKey, privateKey, err := activitypub.GenerateRSAKeyPair()
 		require.NoError(t, err)
