@@ -16,6 +16,7 @@ type Repository interface {
 	FindActorAPIDByID(ctx context.Context, actorID string) (string, error)
 	IsProjectActor(ctx context.Context, actorID string) (bool, error)
 	StoreInboundActivity(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
+	StoreInboundCreateNote(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	AcceptProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) (*FollowResponse, error)
 	UndoProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) error
 }
@@ -62,8 +63,46 @@ func (r *PgRepository) StoreInboundActivity(ctx context.Context, targetActorID s
 	}
 	defer tx.Rollback()
 
+	accepted, err := r.storeInboundActivityTx(ctx, tx, targetActorID, activity)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return accepted, nil
+}
+
+func (r *PgRepository) StoreInboundCreateNote(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
+	if activity.ObjectNote == nil {
+		return nil, ErrInvalidActivity
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	accepted, err := r.storeInboundActivityTx(ctx, tx, targetActorID, activity)
+	if err != nil {
+		return nil, err
+	}
+	if !accepted.Duplicate {
+		if err := r.insertRemoteNoteCommentTx(ctx, tx, targetActorID, activity); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return accepted, nil
+}
+
+func (r *PgRepository) storeInboundActivityTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
 	var activityID string
-	err = tx.QueryRowxContext(ctx, `
+	err := tx.QueryRowxContext(ctx, `
 		INSERT INTO ap_activities (
 			ap_id, activity_type, actor_id, object_ap_id, target_ap_id, document
 		)
@@ -122,16 +161,79 @@ func (r *PgRepository) StoreInboundActivity(ctx context.Context, targetActorID s
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-
 	return &AcceptedActivity{
 		ActivityID:   activityID,
 		ActivityAPID: activity.ID,
 		ReceivedAt:   receivedAt.Time,
 		Duplicate:    duplicateActivity || duplicateInboxItem,
 	}, nil
+}
+
+func (r *PgRepository) insertRemoteNoteCommentTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity) error {
+	note := activity.ObjectNote
+
+	var ticketID string
+	if err := tx.GetContext(ctx, &ticketID, `
+		SELECT ticket.id::text
+		FROM tickets ticket
+		JOIN projects project ON project.id = ticket.project_id
+		WHERE project.id = $1 AND ticket.ap_id = $2
+	`, targetActorID, note.InReplyTo); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrInvalidActivity
+		}
+		return err
+	}
+
+	var acceptedFollower bool
+	if err := tx.GetContext(ctx, &acceptedFollower, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM actor_follows
+			WHERE follower_actor_id = $1
+				AND followed_actor_id = $2
+				AND state = 'accepted'
+		)
+	`, activity.ActorID, targetActorID); err != nil {
+		return err
+	}
+	if !acceptedFollower {
+		return ErrForbiddenActor
+	}
+
+	commentID, err := activitypub.NewID()
+	if err != nil {
+		return err
+	}
+
+	var storedCommentID string
+	if err := tx.GetContext(ctx, &storedCommentID, `
+		WITH inserted AS (
+			INSERT INTO comments (id, ap_id, ticket_id, author_id, content)
+			VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT (ap_id) DO NOTHING
+			RETURNING id::text
+		)
+		SELECT id FROM inserted
+		UNION ALL
+		SELECT id::text FROM comments WHERE ap_id = $2
+		LIMIT 1
+	`, commentID, note.ID, ticketID, activity.ActorID, note.Content); err != nil {
+		return err
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO ap_objects (ap_id, object_type, actor_id, local_ref_table, local_ref_id, document)
+		VALUES ($1, 'Note', $2, 'comments', $3, $4)
+		ON CONFLICT (ap_id) DO UPDATE
+		SET object_type = EXCLUDED.object_type,
+			actor_id = EXCLUDED.actor_id,
+			local_ref_table = EXCLUDED.local_ref_table,
+			local_ref_id = EXCLUDED.local_ref_id,
+			document = EXCLUDED.document,
+			is_deleted = false
+	`, note.ID, activity.ActorID, storedCommentID, note.Document)
+	return err
 }
 
 func (r *PgRepository) AcceptProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) (*FollowResponse, error) {

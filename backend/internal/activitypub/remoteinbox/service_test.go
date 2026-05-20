@@ -19,6 +19,7 @@ type memoryRepository struct {
 	targetActorID string
 	actorAPID     string
 	stored        *InboundActivity
+	storedNote    *InboundActivity
 	storeResult   *AcceptedActivity
 	projectActor  bool
 	follow        *InboundActivity
@@ -26,6 +27,7 @@ type memoryRepository struct {
 	undo          *InboundActivity
 	findErr       error
 	storeErr      error
+	storeNoteErr  error
 	followErr     error
 	undoErr       error
 }
@@ -56,6 +58,22 @@ func (m *memoryRepository) StoreInboundActivity(ctx context.Context, targetActor
 	}
 	return &AcceptedActivity{
 		ActivityID:   "stored-activity",
+		ActivityAPID: activity.ID,
+		ReceivedAt:   time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC),
+	}, nil
+}
+
+func (m *memoryRepository) StoreInboundCreateNote(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
+	if m.storeNoteErr != nil {
+		return nil, m.storeNoteErr
+	}
+	copy := *activity
+	m.storedNote = &copy
+	if m.storeResult != nil {
+		return m.storeResult, nil
+	}
+	return &AcceptedActivity{
+		ActivityID:   "stored-note-activity",
 		ActivityAPID: activity.ID,
 		ReceivedAt:   time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC),
 	}, nil
@@ -169,6 +187,51 @@ func TestServiceReceiveRejectsProjectFollowWithWrongObject(t *testing.T) {
 		ActorAPID: "https://remote.example/users/alice",
 	}})
 	body := []byte(`{"id":"https://remote.example/activities/follow-1","type":"Follow","actor":"https://remote.example/users/alice","object":"http://localhost:8080/projects/other"}`)
+
+	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
+
+	require.ErrorIs(t, err, ErrInvalidActivity)
+}
+
+func TestServiceReceiveStoresProjectCreateNote(t *testing.T) {
+	repo := &memoryRepository{targetActorID: "project-actor", projectActor: true}
+	service := NewService(repo, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-actor",
+		ActorAPID: "https://remote.example/users/alice",
+	}})
+	body := []byte(`{"id":"https://remote.example/activities/create-note-1","type":"Create","actor":"https://remote.example/users/alice","object":{"id":"https://remote.example/notes/1","type":"Note","attributedTo":"https://remote.example/users/alice","inReplyTo":"http://localhost:8080/tickets/ticket-1","content":"Looks ready."}}`)
+
+	accepted, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://remote.example/activities/create-note-1", accepted.ActivityAPID)
+	require.NotNil(t, repo.storedNote)
+	require.NotNil(t, repo.storedNote.ObjectNote)
+	assert.Equal(t, "https://remote.example/notes/1", repo.storedNote.ObjectNote.ID)
+	assert.Equal(t, "http://localhost:8080/tickets/ticket-1", repo.storedNote.ObjectNote.InReplyTo)
+	assert.Equal(t, "Looks ready.", repo.storedNote.ObjectNote.Content)
+	require.NotNil(t, repo.storedNote.ObjectAPID)
+	assert.Equal(t, "https://remote.example/notes/1", *repo.storedNote.ObjectAPID)
+}
+
+func TestServiceReceiveRejectsProjectCreateNoteActorMismatch(t *testing.T) {
+	service := NewService(&memoryRepository{targetActorID: "project-actor", projectActor: true}, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-actor",
+		ActorAPID: "https://remote.example/users/alice",
+	}})
+	body := []byte(`{"id":"https://remote.example/activities/create-note-1","type":"Create","actor":"https://remote.example/users/alice","object":{"id":"https://remote.example/notes/1","type":"Note","attributedTo":"https://remote.example/users/bob","inReplyTo":"http://localhost:8080/tickets/ticket-1","content":"Looks ready."}}`)
+
+	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
+
+	require.ErrorIs(t, err, ErrForbiddenActor)
+}
+
+func TestServiceReceiveRejectsProjectCreateNoteWithoutReplyTarget(t *testing.T) {
+	service := NewService(&memoryRepository{targetActorID: "project-actor", projectActor: true}, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-actor",
+		ActorAPID: "https://remote.example/users/alice",
+	}})
+	body := []byte(`{"id":"https://remote.example/activities/create-note-1","type":"Create","actor":"https://remote.example/users/alice","object":{"id":"https://remote.example/notes/1","type":"Note","attributedTo":"https://remote.example/users/alice","content":"Looks ready."}}`)
 
 	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
 

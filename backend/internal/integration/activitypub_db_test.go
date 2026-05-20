@@ -358,6 +358,38 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		requireOutboxItem(t, db, project.ID, "Accept", followAPID)
 		requireDeliveryForObject(t, db, "Accept", followAPID, remoteActor.InboxURL)
 
+		ticketService := ticket.NewService(ticket.NewRepository(db, cfg), projectService, cfg)
+		ticketService.SetDelivery(deliveryService)
+		localTicket, err := ticketService.CreateTicket(ctx, ticket.CreateTicketRequest{
+			Title:       "Remote comment target",
+			Description: "A local ticket for remote discussion",
+			Priority:    "medium",
+			Type:        "task",
+		}, project.ID, owner.ID)
+		require.NoError(t, err)
+
+		noteAPID := "https://remote.example/notes/project-comment"
+		createNoteAPID := "https://remote.example/activities/create-project-comment"
+		noteBody := []byte(`{"id":"` + createNoteAPID + `","type":"Create","actor":"` + remoteActor.APID + `","object":{"id":"` + noteAPID + `","type":"Note","attributedTo":"` + remoteActor.APID + `","inReplyTo":"` + localTicket.APID + `","content":"Remote review looks good."}}`)
+		noteReq, err := http.NewRequest(http.MethodPost, project.APID+"/inbox", bytes.NewReader(noteBody))
+		require.NoError(t, err)
+		require.NoError(t, signer.SignRequest(ctx, remoteActor.ID, noteReq, noteBody))
+
+		remoteComment, err := receiver.Receive(ctx, noteReq, project.APID, noteBody)
+		require.NoError(t, err)
+		require.Equal(t, createNoteAPID, remoteComment.ActivityAPID)
+		requireObjectType(t, db, noteAPID, "Note")
+		requireActivityForObject(t, db, "Create", noteAPID)
+		requireInboxItem(t, db, project.ID, "Create", noteAPID)
+
+		commentService := comment.NewService(comment.NewRepository(db, cfg), ticketService, cfg)
+		comments, err := commentService.ListComments(ctx, localTicket.ID, owner.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 1)
+		assert.Equal(t, noteAPID, comments[0].APID)
+		assert.Equal(t, remoteActor.ID, comments[0].AuthorID)
+		assert.Equal(t, "Remote review looks good.", comments[0].Content)
+
 		undoAPID := "https://remote.example/activities/undo-follow-project"
 		undoBody := []byte(`{"id":"` + undoAPID + `","type":"Undo","actor":"` + remoteActor.APID + `","object":{"id":"` + followAPID + `","type":"Follow","actor":"` + remoteActor.APID + `","object":"` + project.APID + `"}}`)
 		undoReq, err := http.NewRequest(http.MethodPost, project.APID+"/inbox", bytes.NewReader(undoBody))
@@ -372,8 +404,6 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		requireActivityForObject(t, db, "Undo", followAPID)
 		requireInboxItem(t, db, project.ID, "Undo", followAPID)
 
-		ticketService := ticket.NewService(ticket.NewRepository(db, cfg), projectService, cfg)
-		ticketService.SetDelivery(deliveryService)
 		ticketAfterUndo, err := ticketService.CreateTicket(ctx, ticket.CreateTicketRequest{
 			Title:       "No delivery after undo",
 			Description: "Remote follower opted out",

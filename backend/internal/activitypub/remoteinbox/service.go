@@ -103,6 +103,14 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 	if err != nil {
 		return nil, err
 	}
+	isProjectCreateNote, err := s.isProjectCreateNote(ctx, targetActorID, targetAPID, activity)
+	if err != nil {
+		return nil, err
+	}
+
+	if isProjectCreateNote {
+		return s.repo.StoreInboundCreateNote(ctx, targetActorID, activity)
+	}
 
 	accepted, err := s.repo.StoreInboundActivity(ctx, targetActorID, activity)
 	if err != nil {
@@ -123,6 +131,36 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 		}
 	}
 	return accepted, nil
+}
+
+func (s *Service) isProjectCreateNote(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
+	if activity.Type != "Create" || activity.ObjectNote == nil {
+		return false, nil
+	}
+	isProjectActor, err := s.repo.IsProjectActor(ctx, targetActorID)
+	if err != nil {
+		return false, err
+	}
+	if !isProjectActor {
+		return false, nil
+	}
+	note := activity.ObjectNote
+	if note.ID == "" || !isAbsoluteURI(note.ID) {
+		return false, fmt.Errorf("%w: note id", ErrInvalidActivity)
+	}
+	if note.AttributedTo == "" || note.AttributedTo != activity.ActorAPID {
+		return false, ErrForbiddenActor
+	}
+	if note.InReplyTo == "" || !isAbsoluteURI(note.InReplyTo) {
+		return false, fmt.Errorf("%w: note inReplyTo", ErrInvalidActivity)
+	}
+	if strings.TrimSpace(note.Content) == "" {
+		return false, fmt.Errorf("%w: note content", ErrInvalidActivity)
+	}
+	if activity.TargetAPID != nil && *activity.TargetAPID != targetAPID {
+		return false, fmt.Errorf("%w: create target must match inbox actor", ErrInvalidActivity)
+	}
+	return true, nil
 }
 
 func (s *Service) isProjectFollow(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
@@ -208,6 +246,9 @@ func parseActivity(body []byte) (*InboundActivity, error) {
 			activity.TargetAPID = &objectActivity.ObjectAPID
 		}
 	}
+	if objectNote := extractInboundNote(rawObject); objectNote != nil {
+		activity.ObjectNote = objectNote
+	}
 	if targetAPID := extractAPID(raw["target"]); targetAPID != "" {
 		activity.TargetAPID = &targetAPID
 	}
@@ -270,6 +311,45 @@ func extractEmbeddedActivity(value any) *EmbeddedActivity {
 		return nil
 	}
 	return embedded
+}
+
+func extractInboundNote(value any) *InboundNote {
+	raw, ok := value.(map[string]any)
+	if !ok || !hasObjectType(raw["type"], "Note") {
+		return nil
+	}
+	document, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	return &InboundNote{
+		ID:           extractAPID(raw["id"]),
+		AttributedTo: extractAPID(raw["attributedTo"]),
+		InReplyTo:    extractAPID(raw["inReplyTo"]),
+		Content:      strings.TrimSpace(stringValue(raw["content"])),
+		Document:     document,
+	}
+}
+
+func hasObjectType(value any, expected string) bool {
+	switch typed := value.(type) {
+	case string:
+		return typed == expected
+	case []any:
+		for _, item := range typed {
+			if value, ok := item.(string); ok && value == expected {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func stringValue(value any) string {
+	if typed, ok := value.(string); ok {
+		return typed
+	}
+	return ""
 }
 
 func isAbsoluteURI(value string) bool {

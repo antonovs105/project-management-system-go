@@ -24,6 +24,7 @@ type InboundActivity struct {
 	ActorID        string            `json:"-"`
 	ObjectAPID     *string           `json:"object,omitempty"`
 	ObjectActivity *EmbeddedActivity `json:"-"`
+	ObjectNote     *InboundNote      `json:"-"`
 	TargetAPID     *string           `json:"target,omitempty"`
 	Document       json.RawMessage   `json:"-"`
 }
@@ -33,6 +34,14 @@ type EmbeddedActivity struct {
 	Type       string
 	ActorAPID  string
 	ObjectAPID string
+}
+
+type InboundNote struct {
+	ID           string
+	AttributedTo string
+	InReplyTo    string
+	Content      string
+	Document     json.RawMessage
 }
 
 type AcceptedActivity struct {
