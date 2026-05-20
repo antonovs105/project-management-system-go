@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	"github.com/antonovs105/project-management-system-go/internal/activitypub/c2s"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/httpsig"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteactor"
@@ -32,6 +33,7 @@ type ApiServer struct {
 	ticketHandler   *ticket.Handler
 	commentHandler  *comment.Handler
 	apHandler       *activitypub.Handler
+	c2sHandler      *c2s.Handler
 	inboxHandler    *remoteinbox.Handler
 	deliveryHandler *delivery.Handler
 	deliverySvc     *delivery.Service
@@ -84,6 +86,7 @@ func main() {
 
 	// ActivityPub JSON-LD read dependencies
 	apHandler := activitypub.NewHandler(db, apConfig)
+	c2sHandler := c2s.NewHandler(db, apConfig, ticketService, commentService)
 
 	// Remote ActivityPub signing/discovery dependencies
 	remoteActorRepo := remoteactor.NewRepository(db)
@@ -145,6 +148,7 @@ func main() {
 		ticketHandler:   ticketHandler,
 		commentHandler:  commentHandler,
 		apHandler:       apHandler,
+		c2sHandler:      c2sHandler,
 		inboxHandler:    inboxHandler,
 		deliveryHandler: deliveryHandler,
 		deliverySvc:     deliveryService,
@@ -172,6 +176,7 @@ func main() {
 
 	// Local ActivityPub JSON-LD read routes and signed remote inbox POST foundation.
 	server.apHandler.RegisterRoutes(e)
+	server.c2sHandler.RegisterRoutes(e, authMiddleware.JWTMiddleware([]byte(jwtSecret)))
 	server.inboxHandler.RegisterRoutes(e)
 
 	// protected routes

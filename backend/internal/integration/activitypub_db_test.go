@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	"github.com/antonovs105/project-management-system-go/internal/activitypub/c2s"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/httpsig"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteactor"
@@ -187,6 +188,9 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	requireOutboxItem(t, db, owner.ID, "Create", createdTicket.APID)
 	requireDeliveryForObject(t, db, "Create", createdTicket.APID, remoteInbox)
 
+	c2sTicketAPID := requireC2SCreateTicket(t, db, cfg, ticketService, commentService, owner.ID, owner.Username, owner.APID, project.APID, remoteInbox)
+	requireProjectTicketsCollectionContains(t, db, cfg, project.ID, project.APID, c2sTicketAPID)
+
 	status := "done"
 	assigneeID := member.ID
 	assigneePatch := &assigneeID
@@ -232,6 +236,9 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, comments)
 
+	c2sCommentAPID := requireC2SCreateNote(t, db, cfg, ticketService, commentService, owner.ID, owner.Username, owner.APID, createdTicket.APID, project.ID, remoteInbox)
+	requireC2SOutboxRejectsActorMismatch(t, db, cfg, ticketService, commentService, owner.ID, owner.Username, member.APID, createdTicket.APID)
+
 	ticketComment, err := commentService.CreateComment(ctx, createdTicket.ID, owner.ID, "Deleting this with the ticket.")
 	require.NoError(t, err)
 
@@ -240,6 +247,8 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	requireObjectTombstone(t, db, createdTicket.APID, "forge:Ticket")
 	requireObjectDeleted(t, db, ticketComment.APID)
 	requireObjectTombstone(t, db, ticketComment.APID, "Note")
+	requireObjectDeleted(t, db, c2sCommentAPID)
+	requireObjectTombstone(t, db, c2sCommentAPID, "Note")
 	requireActivityForObject(t, db, "Delete", createdTicket.APID)
 	requireOutboxItem(t, db, owner.ID, "Delete", createdTicket.APID)
 	requireDeliveryForObject(t, db, "Delete", createdTicket.APID, remoteInbox)
@@ -1819,6 +1828,24 @@ func requireObjectType(t *testing.T, db *sqlx.DB, apID, expectedType string) {
 	require.Equal(t, expectedType, objectType)
 }
 
+func requireCommentContent(t *testing.T, db *sqlx.DB, apID, expectedContent string) {
+	t.Helper()
+
+	var content string
+	err := db.Get(&content, `SELECT content FROM comments WHERE ap_id = $1`, apID)
+	require.NoError(t, err)
+	require.Equal(t, expectedContent, content)
+}
+
+func requireTicketObjectName(t *testing.T, db *sqlx.DB, apID, expectedName string) {
+	t.Helper()
+
+	var name string
+	err := db.Get(&name, `SELECT document->>'name' FROM ap_objects WHERE ap_id = $1`, apID)
+	require.NoError(t, err)
+	require.Equal(t, expectedName, name)
+}
+
 func requireProjectObjectFields(t *testing.T, db *sqlx.DB, apID, expectedName, expectedSummary string) {
 	t.Helper()
 
@@ -2320,6 +2347,125 @@ func requireProjectActivityPubCollections(t *testing.T, db *sqlx.DB, cfg activit
 	require.LessOrEqual(t, len(ticketItems), 2)
 }
 
+func requireC2SCreateTicket(t *testing.T, db *sqlx.DB, cfg activitypub.Config, ticketService *ticket.Service, commentService *comment.Service, actorID, username, actorAPID, projectAPID, remoteInbox string) string {
+	t.Helper()
+
+	body := map[string]any{
+		"@context": activitypub.Context(),
+		"type":     "Create",
+		"actor":    actorAPID,
+		"object": map[string]any{
+			"type":             "forge:Ticket",
+			"attributedTo":     actorAPID,
+			"context":          projectAPID,
+			"name":             "C2S protocol task",
+			"content":          "Created through the local ActivityPub outbox.",
+			"forge:priority":   "medium",
+			"forge:ticketType": "task",
+			"forge:isResolved": false,
+		},
+	}
+	rec := postC2SOutbox(t, db, cfg, ticketService, commentService, username, actorID, body)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Header().Get(echo.HeaderContentType), activitypub.ActivityJSONMediaType)
+
+	var activity map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &activity))
+	require.Equal(t, "Create", activity["type"])
+	require.Equal(t, actorAPID, activity["actor"])
+	require.Equal(t, rec.Header().Get(echo.HeaderLocation), activity["id"])
+
+	ticketAPID, ok := activity["object"].(string)
+	require.True(t, ok)
+	require.NotEmpty(t, ticketAPID)
+
+	requireObjectType(t, db, ticketAPID, "Ticket")
+	requireTicketObjectName(t, db, ticketAPID, "C2S protocol task")
+	requireActivityForObjectAndActor(t, db, "Create", ticketAPID, actorID)
+	requireOutboxItem(t, db, actorID, "Create", ticketAPID)
+	requireDeliveryForObject(t, db, "Create", ticketAPID, remoteInbox)
+	return ticketAPID
+}
+
+func requireC2SCreateNote(t *testing.T, db *sqlx.DB, cfg activitypub.Config, ticketService *ticket.Service, commentService *comment.Service, actorID, username, actorAPID, ticketAPID, projectID, remoteInbox string) string {
+	t.Helper()
+
+	body := map[string]any{
+		"@context": activitypub.Context(),
+		"type":     "Create",
+		"actor":    actorAPID,
+		"object": map[string]any{
+			"type":         "Note",
+			"attributedTo": actorAPID,
+			"inReplyTo":    ticketAPID,
+			"content":      "C2S comment landed.",
+		},
+	}
+	rec := postC2SOutbox(t, db, cfg, ticketService, commentService, username, actorID, body)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Header().Get(echo.HeaderContentType), activitypub.ActivityJSONMediaType)
+
+	var activity map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &activity))
+	require.Equal(t, "Create", activity["type"])
+	require.Equal(t, actorAPID, activity["actor"])
+	require.Equal(t, rec.Header().Get(echo.HeaderLocation), activity["id"])
+
+	object, ok := activity["object"].(map[string]any)
+	require.True(t, ok)
+	commentAPID, ok := object["id"].(string)
+	require.True(t, ok)
+	require.NotEmpty(t, commentAPID)
+	require.Equal(t, "Note", object["type"])
+	require.Equal(t, ticketAPID, object["inReplyTo"])
+	require.Equal(t, "C2S comment landed.", object["content"])
+
+	requireObjectType(t, db, commentAPID, "Note")
+	requireCommentContent(t, db, commentAPID, "C2S comment landed.")
+	requireActivityForObjectAndActor(t, db, "Create", commentAPID, actorID)
+	requireOutboxItem(t, db, actorID, "Create", commentAPID)
+	requireInboxItem(t, db, projectID, "Create", commentAPID)
+	requireDeliveryForObject(t, db, "Create", commentAPID, remoteInbox)
+	return commentAPID
+}
+
+func requireC2SOutboxRejectsActorMismatch(t *testing.T, db *sqlx.DB, cfg activitypub.Config, ticketService *ticket.Service, commentService *comment.Service, actorID, username, wrongActorAPID, ticketAPID string) {
+	t.Helper()
+
+	before := activityCount(t, db)
+	body := map[string]any{
+		"type":  "Create",
+		"actor": wrongActorAPID,
+		"object": map[string]any{
+			"type":      "Note",
+			"inReplyTo": ticketAPID,
+			"content":   "This should be rejected.",
+		},
+	}
+	rec := postC2SOutbox(t, db, cfg, ticketService, commentService, username, actorID, body)
+	require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+	requireActivityCount(t, db, before)
+}
+
+func postC2SOutbox(t *testing.T, db *sqlx.DB, cfg activitypub.Config, ticketService *ticket.Service, commentService *comment.Service, username, userID string, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+
+	raw, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/users/"+username+"/outbox", bytes.NewReader(raw))
+	req.Header.Set(echo.HeaderContentType, activitypub.ActivityJSONMediaType)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("username")
+	c.SetParamValues(username)
+	c.Set("userID", userID)
+
+	require.NoError(t, c2s.NewHandler(db, cfg, ticketService, commentService).PostUserOutbox(c))
+	return rec
+}
+
 func requireActivityPubDocument(t *testing.T, db *sqlx.DB, cfg activitypub.Config, path string) map[string]any {
 	t.Helper()
 
@@ -2345,6 +2491,16 @@ func requireProjectTicketsCollectionNotContains(t *testing.T, db *sqlx.DB, cfg a
 	require.Equal(t, "OrderedCollectionPage", ticketsPage["type"])
 	require.Equal(t, ticketsID, ticketsPage["partOf"])
 	require.NotContains(t, requireOrderedItems(t, ticketsPage), ticketAPID)
+}
+
+func requireProjectTicketsCollectionContains(t *testing.T, db *sqlx.DB, cfg activitypub.Config, projectID, projectAPID, ticketAPID string) {
+	t.Helper()
+
+	ticketsID := activitypub.ProjectTickets(projectAPID)
+	ticketsPage := requireActivityPubDocument(t, db, cfg, "/projects/"+projectID+"/tickets?page=true&limit=50")
+	require.Equal(t, "OrderedCollectionPage", ticketsPage["type"])
+	require.Equal(t, ticketsID, ticketsPage["partOf"])
+	require.Contains(t, requireOrderedItems(t, ticketsPage), ticketAPID)
 }
 
 func requireOrderedItems(t *testing.T, doc map[string]any) []any {
