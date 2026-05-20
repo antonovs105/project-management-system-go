@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteactor"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
 	"github.com/antonovs105/project-management-system-go/internal/project"
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
@@ -156,6 +157,39 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 			VALUES ($1, $2, $3, 'Invalid status', 'blocked', 'medium', 'task')
 		`, "http://localhost:8080/tickets/invalid-status", project.ID, owner.ID)
 		require.Error(t, err)
+	})
+
+	t.Run("remote service actor allows public only key", func(t *testing.T) {
+		repo := remoteactor.NewRepository(db)
+		followersURL := "https://remote.example/users/bot/followers"
+		actor := &remoteactor.Actor{
+			APID:              "https://remote.example/users/bot",
+			Type:              "Service",
+			PreferredUsername: "bot",
+			Handle:            "bot@remote.example",
+			Name:              "Remote Bot",
+			Summary:           "",
+			InboxURL:          "https://remote.example/users/bot/inbox",
+			OutboxURL:         "https://remote.example/users/bot/outbox",
+			FollowersURL:      &followersURL,
+			PublicKeyID:       "https://remote.example/users/bot#main-key",
+			PublicKeyPEM:      "public key",
+			Document:          []byte(`{"id":"https://remote.example/users/bot","type":"Service"}`),
+		}
+
+		require.NoError(t, repo.UpsertRemoteActor(ctx, actor))
+
+		var isLocal bool
+		require.NoError(t, db.GetContext(ctx, &isLocal, `
+			SELECT is_local FROM actors WHERE ap_id = $1
+		`, actor.APID))
+		assert.False(t, isLocal)
+
+		var privateKey *string
+		require.NoError(t, db.GetContext(ctx, &privateKey, `
+			SELECT private_key_pem FROM actor_keys WHERE key_id = $1
+		`, actor.PublicKeyID))
+		assert.Nil(t, privateKey)
 	})
 }
 
