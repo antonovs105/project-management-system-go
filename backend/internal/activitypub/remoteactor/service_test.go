@@ -117,6 +117,43 @@ func TestResolveKeyFetchesAndCachesActor(t *testing.T) {
 	assert.Equal(t, server.URL+"/users/alice#main-key", repo.actor.PublicKeyID)
 }
 
+func TestResolveKeyRejectsUnsupportedScheme(t *testing.T) {
+	service := NewService(&memoryRepository{})
+
+	err := service.ResolveKey(context.Background(), "ftp://remote.example/users/alice#main-key")
+
+	require.ErrorIs(t, err, ErrInvalidActorDocument)
+}
+
+func TestResolveKeyRejectsKeyMismatch(t *testing.T) {
+	publicKey, _, err := activitypub.GenerateRSAKeyPair()
+	require.NoError(t, err)
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/users/alice" {
+			http.NotFound(w, r)
+			return
+		}
+		doc := actorDocumentMap(server.URL, "Person", publicKey)
+		doc["publicKey"].(map[string]any)["id"] = server.URL + "/users/alice#other-key"
+		writeJSON(t, w, doc)
+	}))
+	defer server.Close()
+
+	err = NewService(&memoryRepository{}, WithHTTPClient(server.Client())).ResolveKey(context.Background(), server.URL+"/users/alice#main-key")
+
+	require.ErrorIs(t, err, ErrInvalidActorDocument)
+}
+
+func TestFetchRejectsUnsupportedActorScheme(t *testing.T) {
+	service := NewService(&memoryRepository{})
+
+	_, err := service.Fetch(context.Background(), "ftp://remote.example/users/alice")
+
+	require.ErrorIs(t, err, ErrInvalidActorDocument)
+}
+
 func TestDiscoverRejectsWebFingerWithoutSelfLink(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(t, w, map[string]any{"subject": r.URL.Query().Get("resource"), "links": []any{}})
@@ -130,6 +167,28 @@ func TestDiscoverRejectsWebFingerWithoutSelfLink(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidWebFinger)
 }
 
+func TestDiscoverRejectsUnsupportedSelfLinkScheme(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, map[string]any{
+			"subject": r.URL.Query().Get("resource"),
+			"links": []map[string]any{
+				{
+					"rel":  "self",
+					"type": "application/activity+json",
+					"href": "ftp://remote.example/users/alice",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	service := NewService(&memoryRepository{}, WithHTTPClient(server.Client()), WithWebFingerScheme("http"))
+
+	_, err := service.Discover(context.Background(), "acct:alice@"+serverHost(server))
+
+	require.ErrorIs(t, err, ErrInvalidActorDocument)
+}
+
 func TestDiscoverRejectsInvalidActorDocument(t *testing.T) {
 	doc := actorDocumentMap("", "Person", "not a public key")
 
@@ -139,6 +198,41 @@ func TestDiscoverRejectsInvalidActorDocument(t *testing.T) {
 	service := NewService(&memoryRepository{}, WithHTTPClient(server.Client()), WithWebFingerScheme("http"))
 
 	_, err := service.Discover(context.Background(), "acct:alice@"+serverHost(server))
+
+	require.ErrorIs(t, err, ErrInvalidActorDocument)
+}
+
+func TestDiscoverRejectsInvalidActorEndpoints(t *testing.T) {
+	publicKey, _, err := activitypub.GenerateRSAKeyPair()
+	require.NoError(t, err)
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/webfinger":
+			writeJSON(t, w, map[string]any{
+				"subject": r.URL.Query().Get("resource"),
+				"links": []map[string]any{
+					{
+						"rel":  "self",
+						"type": "application/activity+json",
+						"href": server.URL + "/users/alice",
+					},
+				},
+			})
+		case "/users/alice":
+			doc := actorDocumentMap(server.URL, "Person", publicKey)
+			doc["inbox"] = "file:///tmp/inbox"
+			writeJSON(t, w, doc)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	service := NewService(&memoryRepository{}, WithHTTPClient(server.Client()), WithWebFingerScheme("http"))
+
+	_, err = service.Discover(context.Background(), "acct:alice@"+serverHost(server))
 
 	require.ErrorIs(t, err, ErrInvalidActorDocument)
 }

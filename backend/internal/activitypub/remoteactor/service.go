@@ -163,6 +163,11 @@ func (s *Service) resolveWebFinger(ctx context.Context, domain, resource string)
 }
 
 func (s *Service) fetchActor(ctx context.Context, actorURL, fallbackUsername, domain string) (*Actor, error) {
+	actorURL = strings.TrimSpace(actorURL)
+	if _, err := parseHTTPURL(actorURL); err != nil {
+		return nil, fmt.Errorf("%w: actor url", ErrInvalidActorDocument)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, actorURL, nil)
 	if err != nil {
 		return nil, err
@@ -189,6 +194,22 @@ func (s *Service) fetchActor(ctx context.Context, actorURL, fallbackUsername, do
 	}
 	if doc.Inbox == "" || doc.Outbox == "" {
 		return nil, fmt.Errorf("%w: actor inbox/outbox required", ErrInvalidActorDocument)
+	}
+	if _, err := parseHTTPURL(doc.Inbox); err != nil {
+		return nil, fmt.Errorf("%w: actor inbox url", ErrInvalidActorDocument)
+	}
+	if _, err := parseHTTPURL(doc.Outbox); err != nil {
+		return nil, fmt.Errorf("%w: actor outbox url", ErrInvalidActorDocument)
+	}
+	if doc.Followers != "" {
+		if _, err := parseHTTPURL(doc.Followers); err != nil {
+			return nil, fmt.Errorf("%w: actor followers url", ErrInvalidActorDocument)
+		}
+	}
+	if doc.Following != "" {
+		if _, err := parseHTTPURL(doc.Following); err != nil {
+			return nil, fmt.Errorf("%w: actor following url", ErrInvalidActorDocument)
+		}
 	}
 
 	keyID, publicKeyPEM, err := parsePublicKey(doc.PublicKey, doc.ID)
@@ -280,8 +301,8 @@ func normalizeAcctResource(resource string) (username string, domain string, nor
 }
 
 func actorURLFromKeyID(keyID string) (string, error) {
-	parsed, err := url.Parse(strings.TrimSpace(keyID))
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+	parsed, err := parseHTTPURL(keyID)
+	if err != nil {
 		return "", ErrInvalidActorDocument
 	}
 	parsed.Fragment = ""
@@ -292,8 +313,8 @@ func actorURLFromKeyID(keyID string) (string, error) {
 }
 
 func fallbackIdentity(actorURL string) (username string, domain string, err error) {
-	parsed, err := url.Parse(strings.TrimSpace(actorURL))
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+	parsed, err := parseHTTPURL(actorURL)
+	if err != nil {
 		return "", "", ErrInvalidActorDocument
 	}
 	username = path.Base(strings.TrimRight(parsed.Path, "/"))
@@ -349,6 +370,9 @@ func parsePublicKey(raw json.RawMessage, actorID string) (keyID string, publicKe
 	if key.ID == "" || key.PublicKeyPEM == "" {
 		return "", "", fmt.Errorf("%w: publicKey id and pem required", ErrInvalidActorDocument)
 	}
+	if _, err := parseHTTPURL(key.ID); err != nil {
+		return "", "", fmt.Errorf("%w: publicKey id url", ErrInvalidActorDocument)
+	}
 	if key.Owner != "" && key.Owner != actorID {
 		return "", "", fmt.Errorf("%w: publicKey owner mismatch", ErrInvalidActorDocument)
 	}
@@ -356,6 +380,21 @@ func parsePublicKey(raw json.RawMessage, actorID string) (keyID string, publicKe
 		return "", "", fmt.Errorf("%w: invalid publicKeyPem", ErrInvalidActorDocument)
 	}
 	return key.ID, key.PublicKeyPEM, nil
+}
+
+func parseHTTPURL(value string) (*url.URL, error) {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return nil, ErrInvalidActorDocument
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return nil, ErrInvalidActorDocument
+	}
+	if parsed.Path == "" {
+		return nil, ErrInvalidActorDocument
+	}
+	return parsed, nil
 }
 
 func emptyStringToNil(value string) *string {
