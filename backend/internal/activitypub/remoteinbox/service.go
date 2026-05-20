@@ -111,12 +111,19 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 	if err != nil {
 		return nil, err
 	}
+	isProjectUpdateTicket, err := s.isProjectUpdateTicket(ctx, targetActorID, targetAPID, activity)
+	if err != nil {
+		return nil, err
+	}
 
 	if isProjectCreateNote {
 		return s.repo.StoreInboundCreateNote(ctx, targetActorID, activity)
 	}
 	if isProjectCreateTicket {
 		return s.repo.StoreInboundCreateTicket(ctx, targetActorID, activity)
+	}
+	if isProjectUpdateTicket {
+		return s.repo.StoreInboundUpdateTicket(ctx, targetActorID, activity)
 	}
 
 	accepted, err := s.repo.StoreInboundActivity(ctx, targetActorID, activity)
@@ -140,6 +147,54 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 	return accepted, nil
 }
 
+func (s *Service) isProjectUpdateTicket(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
+	if activity.Type != "Update" || activity.ObjectTicket == nil {
+		return false, nil
+	}
+	isProjectActor, err := s.repo.IsProjectActor(ctx, targetActorID)
+	if err != nil {
+		return false, err
+	}
+	if !isProjectActor {
+		return false, nil
+	}
+	ticket := activity.ObjectTicket
+	if err := validateInboundTicketIdentity(ticket, activity.ActorAPID, targetAPID); err != nil {
+		return false, err
+	}
+	if !ticket.HasName && !ticket.HasContent && !ticket.HasStatus && !ticket.HasPriority && !ticket.HasTicketType && !ticket.HasIsResolved {
+		return false, fmt.Errorf("%w: ticket update has no projected fields", ErrInvalidActivity)
+	}
+	if ticket.HasName && strings.TrimSpace(ticket.Name) == "" {
+		return false, fmt.Errorf("%w: ticket name", ErrInvalidActivity)
+	}
+	if ticket.HasStatus {
+		if _, ok := normalizeTicketStatus(ticket.Status); !ok {
+			return false, fmt.Errorf("%w: ticket status", ErrInvalidActivity)
+		}
+	}
+	if ticket.HasPriority {
+		if _, ok := normalizeTicketPriority(ticket.Priority); !ok {
+			return false, fmt.Errorf("%w: ticket priority", ErrInvalidActivity)
+		}
+	}
+	if ticket.HasTicketType {
+		if _, ok := normalizeTicketType(ticket.TicketType); !ok {
+			return false, fmt.Errorf("%w: ticket type", ErrInvalidActivity)
+		}
+	}
+	if ticket.HasStatus && ticket.HasIsResolved {
+		status, _ := normalizeTicketStatus(ticket.Status)
+		if (status == "done") != ticket.IsResolved {
+			return false, fmt.Errorf("%w: ticket status and isResolved conflict", ErrInvalidActivity)
+		}
+	}
+	if activity.TargetAPID != nil && *activity.TargetAPID != targetAPID {
+		return false, fmt.Errorf("%w: update target must match inbox actor", ErrInvalidActivity)
+	}
+	return true, nil
+}
+
 func (s *Service) isProjectCreateTicket(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
 	if activity.Type != "Create" || activity.ObjectTicket == nil {
 		return false, nil
@@ -152,19 +207,13 @@ func (s *Service) isProjectCreateTicket(ctx context.Context, targetActorID, targ
 		return false, nil
 	}
 	ticket := activity.ObjectTicket
-	if ticket.ID == "" || !isAbsoluteURI(ticket.ID) {
-		return false, fmt.Errorf("%w: ticket id", ErrInvalidActivity)
-	}
-	if ticket.AttributedTo == "" || ticket.AttributedTo != activity.ActorAPID {
-		return false, ErrForbiddenActor
-	}
-	if ticket.Context != targetAPID {
-		return false, fmt.Errorf("%w: ticket context must match inbox actor", ErrInvalidActivity)
+	if err := validateInboundTicketIdentity(ticket, activity.ActorAPID, targetAPID); err != nil {
+		return false, err
 	}
 	if strings.TrimSpace(ticket.Name) == "" {
 		return false, fmt.Errorf("%w: ticket name", ErrInvalidActivity)
 	}
-	if _, ok := normalizeTicketPriority(ticket.Priority); !ok {
+	if _, ok := normalizeTicketPriority(ticket.Priority); !ok || ticket.InvalidFieldType {
 		return false, fmt.Errorf("%w: ticket priority", ErrInvalidActivity)
 	}
 	if _, ok := normalizeTicketType(ticket.TicketType); !ok {
@@ -174,6 +223,22 @@ func (s *Service) isProjectCreateTicket(ctx context.Context, targetActorID, targ
 		return false, fmt.Errorf("%w: create target must match inbox actor", ErrInvalidActivity)
 	}
 	return true, nil
+}
+
+func validateInboundTicketIdentity(ticket *InboundTicket, actorAPID, targetAPID string) error {
+	if ticket.InvalidFieldType {
+		return fmt.Errorf("%w: ticket field type", ErrInvalidActivity)
+	}
+	if ticket.ID == "" || !isAbsoluteURI(ticket.ID) {
+		return fmt.Errorf("%w: ticket id", ErrInvalidActivity)
+	}
+	if ticket.AttributedTo == "" || ticket.AttributedTo != actorAPID {
+		return ErrForbiddenActor
+	}
+	if ticket.Context != targetAPID {
+		return fmt.Errorf("%w: ticket context must match inbox actor", ErrInvalidActivity)
+	}
+	return nil
 }
 
 func (s *Service) isProjectCreateNote(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
@@ -386,17 +451,40 @@ func extractInboundTicket(value any) *InboundTicket {
 	if err != nil {
 		return nil
 	}
-	isResolved, _ := boolValue(raw["forge:isResolved"])
+	name, hasName, validName := optionalStringValue(raw, "name")
+	content, hasContent, validContent := optionalStringValue(raw, "content")
+	status, hasStatus, validStatus := optionalStringValue(raw, "forge:status")
+	priority, hasPriority, validPriority := optionalStringValue(raw, "forge:priority")
+	ticketType, hasTicketType, validTicketType := optionalStringValue(raw, "forge:ticketType")
+	isResolved, hasIsResolved, validIsResolved := optionalBoolValue(raw, "forge:isResolved")
 	return &InboundTicket{
-		ID:           extractAPID(raw["id"]),
-		AttributedTo: extractAPID(raw["attributedTo"]),
-		Context:      extractAPID(raw["context"]),
-		Name:         strings.TrimSpace(stringValue(raw["name"])),
-		Content:      strings.TrimSpace(stringValue(raw["content"])),
-		Priority:     strings.TrimSpace(stringValue(raw["forge:priority"])),
-		TicketType:   strings.TrimSpace(stringValue(raw["forge:ticketType"])),
-		IsResolved:   isResolved,
-		Document:     document,
+		ID:               extractAPID(raw["id"]),
+		AttributedTo:     extractAPID(raw["attributedTo"]),
+		Context:          extractAPID(raw["context"]),
+		Name:             strings.TrimSpace(name),
+		HasName:          hasName,
+		Content:          strings.TrimSpace(content),
+		HasContent:       hasContent,
+		Status:           strings.TrimSpace(status),
+		HasStatus:        hasStatus,
+		Priority:         strings.TrimSpace(priority),
+		HasPriority:      hasPriority,
+		TicketType:       strings.TrimSpace(ticketType),
+		HasTicketType:    hasTicketType,
+		IsResolved:       isResolved,
+		HasIsResolved:    hasIsResolved,
+		InvalidFieldType: !validName || !validContent || !validStatus || !validPriority || !validTicketType || !validIsResolved,
+		Document:         document,
+	}
+}
+
+func normalizeTicketStatus(value string) (string, bool) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch value {
+	case "open", "in_progress", "review", "done":
+		return value, true
+	default:
+		return "", false
 	}
 }
 
@@ -447,11 +535,22 @@ func stringValue(value any) string {
 	return ""
 }
 
-func boolValue(value any) (bool, bool) {
-	if typed, ok := value.(bool); ok {
-		return typed, true
+func optionalStringValue(raw map[string]any, key string) (string, bool, bool) {
+	value, exists := raw[key]
+	if !exists {
+		return "", false, true
 	}
-	return false, false
+	typed, ok := value.(string)
+	return typed, true, ok
+}
+
+func optionalBoolValue(raw map[string]any, key string) (bool, bool, bool) {
+	value, exists := raw[key]
+	if !exists {
+		return false, false, true
+	}
+	typed, ok := value.(bool)
+	return typed, true, ok
 }
 
 func isAbsoluteURI(value string) bool {

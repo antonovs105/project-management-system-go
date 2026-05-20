@@ -18,6 +18,7 @@ type Repository interface {
 	StoreInboundActivity(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	StoreInboundCreateNote(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	StoreInboundCreateTicket(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
+	StoreInboundUpdateTicket(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	AcceptProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) (*FollowResponse, error)
 	UndoProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) error
 }
@@ -117,6 +118,32 @@ func (r *PgRepository) StoreInboundCreateTicket(ctx context.Context, targetActor
 	}
 	if !accepted.Duplicate {
 		if err := r.insertRemoteTicketTx(ctx, tx, targetActorID, activity); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return accepted, nil
+}
+
+func (r *PgRepository) StoreInboundUpdateTicket(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
+	if activity.ObjectTicket == nil {
+		return nil, ErrInvalidActivity
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	accepted, err := r.storeInboundActivityTx(ctx, tx, targetActorID, activity)
+	if err != nil {
+		return nil, err
+	}
+	if !accepted.Duplicate {
+		if err := r.updateRemoteTicketTx(ctx, tx, targetActorID, activity); err != nil {
 			return nil, err
 		}
 	}
@@ -333,6 +360,127 @@ func (r *PgRepository) insertRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, ta
 	}
 
 	_, err = tx.ExecContext(ctx, `
+		INSERT INTO ap_objects (ap_id, object_type, actor_id, local_ref_table, local_ref_id, document)
+		VALUES ($1, 'Ticket', $2, 'tickets', $3, $4)
+		ON CONFLICT (ap_id) DO UPDATE
+		SET object_type = EXCLUDED.object_type,
+			actor_id = EXCLUDED.actor_id,
+			local_ref_table = EXCLUDED.local_ref_table,
+			local_ref_id = EXCLUDED.local_ref_id,
+			document = EXCLUDED.document,
+			is_deleted = false
+	`, ticket.ID, activity.ActorID, stored.ID, ticket.Document)
+	return err
+}
+
+func (r *PgRepository) updateRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity) error {
+	ticket := activity.ObjectTicket
+
+	var acceptedFollower bool
+	if err := tx.GetContext(ctx, &acceptedFollower, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM actor_follows
+			WHERE follower_actor_id = $1
+				AND followed_actor_id = $2
+				AND state = 'accepted'
+		)
+	`, activity.ActorID, targetActorID); err != nil {
+		return err
+	}
+	if !acceptedFollower {
+		return ErrForbiddenActor
+	}
+
+	var stored struct {
+		ID          string `db:"id"`
+		ProjectID   string `db:"project_id"`
+		ReporterID  string `db:"reporter_id"`
+		Title       string `db:"title"`
+		Description string `db:"description"`
+		Status      string `db:"status"`
+		Priority    string `db:"priority"`
+		Type        string `db:"type"`
+	}
+	if err := tx.GetContext(ctx, &stored, `
+		SELECT id::text, project_id::text, reporter_id::text, title, description, status, priority, type
+		FROM tickets
+		WHERE ap_id = $1
+		FOR UPDATE
+	`, ticket.ID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrInvalidActivity
+		}
+		return err
+	}
+	if stored.ProjectID != targetActorID || stored.ReporterID != activity.ActorID {
+		return ErrActivityConflict
+	}
+
+	title := stored.Title
+	if ticket.HasName {
+		title = ticket.Name
+	}
+	description := stored.Description
+	if ticket.HasContent {
+		description = ticket.Content
+	}
+	status := stored.Status
+	if ticket.HasStatus {
+		normalizedStatus, ok := normalizeTicketStatus(ticket.Status)
+		if !ok {
+			return ErrInvalidActivity
+		}
+		status = normalizedStatus
+	}
+	if ticket.HasIsResolved {
+		if ticket.IsResolved {
+			status = "done"
+		} else if !ticket.HasStatus && status == "done" {
+			status = "open"
+		}
+	}
+	priority := stored.Priority
+	if ticket.HasPriority {
+		normalizedPriority, ok := normalizeTicketPriority(ticket.Priority)
+		if !ok {
+			return ErrInvalidActivity
+		}
+		priority = normalizedPriority
+	}
+	ticketType := stored.Type
+	if ticket.HasTicketType {
+		normalizedType, ok := normalizeTicketType(ticket.TicketType)
+		if !ok {
+			return ErrInvalidActivity
+		}
+		ticketType = normalizedType
+	}
+	isResolved := status == "done"
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE tickets
+		SET title = $2,
+			description = $3,
+			status = $4,
+			priority = $5,
+			type = $6,
+			is_resolved = $7,
+			resolved_at = CASE
+				WHEN $7 AND resolved_at IS NULL THEN now()
+				WHEN NOT $7 THEN NULL
+				ELSE resolved_at
+			END,
+			resolved_by_actor_id = CASE
+				WHEN $7 THEN CAST($8 AS uuid)
+				ELSE NULL
+			END
+		WHERE id = $1
+	`, stored.ID, title, description, status, priority, ticketType, isResolved, activity.ActorID); err != nil {
+		return err
+	}
+
+	_, err := tx.ExecContext(ctx, `
 		INSERT INTO ap_objects (ap_id, object_type, actor_id, local_ref_table, local_ref_id, document)
 		VALUES ($1, 'Ticket', $2, 'tickets', $3, $4)
 		ON CONFLICT (ap_id) DO UPDATE

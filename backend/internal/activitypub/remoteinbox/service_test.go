@@ -16,22 +16,24 @@ import (
 )
 
 type memoryRepository struct {
-	targetActorID  string
-	actorAPID      string
-	stored         *InboundActivity
-	storedNote     *InboundActivity
-	storedTicket   *InboundActivity
-	storeResult    *AcceptedActivity
-	projectActor   bool
-	follow         *InboundActivity
-	followResult   *FollowResponse
-	undo           *InboundActivity
-	findErr        error
-	storeErr       error
-	storeNoteErr   error
-	storeTicketErr error
-	followErr      error
-	undoErr        error
+	targetActorID   string
+	actorAPID       string
+	stored          *InboundActivity
+	storedNote      *InboundActivity
+	storedTicket    *InboundActivity
+	updatedTicket   *InboundActivity
+	storeResult     *AcceptedActivity
+	projectActor    bool
+	follow          *InboundActivity
+	followResult    *FollowResponse
+	undo            *InboundActivity
+	findErr         error
+	storeErr        error
+	storeNoteErr    error
+	storeTicketErr  error
+	updateTicketErr error
+	followErr       error
+	undoErr         error
 }
 
 func (m *memoryRepository) FindLocalActorIDByAPID(ctx context.Context, apID string) (string, error) {
@@ -92,6 +94,22 @@ func (m *memoryRepository) StoreInboundCreateTicket(ctx context.Context, targetA
 	}
 	return &AcceptedActivity{
 		ActivityID:   "stored-ticket-activity",
+		ActivityAPID: activity.ID,
+		ReceivedAt:   time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC),
+	}, nil
+}
+
+func (m *memoryRepository) StoreInboundUpdateTicket(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
+	if m.updateTicketErr != nil {
+		return nil, m.updateTicketErr
+	}
+	copy := *activity
+	m.updatedTicket = &copy
+	if m.storeResult != nil {
+		return m.storeResult, nil
+	}
+	return &AcceptedActivity{
+		ActivityID:   "updated-ticket-activity",
 		ActivityAPID: activity.ID,
 		ReceivedAt:   time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC),
 	}, nil
@@ -296,6 +314,55 @@ func TestServiceReceiveRejectsProjectCreateTicketInvalidPriority(t *testing.T) {
 		ActorAPID: "https://remote.example/users/alice",
 	}})
 	body := []byte(`{"id":"https://remote.example/activities/create-ticket-1","type":"Create","actor":"https://remote.example/users/alice","object":{"id":"https://remote.example/tickets/1","type":"forge:Ticket","attributedTo":"https://remote.example/users/alice","context":"http://localhost:8080/projects/project-1","name":"Remote ticket","forge:priority":"eventually"}}`)
+
+	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
+
+	require.ErrorIs(t, err, ErrInvalidActivity)
+}
+
+func TestServiceReceiveStoresProjectUpdateTicket(t *testing.T) {
+	repo := &memoryRepository{targetActorID: "project-actor", projectActor: true}
+	service := NewService(repo, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-actor",
+		ActorAPID: "https://remote.example/users/alice",
+	}})
+	body := []byte(`{"id":"https://remote.example/activities/update-ticket-1","type":"Update","actor":"https://remote.example/users/alice","object":{"id":"https://remote.example/tickets/1","type":"forge:Ticket","attributedTo":"https://remote.example/users/alice","context":"http://localhost:8080/projects/project-1","name":"Updated remote ticket","forge:status":"done","forge:isResolved":true}}`)
+
+	accepted, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://remote.example/activities/update-ticket-1", accepted.ActivityAPID)
+	require.NotNil(t, repo.updatedTicket)
+	require.NotNil(t, repo.updatedTicket.ObjectTicket)
+	assert.Equal(t, "https://remote.example/tickets/1", repo.updatedTicket.ObjectTicket.ID)
+	assert.Equal(t, "Updated remote ticket", repo.updatedTicket.ObjectTicket.Name)
+	assert.True(t, repo.updatedTicket.ObjectTicket.HasName)
+	assert.Equal(t, "done", repo.updatedTicket.ObjectTicket.Status)
+	assert.True(t, repo.updatedTicket.ObjectTicket.HasStatus)
+	assert.True(t, repo.updatedTicket.ObjectTicket.IsResolved)
+	assert.True(t, repo.updatedTicket.ObjectTicket.HasIsResolved)
+	require.NotNil(t, repo.updatedTicket.ObjectAPID)
+	assert.Equal(t, "https://remote.example/tickets/1", *repo.updatedTicket.ObjectAPID)
+}
+
+func TestServiceReceiveRejectsProjectUpdateTicketStatusConflict(t *testing.T) {
+	service := NewService(&memoryRepository{targetActorID: "project-actor", projectActor: true}, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-actor",
+		ActorAPID: "https://remote.example/users/alice",
+	}})
+	body := []byte(`{"id":"https://remote.example/activities/update-ticket-1","type":"Update","actor":"https://remote.example/users/alice","object":{"id":"https://remote.example/tickets/1","type":"forge:Ticket","attributedTo":"https://remote.example/users/alice","context":"http://localhost:8080/projects/project-1","forge:status":"done","forge:isResolved":false}}`)
+
+	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
+
+	require.ErrorIs(t, err, ErrInvalidActivity)
+}
+
+func TestServiceReceiveRejectsProjectUpdateTicketWithoutFields(t *testing.T) {
+	service := NewService(&memoryRepository{targetActorID: "project-actor", projectActor: true}, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-actor",
+		ActorAPID: "https://remote.example/users/alice",
+	}})
+	body := []byte(`{"id":"https://remote.example/activities/update-ticket-1","type":"Update","actor":"https://remote.example/users/alice","object":{"id":"https://remote.example/tickets/1","type":"forge:Ticket","attributedTo":"https://remote.example/users/alice","context":"http://localhost:8080/projects/project-1"}}`)
 
 	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
 

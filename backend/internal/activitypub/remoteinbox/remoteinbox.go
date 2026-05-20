@@ -46,15 +46,23 @@ type InboundNote struct {
 }
 
 type InboundTicket struct {
-	ID           string
-	AttributedTo string
-	Context      string
-	Name         string
-	Content      string
-	Priority     string
-	TicketType   string
-	IsResolved   bool
-	Document     json.RawMessage
+	ID               string
+	AttributedTo     string
+	Context          string
+	Name             string
+	HasName          bool
+	Content          string
+	HasContent       bool
+	Status           string
+	HasStatus        bool
+	Priority         string
+	HasPriority      bool
+	TicketType       string
+	HasTicketType    bool
+	IsResolved       bool
+	HasIsResolved    bool
+	InvalidFieldType bool
+	Document         json.RawMessage
 }
 
 type AcceptedActivity struct {

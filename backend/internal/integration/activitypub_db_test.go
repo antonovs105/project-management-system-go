@@ -415,6 +415,31 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		assert.Equal(t, "urgent", createdRemoteTicket.Priority)
 		assert.Equal(t, "task", createdRemoteTicket.Type)
 
+		updateTicketAPID := "https://remote.example/activities/update-project-ticket"
+		updateTicketBody := []byte(`{"id":"` + updateTicketAPID + `","type":"Update","actor":"` + remoteActor.APID + `","target":"` + project.APID + `","object":{"id":"` + remoteTicketAPID + `","type":"forge:Ticket","attributedTo":"` + remoteActor.APID + `","context":"` + project.APID + `","name":"Updated remote ticket","content":"Resolved from another server.","forge:status":"done","forge:priority":"high","forge:ticketType":"task","forge:isResolved":true}}`)
+		updateTicketReq, err := http.NewRequest(http.MethodPost, project.APID+"/inbox", bytes.NewReader(updateTicketBody))
+		require.NoError(t, err)
+		require.NoError(t, signer.SignRequest(ctx, remoteActor.ID, updateTicketReq, updateTicketBody))
+
+		updatedRemoteTicketActivity, err := receiver.Receive(ctx, updateTicketReq, project.APID, updateTicketBody)
+		require.NoError(t, err)
+		require.Equal(t, updateTicketAPID, updatedRemoteTicketActivity.ActivityAPID)
+		requireObjectType(t, db, remoteTicketAPID, "Ticket")
+		requireActivityForObject(t, db, "Update", remoteTicketAPID)
+		requireInboxItem(t, db, project.ID, "Update", remoteTicketAPID)
+
+		tickets, err = ticketService.ListTicketsInProject(ctx, project.ID, owner.ID)
+		require.NoError(t, err)
+		updatedRemoteTicket := findTicketByAPID(tickets, remoteTicketAPID)
+		require.NotNil(t, updatedRemoteTicket)
+		assert.Equal(t, remoteActor.ID, updatedRemoteTicket.ReporterID)
+		assert.Equal(t, "Updated remote ticket", updatedRemoteTicket.Title)
+		assert.Equal(t, "Resolved from another server.", updatedRemoteTicket.Description)
+		assert.Equal(t, "done", updatedRemoteTicket.Status)
+		assert.Equal(t, "high", updatedRemoteTicket.Priority)
+		assert.True(t, updatedRemoteTicket.IsResolved)
+		requireTicketResolved(t, db, updatedRemoteTicket.ID)
+
 		undoAPID := "https://remote.example/activities/undo-follow-project"
 		undoBody := []byte(`{"id":"` + undoAPID + `","type":"Undo","actor":"` + remoteActor.APID + `","object":{"id":"` + followAPID + `","type":"Follow","actor":"` + remoteActor.APID + `","object":"` + project.APID + `"}}`)
 		undoReq, err := http.NewRequest(http.MethodPost, project.APID+"/inbox", bytes.NewReader(undoBody))
