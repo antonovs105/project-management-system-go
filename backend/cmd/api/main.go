@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -259,9 +260,7 @@ func main() {
 	// New Echo
 	e := echo.New()
 
-	//Middleware
-	e.Use(middleware.Logger())
-	e.Use(middleware.Recover())
+	registerGlobalMiddleware(e, os.Stdout)
 
 	// CORS
 	corsOrigins := splitCSVEnv("CORS_ALLOWED_ORIGINS")
@@ -301,6 +300,25 @@ func main() {
 	server.deliveryHandler.RegisterRoutes(api)
 
 	e.Logger.Fatal(e.Start(":8080"))
+}
+
+func registerGlobalMiddleware(e *echo.Echo, logOutput io.Writer) {
+	e.Use(middleware.RequestID())
+	e.Use(middleware.LoggerWithConfig(requestLoggerConfig(logOutput)))
+	e.Use(middleware.Recover())
+}
+
+func requestLoggerConfig(output io.Writer) middleware.LoggerConfig {
+	if output == nil {
+		output = os.Stdout
+	}
+	return middleware.LoggerConfig{
+		Format: `{"time":"${time_rfc3339_nano}","request_id":"${id}","remote_ip":"${remote_ip}",` +
+			`"host":"${host}","method":"${method}","uri":"${uri}","route":"${route}",` +
+			`"status":${status},"latency":${latency},"latency_human":"${latency_human}",` +
+			`"bytes_in":${bytes_in},"bytes_out":${bytes_out},"error":"${error}"}` + "\n",
+		Output: output,
+	}
 }
 
 // Handler
