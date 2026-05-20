@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -43,9 +44,10 @@ var (
 )
 
 type Service struct {
-	repo   Repository
-	clock  func() time.Time
-	maxAge time.Duration
+	repo               Repository
+	clock              func() time.Time
+	maxAge             time.Duration
+	missingKeyResolver func(context.Context, string) error
 }
 
 type Option func(*Service)
@@ -82,6 +84,12 @@ func WithClock(clock func() time.Time) Option {
 func WithMaxAge(maxAge time.Duration) Option {
 	return func(s *Service) {
 		s.maxAge = maxAge
+	}
+}
+
+func WithMissingKeyResolver(resolver func(context.Context, string) error) Option {
+	return func(s *Service) {
+		s.missingKeyResolver = resolver
 	}
 }
 
@@ -171,6 +179,12 @@ func (s *Service) VerifyRequest(ctx context.Context, req *http.Request, body []b
 	}
 
 	key, err := s.repo.PublicKeyByKeyID(ctx, input.KeyID)
+	if errors.Is(err, sql.ErrNoRows) && s.missingKeyResolver != nil {
+		if resolveErr := s.missingKeyResolver(ctx, input.KeyID); resolveErr != nil {
+			return nil, resolveErr
+		}
+		key, err = s.repo.PublicKeyByKeyID(ctx, input.KeyID)
+	}
 	if err != nil {
 		return nil, err
 	}

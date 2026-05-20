@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
 
+	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/httpsig"
 )
 
@@ -22,7 +24,12 @@ type Verifier interface {
 type Service struct {
 	repo         Repository
 	verifier     Verifier
+	delivery     DeliveryEnqueuer
 	maxBodyBytes int64
+}
+
+type DeliveryEnqueuer interface {
+	Enqueue(ctx context.Context, activityID string, targetInboxURL string) (*delivery.Delivery, error)
 }
 
 type Option func(*Service)
@@ -44,6 +51,12 @@ func WithMaxBodyBytes(size int64) Option {
 		if size > 0 {
 			s.maxBodyBytes = size
 		}
+	}
+}
+
+func WithDelivery(delivery DeliveryEnqueuer) Option {
+	return func(s *Service) {
+		s.delivery = delivery
 	}
 }
 
@@ -82,7 +95,41 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 		return nil, ErrForbiddenActor
 	}
 
-	return s.repo.StoreInboundActivity(ctx, targetActorID, activity)
+	isProjectFollow := false
+	if activity.Type == "Follow" {
+		if activity.ObjectAPID == nil || *activity.ObjectAPID != targetAPID {
+			return nil, fmt.Errorf("%w: follow object must match inbox actor", ErrInvalidActivity)
+		}
+		isProjectActor, err := s.repo.IsProjectActor(ctx, targetActorID)
+		if err != nil {
+			return nil, err
+		}
+		isProjectFollow = isProjectActor
+	}
+
+	accepted, err := s.repo.StoreInboundActivity(ctx, targetActorID, activity)
+	if err != nil {
+		return nil, err
+	}
+	if isProjectFollow && !accepted.Duplicate {
+		response, err := s.repo.AcceptProjectFollow(ctx, targetActorID, activity)
+		if err != nil {
+			return nil, err
+		}
+		accepted.ResponseActivityID = response.ActivityID
+		accepted.ResponseActivityAPID = response.ActivityAPID
+		s.enqueueFollowResponse(ctx, response)
+	}
+	return accepted, nil
+}
+
+func (s *Service) enqueueFollowResponse(ctx context.Context, response *FollowResponse) {
+	if s.delivery == nil || response == nil || response.ActivityID == "" || response.TargetInboxURL == "" {
+		return
+	}
+	if _, err := s.delivery.Enqueue(ctx, response.ActivityID, response.TargetInboxURL); err != nil {
+		log.Printf("failed to enqueue ActivityPub Accept{Follow} delivery to %s: %v", response.TargetInboxURL, err)
+	}
 }
 
 func parseActivity(body []byte) (*InboundActivity, error) {

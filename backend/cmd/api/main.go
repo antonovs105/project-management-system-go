@@ -8,6 +8,7 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/httpsig"
+	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteactor"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteinbox"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
 	authMiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
@@ -83,12 +84,11 @@ func main() {
 	// ActivityPub JSON-LD read dependencies
 	apHandler := activitypub.NewHandler(db, apConfig)
 
-	// Remote ActivityPub inbox dependencies
+	// Remote ActivityPub signing/discovery dependencies
+	remoteActorRepo := remoteactor.NewRepository(db)
+	remoteActorService := remoteactor.NewService(remoteActorRepo)
 	sigRepo := httpsig.NewRepository(db)
-	sigService := httpsig.NewService(sigRepo)
-	inboxRepo := remoteinbox.NewRepository(db)
-	inboxService := remoteinbox.NewService(inboxRepo, sigService)
-	inboxHandler := remoteinbox.NewHandler(inboxService, apConfig)
+	sigService := httpsig.NewService(sigRepo, httpsig.WithMissingKeyResolver(remoteActorService.ResolveKey))
 
 	// ActivityPub delivery dependencies. The worker runs in-process for now; the slice can be
 	// moved to a separate worker container later without changing delivery internals.
@@ -114,6 +114,11 @@ func main() {
 	deliveryService := delivery.NewService(deliveryRepo, deliveryQueue)
 	ticketService.SetDelivery(deliveryService)
 	commentService.SetDelivery(deliveryService)
+
+	// Remote ActivityPub inbox dependencies
+	inboxRepo := remoteinbox.NewRepository(db, apConfig)
+	inboxService := remoteinbox.NewService(inboxRepo, sigService, remoteinbox.WithDelivery(deliveryService))
+	inboxHandler := remoteinbox.NewHandler(inboxService, apConfig)
 
 	// WebFinger discovery dependencies
 	wfRepo := webfinger.NewRepository(db)

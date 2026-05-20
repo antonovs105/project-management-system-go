@@ -28,8 +28,16 @@ type InboundActivity struct {
 }
 
 type AcceptedActivity struct {
-	ActivityID   string    `json:"activity_id"`
-	ActivityAPID string    `json:"activity_ap_id"`
-	ReceivedAt   time.Time `json:"received_at"`
-	Duplicate    bool      `json:"duplicate"`
+	ActivityID           string    `json:"activity_id"`
+	ActivityAPID         string    `json:"activity_ap_id"`
+	ResponseActivityID   string    `json:"response_activity_id,omitempty"`
+	ResponseActivityAPID string    `json:"response_activity_ap_id,omitempty"`
+	ReceivedAt           time.Time `json:"received_at"`
+	Duplicate            bool      `json:"duplicate"`
+}
+
+type FollowResponse struct {
+	ActivityID     string
+	ActivityAPID   string
+	TargetInboxURL string
 }

@@ -9,6 +9,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -93,6 +94,36 @@ func (s *Service) Discover(ctx context.Context, resource string) (*Actor, error)
 		return nil, err
 	}
 	return actor, nil
+}
+
+func (s *Service) Fetch(ctx context.Context, actorURL string) (*Actor, error) {
+	fallbackUsername, domain, err := fallbackIdentity(actorURL)
+	if err != nil {
+		return nil, err
+	}
+	actor, err := s.fetchActor(ctx, actorURL, fallbackUsername, domain)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.UpsertRemoteActor(ctx, actor); err != nil {
+		return nil, err
+	}
+	return actor, nil
+}
+
+func (s *Service) ResolveKey(ctx context.Context, keyID string) error {
+	actorURL, err := actorURLFromKeyID(keyID)
+	if err != nil {
+		return err
+	}
+	actor, err := s.Fetch(ctx, actorURL)
+	if err != nil {
+		return err
+	}
+	if actor.PublicKeyID != keyID {
+		return fmt.Errorf("%w: key id mismatch", ErrInvalidActorDocument)
+	}
+	return nil
 }
 
 func (s *Service) resolveWebFinger(ctx context.Context, domain, resource string) (string, error) {
@@ -246,6 +277,30 @@ func normalizeAcctResource(resource string) (username string, domain string, nor
 	}
 	domain = strings.ToLower(domain)
 	return username, domain, "acct:" + username + "@" + domain, nil
+}
+
+func actorURLFromKeyID(keyID string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(keyID))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", ErrInvalidActorDocument
+	}
+	parsed.Fragment = ""
+	if parsed.Path == "" {
+		return "", ErrInvalidActorDocument
+	}
+	return parsed.String(), nil
+}
+
+func fallbackIdentity(actorURL string) (username string, domain string, err error) {
+	parsed, err := url.Parse(strings.TrimSpace(actorURL))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", "", ErrInvalidActorDocument
+	}
+	username = path.Base(strings.TrimRight(parsed.Path, "/"))
+	if username == "." || username == "/" || username == "" {
+		username = "remote"
+	}
+	return username, strings.ToLower(parsed.Host), nil
 }
 
 func isActivityJSONMediaType(raw string) bool {

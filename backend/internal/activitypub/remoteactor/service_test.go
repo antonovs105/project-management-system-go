@@ -90,6 +90,33 @@ func TestDiscoverAcceptsActivityTypeArray(t *testing.T) {
 	assert.Equal(t, "bot@"+serverHost(server), actor.Handle)
 }
 
+func TestResolveKeyFetchesAndCachesActor(t *testing.T) {
+	publicKey, _, err := activitypub.GenerateRSAKeyPair()
+	require.NoError(t, err)
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/users/alice" {
+			http.NotFound(w, r)
+			return
+		}
+		doc := actorDocumentMap(server.URL, "Person", publicKey)
+		doc["publicKey"].(map[string]any)["id"] = server.URL + "/users/alice#main-key"
+		writeJSON(t, w, doc)
+	}))
+	defer server.Close()
+
+	repo := &memoryRepository{}
+	service := NewService(repo, WithHTTPClient(server.Client()))
+
+	err = service.ResolveKey(context.Background(), server.URL+"/users/alice#main-key")
+
+	require.NoError(t, err)
+	require.NotNil(t, repo.actor)
+	assert.Equal(t, server.URL+"/users/alice", repo.actor.APID)
+	assert.Equal(t, server.URL+"/users/alice#main-key", repo.actor.PublicKeyID)
+}
+
 func TestDiscoverRejectsWebFingerWithoutSelfLink(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(t, w, map[string]any{"subject": r.URL.Query().Get("resource"), "links": []any{}})

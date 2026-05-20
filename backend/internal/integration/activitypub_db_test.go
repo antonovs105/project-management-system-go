@@ -274,6 +274,56 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		requireInboxItem(t, db, project.ID, "Create", objectAPID)
 	})
 
+	t.Run("remote inbox accepts project follow and queues response", func(t *testing.T) {
+		publicKey, privateKey, err := activitypub.GenerateRSAKeyPair()
+		require.NoError(t, err)
+
+		remoteActor := &remoteactor.Actor{
+			APID:              "https://remote.example/users/follow-bot",
+			Type:              "Person",
+			PreferredUsername: "follow-bot",
+			Handle:            "follow-bot@remote.example",
+			Name:              "Follow Bot",
+			Summary:           "",
+			InboxURL:          "https://remote.example/users/follow-bot/inbox",
+			OutboxURL:         "https://remote.example/users/follow-bot/outbox",
+			PublicKeyID:       "https://remote.example/users/follow-bot#main-key",
+			PublicKeyPEM:      publicKey,
+			Document:          []byte(`{"id":"https://remote.example/users/follow-bot","type":"Person"}`),
+		}
+		require.NoError(t, remoteactor.NewRepository(db).UpsertRemoteActor(ctx, remoteActor))
+
+		followAPID := "https://remote.example/activities/follow-project"
+		body := []byte(`{"id":"` + followAPID + `","type":"Follow","actor":"` + remoteActor.APID + `","object":"` + project.APID + `"}`)
+		req, err := http.NewRequest(http.MethodPost, project.APID+"/inbox", bytes.NewReader(body))
+		require.NoError(t, err)
+
+		signer := httpsig.NewService(singleKeyRepo{key: &httpsig.ActorKey{
+			ActorID:       remoteActor.ID,
+			ActorAPID:     remoteActor.APID,
+			KeyID:         remoteActor.PublicKeyID,
+			Algorithm:     httpsig.AlgorithmRSAV15SHA256,
+			PublicKeyPEM:  publicKey,
+			PrivateKeyPEM: privateKey,
+		}})
+		require.NoError(t, signer.SignRequest(ctx, remoteActor.ID, req, body))
+
+		deliveryService := delivery.NewService(delivery.NewRecipientRepository(db), delivery.NoopQueue{})
+		receiver := remoteinbox.NewService(
+			remoteinbox.NewRepository(db, cfg),
+			httpsig.NewService(httpsig.NewRepository(db)),
+			remoteinbox.WithDelivery(deliveryService),
+		)
+		accepted, err := receiver.Receive(ctx, req, project.APID, body)
+		require.NoError(t, err)
+		require.NotEmpty(t, accepted.ResponseActivityID)
+
+		requireFollow(t, db, remoteActor.ID, project.ID, "accepted")
+		requireActivityForObject(t, db, "Accept", followAPID)
+		requireOutboxItem(t, db, project.ID, "Accept", followAPID)
+		requireDeliveryForObject(t, db, "Accept", followAPID, remoteActor.InboxURL)
+	})
+
 	t.Run("outbox delivery ledger tracks attempts", func(t *testing.T) {
 		var activityID string
 		require.NoError(t, db.GetContext(ctx, &activityID, `

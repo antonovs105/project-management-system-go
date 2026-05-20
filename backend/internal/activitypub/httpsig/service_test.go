@@ -2,6 +2,7 @@ package httpsig
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"strings"
 	"testing"
@@ -22,6 +23,24 @@ func (m memoryRepository) ActivePrivateKey(ctx context.Context, actorID string) 
 
 func (m memoryRepository) PublicKeyByKeyID(ctx context.Context, keyID string) (*ActorKey, error) {
 	return m.key, nil
+}
+
+type resolvingRepository struct {
+	key *ActorKey
+}
+
+func (r *resolvingRepository) ActivePrivateKey(ctx context.Context, actorID string) (*ActorKey, error) {
+	if r.key == nil {
+		return nil, sql.ErrNoRows
+	}
+	return r.key, nil
+}
+
+func (r *resolvingRepository) PublicKeyByKeyID(ctx context.Context, keyID string) (*ActorKey, error) {
+	if r.key == nil {
+		return nil, sql.ErrNoRows
+	}
+	return r.key, nil
 }
 
 func TestSignAndVerifyRequest(t *testing.T) {
@@ -119,6 +138,32 @@ func TestVerifyRequestRequiresSignatureHeaders(t *testing.T) {
 
 	_, err := service.VerifyRequest(context.Background(), req, nil)
 	require.ErrorIs(t, err, ErrMissingSignature)
+}
+
+func TestVerifyRequestResolvesMissingPublicKey(t *testing.T) {
+	signer, key, now := newTestService(t, AlgorithmRSAV15SHA256)
+	body := []byte(`{"type":"Follow"}`)
+	req := newSignedRequest(t, http.MethodPost, "https://local.test/projects/1/inbox", body)
+	require.NoError(t, signer.SignRequest(context.Background(), key.ActorID, req, body))
+
+	repo := &resolvingRepository{}
+	resolved := false
+	verifier := NewService(
+		repo,
+		WithClock(func() time.Time { return now }),
+		WithMaxAge(5*time.Minute),
+		WithMissingKeyResolver(func(ctx context.Context, keyID string) error {
+			resolved = true
+			repo.key = key
+			return nil
+		}),
+	)
+
+	verified, err := verifier.VerifyRequest(context.Background(), req, body)
+
+	require.NoError(t, err)
+	assert.True(t, resolved)
+	assert.Equal(t, key.KeyID, verified.KeyID)
 }
 
 func newTestService(t *testing.T, algorithm string) (*Service, *ActorKey, time.Time) {

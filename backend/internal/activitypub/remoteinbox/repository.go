@@ -3,23 +3,33 @@ package remoteinbox
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"time"
 
+	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/jmoiron/sqlx"
 )
 
 type Repository interface {
 	FindLocalActorIDByAPID(ctx context.Context, apID string) (string, error)
 	FindActorAPIDByID(ctx context.Context, actorID string) (string, error)
+	IsProjectActor(ctx context.Context, actorID string) (bool, error)
 	StoreInboundActivity(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
+	AcceptProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) (*FollowResponse, error)
 }
 
 type PgRepository struct {
-	db *sqlx.DB
+	db  *sqlx.DB
+	cfg activitypub.Config
 }
 
-func NewRepository(db *sqlx.DB) Repository {
-	return &PgRepository{db: db}
+func NewRepository(db *sqlx.DB, configs ...activitypub.Config) Repository {
+	cfg := activitypub.NewConfig("", "")
+	if len(configs) > 0 {
+		cfg = configs[0]
+	}
+	return &PgRepository{db: db, cfg: cfg}
 }
 
 func (r *PgRepository) FindLocalActorIDByAPID(ctx context.Context, apID string) (string, error) {
@@ -36,6 +46,12 @@ func (r *PgRepository) FindActorAPIDByID(ctx context.Context, actorID string) (s
 	var apID string
 	err := r.db.GetContext(ctx, &apID, `SELECT ap_id FROM actors WHERE id = $1`, actorID)
 	return apID, err
+}
+
+func (r *PgRepository) IsProjectActor(ctx context.Context, actorID string) (bool, error) {
+	var exists bool
+	err := r.db.GetContext(ctx, &exists, `SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1)`, actorID)
+	return exists, err
 }
 
 func (r *PgRepository) StoreInboundActivity(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
@@ -114,5 +130,74 @@ func (r *PgRepository) StoreInboundActivity(ctx context.Context, targetActorID s
 		ActivityAPID: activity.ID,
 		ReceivedAt:   receivedAt.Time,
 		Duplicate:    duplicateActivity || duplicateInboxItem,
+	}, nil
+}
+
+func (r *PgRepository) AcceptProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) (*FollowResponse, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var targetActorAPID string
+	var followerAPID string
+	var followerInbox string
+	if err := tx.QueryRowxContext(ctx, `
+		SELECT target.ap_id, follower.ap_id, follower.inbox_url
+		FROM actors target
+		JOIN projects project ON project.id = target.id
+		JOIN actors follower ON follower.id = $2
+		WHERE target.id = $1
+	`, targetActorID, activity.ActorID).Scan(&targetActorAPID, &followerAPID, &followerInbox); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrUnsupportedActivity
+		}
+		return nil, err
+	}
+	if followerAPID != activity.ActorAPID {
+		return nil, ErrForbiddenActor
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO actor_follows (follower_actor_id, followed_actor_id, state)
+		VALUES ($1, $2, 'accepted')
+		ON CONFLICT (follower_actor_id, followed_actor_id)
+		DO UPDATE SET state = 'accepted'
+	`, activity.ActorID, targetActorID); err != nil {
+		return nil, err
+	}
+
+	responseID, err := activitypub.NewID()
+	if err != nil {
+		return nil, err
+	}
+	responseAPID := activitypub.ActivityAPID(r.cfg, responseID)
+	doc := activitypub.ActivityDocument("Accept", responseAPID, targetActorAPID, activity.ID, activity.ActorAPID, time.Now().UTC())
+	rawDoc, err := json.Marshal(doc)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO ap_activities (id, ap_id, activity_type, actor_id, object_ap_id, target_ap_id, document)
+		VALUES ($1, $2, 'Accept', $3, $4, $5, $6)
+	`, responseID, responseAPID, targetActorID, activity.ID, activity.ActorAPID, rawDoc); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO actor_outbox_items (actor_id, activity_id, activity_ap_id)
+		VALUES ($1, $2, $3)
+	`, targetActorID, responseID, responseAPID); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &FollowResponse{
+		ActivityID:     responseID,
+		ActivityAPID:   responseAPID,
+		TargetInboxURL: followerInbox,
 	}, nil
 }
