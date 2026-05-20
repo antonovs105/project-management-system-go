@@ -53,13 +53,17 @@ func (s *Service) GetProjectByID(ctx context.Context, projectID, userID string) 
 		return nil, err
 	}
 
-	role, err := s.repo.GetUserRole(ctx, userID, projectID)
+	role, err := s.GetProjectRole(ctx, projectID, userID)
 	if err != nil {
 		return nil, errors.New("project not found or access denied")
 	}
 
 	log.Printf("User %s has role '%s' in project %s", userID, role, projectID)
 	return project, nil
+}
+
+func (s *Service) GetProjectRole(ctx context.Context, projectID, userID string) (string, error) {
+	return s.repo.GetUserRole(ctx, userID, projectID)
 }
 
 func (s *Service) ListUserProjects(ctx context.Context, userID string) ([]Project, error) {
@@ -76,6 +80,13 @@ func (s *Service) UpdateProject(ctx context.Context, projectID, userID string, r
 	if err != nil {
 		return err
 	}
+	role, err := s.GetProjectRole(ctx, projectID, userID)
+	if err != nil {
+		return errors.New("project not found or access denied")
+	}
+	if !CanManageProject(role) {
+		return errors.New("insufficient permissions: only owners or managers can update projects")
+	}
 
 	if req.Name != nil {
 		projectToUpdate.Name = *req.Name
@@ -88,9 +99,15 @@ func (s *Service) UpdateProject(ctx context.Context, projectID, userID string, r
 }
 
 func (s *Service) DeleteProject(ctx context.Context, projectID, userID string) error {
-	_, err := s.GetProjectByID(ctx, projectID, userID)
-	if err != nil {
+	if _, err := s.GetProjectByID(ctx, projectID, userID); err != nil {
 		return err
+	}
+	role, err := s.GetProjectRole(ctx, projectID, userID)
+	if err != nil {
+		return errors.New("project not found or access denied")
+	}
+	if !CanDeleteProject(role) {
+		return errors.New("insufficient permissions: only owners can delete projects")
 	}
 	return s.repo.Delete(ctx, projectID)
 }
@@ -101,12 +118,18 @@ func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUser
 		return nil, errors.New("access denied: you are not a member of this project")
 	}
 
-	if currentUserRole != "owner" && currentUserRole != "manager" {
+	if !CanManageMembers(currentUserRole) {
 		return nil, errors.New("insufficient permissions: only owners or managers can invite new members")
 	}
 
 	if role == "" {
-		role = "viewer"
+		role = RoleViewer
+	}
+	if !IsValidRole(role) {
+		return nil, errors.New("invalid project role")
+	}
+	if role == RoleOwner && currentUserRole != RoleOwner {
+		return nil, errors.New("insufficient permissions: only owners can invite owners")
 	}
 
 	inviteID, err := activitypub.NewID()

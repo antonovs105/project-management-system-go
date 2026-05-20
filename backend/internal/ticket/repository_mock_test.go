@@ -57,6 +57,14 @@ func (m *MockRepository) CreateLink(ctx context.Context, link *TicketLink) error
 	return args.Error(0)
 }
 
+func (m *MockRepository) GetLinkByID(ctx context.Context, linkID string) (*TicketLink, error) {
+	args := m.Called(ctx, linkID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*TicketLink), args.Error(1)
+}
+
 func (m *MockRepository) DeleteLink(ctx context.Context, linkID string) error {
 	args := m.Called(ctx, linkID)
 	return args.Error(0)
@@ -81,4 +89,9 @@ func (m *MockProjectChecker) GetProjectByID(ctx context.Context, projectID, user
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*project.Project), args.Error(1)
+}
+
+func (m *MockProjectChecker) GetProjectRole(ctx context.Context, projectID, userID string) (string, error) {
+	args := m.Called(ctx, projectID, userID)
+	return args.String(0), args.Error(1)
 }

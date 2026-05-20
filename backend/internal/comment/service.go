@@ -7,11 +7,13 @@ import (
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
+	"github.com/antonovs105/project-management-system-go/internal/project"
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
 )
 
 type TicketChecker interface {
 	GetTicketByID(ctx context.Context, ticketID, userID string) (*ticket.Ticket, error)
+	GetProjectRole(ctx context.Context, projectID, userID string) (string, error)
 }
 
 type Service struct {
@@ -39,6 +41,13 @@ func (s *Service) CreateComment(ctx context.Context, ticketID, authorID, content
 	ticket, err := s.tickets.GetTicketByID(ctx, ticketID, authorID)
 	if err != nil {
 		return nil, err
+	}
+	role, err := s.tickets.GetProjectRole(ctx, ticket.ProjectID, authorID)
+	if err != nil {
+		return nil, errors.New("project not found or access denied")
+	}
+	if !project.CanWriteTickets(role) {
+		return nil, errors.New("insufficient permissions: viewers cannot comment on tickets")
 	}
 	commentID, err := activitypub.NewID()
 	if err != nil {
@@ -71,8 +80,20 @@ func (s *Service) DeleteComment(ctx context.Context, commentID, userID string) e
 	if err != nil {
 		return errors.New("comment not found")
 	}
-	if _, err := s.tickets.GetTicketByID(ctx, comment.TicketID, userID); err != nil {
+	ticket, err := s.tickets.GetTicketByID(ctx, comment.TicketID, userID)
+	if err != nil {
 		return err
+	}
+	role, err := s.tickets.GetProjectRole(ctx, ticket.ProjectID, userID)
+	if err != nil {
+		return errors.New("project not found or access denied")
+	}
+	if comment.AuthorID == userID {
+		if !project.CanWriteTickets(role) {
+			return errors.New("insufficient permissions: viewers cannot delete comments")
+		}
+	} else if !project.CanModerateComments(role) {
+		return errors.New("insufficient permissions: only owners or managers can delete other comments")
 	}
 
 	deleteResult, err := s.repo.Delete(ctx, commentID, userID)

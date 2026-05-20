@@ -13,6 +13,7 @@ import (
 // ProjectChecker interface
 type ProjectChecker interface {
 	GetProjectByID(ctx context.Context, projectID, userID string) (*project.Project, error)
+	GetProjectRole(ctx context.Context, projectID, userID string) (string, error)
 }
 
 type Service struct {
@@ -40,6 +41,10 @@ func (s *Service) SetDelivery(delivery DeliveryEnqueuer) {
 	s.delivery = delivery
 }
 
+func (s *Service) GetProjectRole(ctx context.Context, projectID, userID string) (string, error) {
+	return s.projectService.GetProjectRole(ctx, projectID, userID)
+}
+
 // CreateTicketRequest DTO for ticket creation
 type CreateTicketRequest struct {
 	Title       string
@@ -59,9 +64,7 @@ var ticketRanks = map[string]int{
 
 // CreateTicket logic for ticket creation
 func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, projectID, reporterID string) (*Ticket, error) {
-	// checking access
-	_, err := s.projectService.GetProjectByID(ctx, projectID, reporterID)
-	if err != nil {
+	if err := s.requireProjectPermission(ctx, projectID, reporterID, project.CanWriteTickets, "insufficient permissions: viewers cannot create tickets"); err != nil {
 		return nil, err
 	}
 
@@ -172,9 +175,11 @@ type UpdateTicketRequest struct {
 
 // UpdateTicket logic for update
 func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, ticketID, userID string) error {
-	// find ticket, check access
 	ticketToUpdate, err := s.GetTicketByID(ctx, ticketID, userID)
 	if err != nil {
+		return err
+	}
+	if err := s.requireProjectPermission(ctx, ticketToUpdate.ProjectID, userID, project.CanWriteTickets, "insufficient permissions: viewers cannot update tickets"); err != nil {
 		return err
 	}
 
@@ -256,9 +261,11 @@ func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, tic
 
 // DeleteTicket logic for deleting
 func (s *Service) DeleteTicket(ctx context.Context, ticketID, userID string) error {
-	// check access
 	ticket, err := s.GetTicketByID(ctx, ticketID, userID)
 	if err != nil {
+		return err
+	}
+	if err := s.requireProjectPermission(ctx, ticket.ProjectID, userID, project.CanDeleteTickets, "insufficient permissions: only owners or managers can delete tickets"); err != nil {
 		return err
 	}
 
@@ -288,6 +295,9 @@ func (s *Service) AddTicketLink(ctx context.Context, sourceID, targetID string, 
 
 	if source.ProjectID != target.ProjectID {
 		return errors.New("cannot link tickets from different projects")
+	}
+	if err := s.requireProjectPermission(ctx, source.ProjectID, userID, project.CanWriteTickets, "insufficient permissions: viewers cannot update ticket links"); err != nil {
+		return err
 	}
 
 	// Cycle Detection
@@ -381,9 +391,18 @@ func (s *Service) enqueueRecipientInboxes(ctx context.Context, projectID string,
 
 // RemoveTicketLink removes a link
 func (s *Service) RemoveTicketLink(ctx context.Context, linkID, projectID, userID string) error {
-
-	err := s.repo.DeleteLink(ctx, linkID)
-	return err
+	link, err := s.repo.GetLinkByID(ctx, linkID)
+	if err != nil {
+		return err
+	}
+	source, err := s.GetTicketByID(ctx, link.SourceID, userID)
+	if err != nil {
+		return err
+	}
+	if err := s.requireProjectPermission(ctx, source.ProjectID, userID, project.CanWriteTickets, "insufficient permissions: viewers cannot update ticket links"); err != nil {
+		return err
+	}
+	return s.repo.DeleteLink(ctx, linkID)
 }
 
 // GraphNode DTO
@@ -461,4 +480,15 @@ func (s *Service) GetTicketGraph(ctx context.Context, projectID, userID string) 
 	}
 
 	return response, nil
+}
+
+func (s *Service) requireProjectPermission(ctx context.Context, projectID, userID string, allowed func(string) bool, deniedMessage string) error {
+	role, err := s.projectService.GetProjectRole(ctx, projectID, userID)
+	if err != nil {
+		return errors.New("project not found or access denied")
+	}
+	if !allowed(role) {
+		return errors.New(deniedMessage)
+	}
+	return nil
 }

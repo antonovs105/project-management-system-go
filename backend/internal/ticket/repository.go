@@ -18,6 +18,7 @@ type Repository interface {
 	Update(ctx context.Context, ticket *Ticket, actorID string) ([]string, error)
 	Delete(ctx context.Context, id string, actorID string) (*DeleteResult, error)
 	CreateLink(ctx context.Context, link *TicketLink) error
+	GetLinkByID(ctx context.Context, linkID string) (*TicketLink, error)
 	DeleteLink(ctx context.Context, linkID string) error
 	GetLinksByProjectID(ctx context.Context, projectID string) ([]TicketLink, error)
 }
@@ -281,6 +282,23 @@ func (r *PgRepository) CreateLink(ctx context.Context, link *TicketLink) error {
 		return rows.Scan(&link.ID, &link.CreatedAt)
 	}
 	return errors.New("link creation failed")
+}
+
+func (r *PgRepository) GetLinkByID(ctx context.Context, linkID string) (*TicketLink, error) {
+	var link TicketLink
+	if err := r.db.GetContext(ctx, &link, `
+		SELECT
+			id::text,
+			source_id::text,
+			target_id::text,
+			link_type,
+			created_at
+		FROM ticket_links
+		WHERE id = $1
+	`, linkID); err != nil {
+		return nil, err
+	}
+	return &link, nil
 }
 
 func (r *PgRepository) DeleteLink(ctx context.Context, linkID string) error {

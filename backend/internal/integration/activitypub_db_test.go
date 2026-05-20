@@ -188,6 +188,46 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "assignee must be a project participant")
 
+	viewer, err := userService.RegisterUser(ctx, "viewer", "viewer@example.test", "password123")
+	require.NoError(t, err)
+	viewerInvite, err := projectService.AddMemberToProject(ctx, project.ID, owner.ID, viewer.ID, "viewer")
+	require.NoError(t, err)
+	require.NoError(t, projectService.AcceptInvite(ctx, viewerInvite.ID, viewer.ID))
+	requireProjectRole(t, db, viewer.ID, project.ID, "viewer")
+
+	deniedActivityCount := activityCount(t, db)
+	_, err = ticketService.CreateTicket(ctx, ticket.CreateTicketRequest{
+		Title:       "Viewer ticket",
+		Description: "Should not be written",
+		Priority:    "medium",
+		Type:        "task",
+	}, project.ID, viewer.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "viewers cannot create tickets")
+
+	memberPatch := &member.ID
+	err = ticketService.UpdateTicket(ctx, ticket.UpdateTicketRequest{AssigneeID: &memberPatch}, assignmentTarget.ID, viewer.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "viewers cannot update tickets")
+
+	err = ticketService.DeleteTicket(ctx, assignmentTarget.ID, viewer.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "only owners or managers can delete tickets")
+
+	_, err = commentService.CreateComment(ctx, assignmentTarget.ID, viewer.ID, "Viewer comment should not publish.")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "viewers cannot comment")
+
+	newProjectName := "Viewer renamed board"
+	err = projectService.UpdateProject(ctx, project.ID, viewer.ID, projectUpdateNameRequest(&newProjectName))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "only owners or managers can update projects")
+
+	err = projectService.DeleteProject(ctx, project.ID, viewer.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "only owners can delete projects")
+	requireActivityCount(t, db, deniedActivityCount)
+
 	_, err = deliveryService.ListProjectDeliveries(ctx, project.ID, outsider.ID)
 	require.ErrorIs(t, err, delivery.ErrProjectAccessDenied)
 }
@@ -1357,6 +1397,10 @@ func findTicketByAPID(tickets []ticket.Ticket, apID string) *ticket.Ticket {
 	return nil
 }
 
+func projectUpdateNameRequest(name *string) project.UpdateProjectRequest {
+	return project.UpdateProjectRequest{Name: name}
+}
+
 func requireObjectType(t *testing.T, db *sqlx.DB, apID, expectedType string) {
 	t.Helper()
 
@@ -1494,6 +1538,21 @@ func requireActivityActor(t *testing.T, db *sqlx.DB, apID, expectedActorID strin
 	err := db.Get(&actorID, `SELECT actor_id::text FROM ap_activities WHERE ap_id = $1`, apID)
 	require.NoError(t, err)
 	require.Equal(t, expectedActorID, actorID)
+}
+
+func activityCount(t *testing.T, db *sqlx.DB) int {
+	t.Helper()
+
+	var count int
+	err := db.Get(&count, `SELECT count(*) FROM ap_activities`)
+	require.NoError(t, err)
+	return count
+}
+
+func requireActivityCount(t *testing.T, db *sqlx.DB, expected int) {
+	t.Helper()
+
+	require.Equal(t, expected, activityCount(t, db))
 }
 
 func requireNoActivityByAPID(t *testing.T, db *sqlx.DB, apID string) {
