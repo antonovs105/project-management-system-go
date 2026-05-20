@@ -17,7 +17,7 @@ func TestActorDocuments(t *testing.T) {
 
 	project := ProjectActorDocument("https://example.test/projects/project-1", "Project One", "Summary", "public-key")
 	assert.Equal(t, []string{"Group", "forge:Project", "forge:TicketTracker"}, project["type"])
-	assert.Equal(t, "https://example.test/projects/project-1/tickets", project["tickets"])
+	assert.Equal(t, ProjectTickets("https://example.test/projects/project-1"), project["tickets"])
 }
 
 func TestTicketNoteAndActivityDocuments(t *testing.T) {

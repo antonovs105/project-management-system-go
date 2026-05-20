@@ -93,6 +93,10 @@ func Following(apID string) string {
 	return apID + "/following"
 }
 
+func ProjectTickets(apID string) string {
+	return apID + "/tickets"
+}
+
 func KeyID(apID string) string {
 	return apID + "#main-key"
 }
@@ -139,7 +143,7 @@ func ActorDocument(actorType, apID, preferredUsername, name, summary, publicKey 
 func ProjectActorDocument(apID, name, summary, publicKey string) map[string]any {
 	doc := ActorDocument("Group", apID, "project-"+lastPath(apID), name, summary, publicKey)
 	doc["type"] = []string{"Group", "forge:Project", "forge:TicketTracker"}
-	doc["tickets"] = apID + "/tickets"
+	doc["tickets"] = ProjectTickets(apID)
 	return doc
 }
 

@@ -209,7 +209,7 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	requireActivityForObject(t, db, "Create", createdComment.APID)
 	requireOutboxItem(t, db, member.ID, "Create", createdComment.APID)
 	requireDeliveryForObject(t, db, "Create", createdComment.APID, remoteInbox)
-	requireProjectActivityPubCollections(t, db, cfg, project.ID, project.APID, remoteFollower.APID)
+	requireProjectActivityPubCollections(t, db, cfg, project.ID, project.APID, createdTicket.APID, remoteFollower.APID)
 
 	ownerDeliveries, err := deliveryService.ListProjectDeliveries(ctx, project.ID, owner.ID)
 	require.NoError(t, err)
@@ -244,6 +244,7 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	requireOutboxItem(t, db, owner.ID, "Delete", createdTicket.APID)
 	requireDeliveryForObject(t, db, "Delete", createdTicket.APID, remoteInbox)
 	requireNoTicketByAPID(t, db, createdTicket.APID)
+	requireProjectTicketsCollectionNotContains(t, db, cfg, project.ID, project.APID, createdTicket.APID)
 
 	outsider, err := userService.RegisterUser(ctx, "outsider", "outsider@example.test", "password123")
 	require.NoError(t, err)
@@ -2185,7 +2186,7 @@ func requireProjectActorEndpointTombstone(t *testing.T, db *sqlx.DB, cfg activit
 	require.NotContains(t, doc, "content")
 }
 
-func requireProjectActivityPubCollections(t *testing.T, db *sqlx.DB, cfg activitypub.Config, projectID, projectAPID, remoteFollowerAPID string) {
+func requireProjectActivityPubCollections(t *testing.T, db *sqlx.DB, cfg activitypub.Config, projectID, projectAPID, ticketAPID, remoteFollowerAPID string) {
 	t.Helper()
 
 	outboxID := activitypub.Outbox(projectAPID)
@@ -2237,6 +2238,22 @@ func requireProjectActivityPubCollections(t *testing.T, db *sqlx.DB, cfg activit
 	require.Equal(t, "OrderedCollectionPage", followersPage["type"])
 	require.Equal(t, followersID, followersPage["partOf"])
 	require.Contains(t, requireOrderedItems(t, followersPage), remoteFollowerAPID)
+
+	ticketsID := activitypub.ProjectTickets(projectAPID)
+	tickets := requireActivityPubDocument(t, db, cfg, "/projects/"+projectID+"/tickets")
+	require.Equal(t, "OrderedCollection", tickets["type"])
+	require.Equal(t, ticketsID, tickets["id"])
+	require.NotContains(t, tickets, "orderedItems")
+	ticketsTotal := requireJSONInt(t, tickets, "totalItems")
+	require.GreaterOrEqual(t, ticketsTotal, 1)
+
+	ticketsPage := requireActivityPubDocument(t, db, cfg, "/projects/"+projectID+"/tickets?page=true&limit=2")
+	require.Equal(t, "OrderedCollectionPage", ticketsPage["type"])
+	require.Equal(t, ticketsID, ticketsPage["partOf"])
+	require.Equal(t, tickets["totalItems"], ticketsPage["totalItems"])
+	ticketItems := requireOrderedItems(t, ticketsPage)
+	require.Contains(t, ticketItems, ticketAPID)
+	require.LessOrEqual(t, len(ticketItems), 2)
 }
 
 func requireActivityPubDocument(t *testing.T, db *sqlx.DB, cfg activitypub.Config, path string) map[string]any {
@@ -2254,6 +2271,16 @@ func requireActivityPubDocument(t *testing.T, db *sqlx.DB, cfg activitypub.Confi
 	var doc map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &doc))
 	return doc
+}
+
+func requireProjectTicketsCollectionNotContains(t *testing.T, db *sqlx.DB, cfg activitypub.Config, projectID, projectAPID, ticketAPID string) {
+	t.Helper()
+
+	ticketsID := activitypub.ProjectTickets(projectAPID)
+	ticketsPage := requireActivityPubDocument(t, db, cfg, "/projects/"+projectID+"/tickets?page=true&limit=50")
+	require.Equal(t, "OrderedCollectionPage", ticketsPage["type"])
+	require.Equal(t, ticketsID, ticketsPage["partOf"])
+	require.NotContains(t, requireOrderedItems(t, ticketsPage), ticketAPID)
 }
 
 func requireOrderedItems(t *testing.T, doc map[string]any) []any {

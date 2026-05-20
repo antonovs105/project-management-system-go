@@ -42,6 +42,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/projects/:id/inbox", h.ProjectInbox)
 	e.GET("/projects/:id/outbox", h.ProjectOutbox)
 	e.GET("/projects/:id/followers", h.ProjectFollowers)
+	e.GET("/projects/:id/tickets", h.ProjectTickets)
 	e.GET("/tickets/:id", h.GetTicket)
 	e.GET("/comments/:id", h.GetComment)
 	e.GET("/activities/:id", h.GetActivity)
@@ -105,6 +106,10 @@ func (h *Handler) ProjectOutbox(c echo.Context) error {
 
 func (h *Handler) ProjectFollowers(c echo.Context) error {
 	return h.followersCollection(c, ProjectAPID(h.cfg, c.Param("id")))
+}
+
+func (h *Handler) ProjectTickets(c echo.Context) error {
+	return h.projectTicketsCollection(c, ProjectAPID(h.cfg, c.Param("id")))
 }
 
 func (h *Handler) writeObject(c echo.Context, apID string) error {
@@ -229,9 +234,62 @@ func (h *Handler) followersCollection(c echo.Context, actorAPID string) error {
 	`, actorID, page.Limit, page.Offset); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load followers"})
 	}
-	items := make([]any, 0, len(followerAPIDs))
-	for _, followerAPID := range followerAPIDs {
-		items = append(items, followerAPID)
+	next, prev := collectionPageLinks(collectionID, totalItems, page.Limit, page.Offset)
+	return writeActivityJSON(c, http.StatusOK, OrderedCollectionPageDocument(
+		collectionPageURL(collectionID, page.Limit, page.Offset),
+		collectionID,
+		totalItems,
+		stringItems(followerAPIDs),
+		next,
+		prev,
+	))
+}
+
+func (h *Handler) projectTicketsCollection(c echo.Context, projectAPID string) error {
+	page, err := parseCollectionPageRequest(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	var projectID string
+	if err := h.db.GetContext(c.Request().Context(), &projectID, `
+		SELECT project.id::text
+		FROM projects project
+		JOIN actors actor ON actor.id = project.id
+		WHERE actor.ap_id = $1
+	`, projectAPID); err != nil {
+		if err == sql.ErrNoRows {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "project not found"})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load project"})
+	}
+
+	collectionID := ProjectTickets(projectAPID)
+	var totalItems int
+	if err := h.db.GetContext(c.Request().Context(), &totalItems, `
+		SELECT count(*)
+		FROM tickets
+		WHERE project_id = $1
+	`, projectID); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load project tickets"})
+	}
+	if !page.Page {
+		return writeActivityJSON(c, http.StatusOK, OrderedCollectionDocument(
+			collectionID,
+			totalItems,
+			collectionPageURL(collectionID, page.Limit, 0),
+		))
+	}
+
+	var ticketAPIDs []string
+	if err := h.db.SelectContext(c.Request().Context(), &ticketAPIDs, `
+		SELECT ap_id
+		FROM tickets
+		WHERE project_id = $1
+		ORDER BY created_at DESC, id DESC
+		LIMIT $2 OFFSET $3
+	`, projectID, page.Limit, page.Offset); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load project tickets"})
 	}
 
 	next, prev := collectionPageLinks(collectionID, totalItems, page.Limit, page.Offset)
@@ -239,7 +297,7 @@ func (h *Handler) followersCollection(c echo.Context, actorAPID string) error {
 		collectionPageURL(collectionID, page.Limit, page.Offset),
 		collectionID,
 		totalItems,
-		items,
+		stringItems(ticketAPIDs),
 		next,
 		prev,
 	))
@@ -308,6 +366,14 @@ func writeActivityJSON(c echo.Context, status int, doc any) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to encode activitypub document"})
 	}
 	return c.Blob(status, ActivityJSONMediaType, raw)
+}
+
+func stringItems(values []string) []any {
+	items := make([]any, 0, len(values))
+	for _, value := range values {
+		items = append(items, value)
+	}
+	return items
 }
 
 func decodeRawItems(raws []json.RawMessage) ([]any, error) {
