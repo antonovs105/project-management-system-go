@@ -33,13 +33,13 @@ func (h *Handler) ReceiveProjectInbox(c echo.Context) error {
 
 func (h *Handler) receive(c echo.Context, targetAPID string) error {
 	if !isActivityMediaType(c.Request().Header.Get(echo.HeaderContentType)) {
-		return c.JSON(http.StatusUnsupportedMediaType, map[string]string{"error": ErrUnsupportedMedia.Error()})
+		return c.JSON(http.StatusUnsupportedMediaType, errorResponse(ErrUnsupportedMedia))
 	}
 
 	body, err := readLimitedBody(c.Request().Body, h.service.MaxBodyBytes())
 	if err != nil {
 		if errors.Is(err, ErrBodyTooLarge) {
-			return c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": err.Error()})
+			return c.JSON(http.StatusRequestEntityTooLarge, errorResponse(ErrBodyTooLarge))
 		}
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "failed to read inbox activity"})
 	}
@@ -48,23 +48,27 @@ func (h *Handler) receive(c echo.Context, targetAPID string) error {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrTargetNotFound):
-			return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+			return c.JSON(http.StatusNotFound, errorResponse(ErrTargetNotFound))
 		case errors.Is(err, ErrUnauthorized):
-			return c.JSON(http.StatusUnauthorized, map[string]string{"error": err.Error()})
+			return c.JSON(http.StatusUnauthorized, errorResponse(ErrUnauthorized))
 		case errors.Is(err, ErrForbiddenActor):
-			return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+			return c.JSON(http.StatusForbidden, errorResponse(ErrForbiddenActor))
 		case errors.Is(err, ErrInvalidActivity):
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return c.JSON(http.StatusBadRequest, errorResponse(ErrInvalidActivity))
 		case errors.Is(err, ErrUnsupportedActivity):
-			return c.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+			return c.JSON(http.StatusUnprocessableEntity, errorResponse(ErrUnsupportedActivity))
 		case errors.Is(err, ErrActivityConflict):
-			return c.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
+			return c.JSON(http.StatusConflict, errorResponse(ErrActivityConflict))
 		default:
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to receive inbox activity"})
 		}
 	}
 
 	return c.JSON(http.StatusAccepted, accepted)
+}
+
+func errorResponse(err error) map[string]string {
+	return map[string]string{"error": err.Error()}
 }
 
 func readLimitedBody(body io.Reader, maxBytes int64) ([]byte, error) {
