@@ -3,11 +3,15 @@ package project
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
+	"strings"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
 )
+
+var ErrInvalidProjectInput = errors.New("invalid project input")
 
 type Service struct {
 	repo     Repository
@@ -31,6 +35,11 @@ func (s *Service) SetDelivery(delivery DeliveryEnqueuer) {
 }
 
 func (s *Service) CreateProject(ctx context.Context, name, description string, userID string) (*Project, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, invalidProjectInput("name is required")
+	}
+
 	projectID, err := activitypub.NewID()
 	if err != nil {
 		return nil, err
@@ -99,6 +108,11 @@ func (s *Service) UpdateProject(ctx context.Context, projectID, userID string, r
 	}
 
 	if req.Name != nil {
+		trimmedName := strings.TrimSpace(*req.Name)
+		if trimmedName == "" {
+			return invalidProjectInput("name is required")
+		}
+		req.Name = &trimmedName
 		projectToUpdate.Name = *req.Name
 	}
 	if req.Description != nil {
@@ -185,6 +199,9 @@ func (s *Service) RemoveMemberFromProject(ctx context.Context, projectID, actorI
 }
 
 func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUserID, newUserID string, role string) (*ProjectInvite, error) {
+	if strings.TrimSpace(newUserID) == "" {
+		return nil, invalidProjectInput("user_id is required")
+	}
 	currentUserRole, err := s.repo.GetUserRole(ctx, currentUserID, projectID)
 	if err != nil {
 		return nil, errors.New("access denied: you are not a member of this project")
@@ -198,7 +215,7 @@ func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUser
 		role = RoleViewer
 	}
 	if !IsValidRole(role) {
-		return nil, errors.New("invalid project role")
+		return nil, invalidProjectInput("invalid project role")
 	}
 	if role == RoleOwner && currentUserRole != RoleOwner {
 		return nil, errors.New("insufficient permissions: only owners can invite owners")
@@ -238,6 +255,10 @@ func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUser
 		s.enqueueActivityRecipientInboxes(ctx, result.ProjectID, result.ActivityID, result.RecipientInboxes)
 	}
 	return invite, nil
+}
+
+func invalidProjectInput(message string) error {
+	return fmt.Errorf("%w: %s", ErrInvalidProjectInput, message)
 }
 
 func (s *Service) AcceptInvite(ctx context.Context, inviteID, userID string) error {

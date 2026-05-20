@@ -1,8 +1,10 @@
 package project
 
 import (
+	"errors"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 )
@@ -45,7 +47,7 @@ func (h *Handler) Create(c echo.Context) error {
 
 	project, err := h.service.CreateProject(c.Request().Context(), req.Name, req.Description, userID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to create project"})
+		return writeProjectError(c, err)
 	}
 
 	return c.JSON(http.StatusCreated, project)
@@ -59,7 +61,7 @@ func (h *Handler) Get(c echo.Context) error {
 
 	project, err := h.service.GetProjectByID(c.Request().Context(), projectID, userID)
 	if err != nil {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+		return writeProjectError(c, err)
 	}
 
 	return c.JSON(http.StatusOK, project)
@@ -93,7 +95,7 @@ func (h *Handler) Update(c echo.Context) error {
 
 	// call service for update
 	if err := h.service.UpdateProject(c.Request().Context(), projectID, userID, req); err != nil {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+		return writeProjectError(c, err)
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -107,7 +109,7 @@ func (h *Handler) Delete(c echo.Context) error {
 
 	// call service for deleting
 	if err := h.service.DeleteProject(c.Request().Context(), projectID, userID); err != nil {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+		return writeProjectError(c, err)
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -134,8 +136,7 @@ func (h *Handler) AddMember(c echo.Context) error {
 	// call service logic
 	invite, err := h.service.AddMemberToProject(c.Request().Context(), projectID, currentUserID, req.UserID, req.Role)
 	if err != nil {
-		// TODO: add more clarity errors
-		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		return writeProjectError(c, err)
 	}
 
 	return c.JSON(http.StatusAccepted, invite)
@@ -147,7 +148,7 @@ func (h *Handler) RemoveMember(c echo.Context) error {
 	currentUserID := c.Get("userID").(string)
 
 	if err := h.service.RemoveMemberFromProject(c.Request().Context(), projectID, currentUserID, targetUserID); err != nil {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		return writeProjectError(c, err)
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -159,7 +160,7 @@ func (h *Handler) AcceptInvite(c echo.Context) error {
 	userID := c.Get("userID").(string)
 
 	if err := h.service.AcceptInvite(c.Request().Context(), inviteID, userID); err != nil {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		return writeProjectError(c, err)
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -170,7 +171,7 @@ func (h *Handler) RejectInvite(c echo.Context) error {
 	userID := c.Get("userID").(string)
 
 	if err := h.service.RejectInvite(c.Request().Context(), inviteID, userID); err != nil {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		return writeProjectError(c, err)
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -181,8 +182,23 @@ func (h *Handler) RevokeInvite(c echo.Context) error {
 	userID := c.Get("userID").(string)
 
 	if err := h.service.RevokeInvite(c.Request().Context(), inviteID, userID); err != nil {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		return writeProjectError(c, err)
 	}
 
 	return c.NoContent(http.StatusNoContent)
+}
+
+func writeProjectError(c echo.Context, err error) error {
+	switch {
+	case errors.Is(err, ErrInvalidProjectInput):
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case strings.Contains(err.Error(), "already"), strings.Contains(err.Error(), "not pending"):
+		return c.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
+	case strings.Contains(err.Error(), "insufficient permissions"):
+		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+	case strings.Contains(err.Error(), "access denied"), strings.Contains(err.Error(), "not found"):
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	default:
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "project operation failed"})
+	}
 }

@@ -1,7 +1,9 @@
 package comment
 
 import (
+	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 )
@@ -35,7 +37,7 @@ func (h *Handler) Create(c echo.Context) error {
 
 	comment, err := h.service.CreateComment(c.Request().Context(), ticketID, userID, req.Content)
 	if err != nil {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		return writeCommentError(c, err)
 	}
 
 	return c.JSON(http.StatusCreated, comment)
@@ -47,7 +49,7 @@ func (h *Handler) List(c echo.Context) error {
 
 	comments, err := h.service.ListComments(c.Request().Context(), ticketID, userID)
 	if err != nil {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		return writeCommentError(c, err)
 	}
 
 	return c.JSON(http.StatusOK, comments)
@@ -58,8 +60,21 @@ func (h *Handler) Delete(c echo.Context) error {
 	userID := c.Get("userID").(string)
 
 	if err := h.service.DeleteComment(c.Request().Context(), commentID, userID); err != nil {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+		return writeCommentError(c, err)
 	}
 
 	return c.NoContent(http.StatusNoContent)
+}
+
+func writeCommentError(c echo.Context, err error) error {
+	switch {
+	case errors.Is(err, ErrInvalidCommentInput):
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case strings.Contains(err.Error(), "insufficient permissions"):
+		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+	case strings.Contains(err.Error(), "not found"), strings.Contains(err.Error(), "access denied"):
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	default:
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "comment operation failed"})
+	}
 }

@@ -46,6 +46,13 @@ func TestService_CreateProject(t *testing.T) {
 		assert.Nil(t, p)
 		mockRepo.AssertExpectations(t)
 	})
+
+	t.Run("InvalidName", func(t *testing.T) {
+		p, err := service.CreateProject(ctx, " ", desc, userID)
+
+		assert.ErrorIs(t, err, ErrInvalidProjectInput)
+		assert.Nil(t, p)
+	})
 }
 
 func TestService_GetProjectByID(t *testing.T) {

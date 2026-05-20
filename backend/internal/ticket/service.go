@@ -3,7 +3,9 @@ package ticket
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
+	"strings"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
@@ -62,10 +64,32 @@ var ticketRanks = map[string]int{
 	"subtask": 1,
 }
 
+var (
+	ErrInvalidTicketInput = errors.New("invalid ticket input")
+
+	ticketPriorities = map[string]bool{
+		"low":    true,
+		"medium": true,
+		"high":   true,
+		"urgent": true,
+	}
+	ticketStatuses = map[string]bool{
+		"open":        true,
+		"in_progress": true,
+		"review":      true,
+		"done":        true,
+	}
+)
+
 // CreateTicket logic for ticket creation
 func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, projectID, reporterID string) (*Ticket, error) {
 	if err := s.requireProjectPermission(ctx, projectID, reporterID, project.CanWriteTickets, "insufficient permissions: viewers cannot create tickets"); err != nil {
 		return nil, err
+	}
+
+	req.Title = strings.TrimSpace(req.Title)
+	if req.Title == "" {
+		return nil, invalidTicketInput("title is required")
 	}
 
 	// Validate Ticket Type
@@ -75,7 +99,7 @@ func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, pro
 			req.Type = "task"
 			rank = 2
 		} else {
-			return nil, errors.New("invalid ticket type")
+			return nil, invalidTicketInput("invalid ticket type")
 		}
 	}
 
@@ -83,10 +107,10 @@ func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, pro
 	if req.ParentID != nil {
 		parent, err := s.repo.GetByID(ctx, *req.ParentID)
 		if err != nil {
-			return nil, errors.New("parent ticket not found")
+			return nil, invalidTicketInput("parent ticket not found")
 		}
 		if parent.ProjectID != projectID {
-			return nil, errors.New("parent ticket must be in the same project")
+			return nil, invalidTicketInput("parent ticket must be in the same project")
 		}
 
 		parentRank, ok := ticketRanks[parent.Type]
@@ -95,16 +119,19 @@ func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, pro
 		}
 
 		if parentRank <= rank {
-			return nil, errors.New("invalid hierarchy: parent must be of higher rank (Epic > Task > Subtask)")
+			return nil, invalidTicketInput("invalid hierarchy: parent must be of higher rank (Epic > Task > Subtask)")
 		}
 	} else {
 		if req.Type == "subtask" {
-			return nil, errors.New("subtask must have a parent")
+			return nil, invalidTicketInput("subtask must have a parent")
 		}
 	}
 
 	if req.Priority == "" {
 		req.Priority = "medium"
+	}
+	if !ticketPriorities[req.Priority] {
+		return nil, invalidTicketInput("invalid ticket priority")
 	}
 
 	ticketID, err := activitypub.NewID()
@@ -198,34 +225,46 @@ func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, tic
 	if req.Type != nil || req.ParentID != nil {
 		rank, ok := ticketRanks[newType]
 		if !ok {
-			return errors.New("invalid ticket type")
+			return invalidTicketInput("invalid ticket type")
 		}
 
 		if newParentID != nil {
 			parent, err := s.repo.GetByID(ctx, *newParentID)
 			if err != nil {
-				return errors.New("parent ticket not found")
+				return invalidTicketInput("parent ticket not found")
 			}
 			if parent.ProjectID != ticketToUpdate.ProjectID {
-				return errors.New("parent ticket must be in the same project")
+				return invalidTicketInput("parent ticket must be in the same project")
 			}
 			if parent.ID == ticketToUpdate.ID {
-				return errors.New("cannot be own parent")
+				return invalidTicketInput("cannot be own parent")
 			}
 
 			// parent rank check
 			parentRank := ticketRanks[parent.Type]
 			if parentRank <= rank {
-				return errors.New("invalid hierarchy: parent must be of higher rank")
+				return invalidTicketInput("invalid hierarchy: parent must be of higher rank")
 			}
 		} else {
 			if newType == "subtask" {
-				return errors.New("subtask must have a parent")
+				return invalidTicketInput("subtask must have a parent")
 			}
 		}
 	}
 
-	// TODO: add more advanced check
+	if req.Title != nil {
+		trimmedTitle := strings.TrimSpace(*req.Title)
+		if trimmedTitle == "" {
+			return invalidTicketInput("title is required")
+		}
+		req.Title = &trimmedTitle
+	}
+	if req.Status != nil && !ticketStatuses[*req.Status] {
+		return invalidTicketInput("invalid ticket status")
+	}
+	if req.Priority != nil && !ticketPriorities[*req.Priority] {
+		return invalidTicketInput("invalid ticket priority")
+	}
 
 	// update rows
 	if req.Title != nil {
@@ -259,6 +298,10 @@ func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, tic
 	return nil
 }
 
+func invalidTicketInput(message string) error {
+	return fmt.Errorf("%w: %s", ErrInvalidTicketInput, message)
+}
+
 // DeleteTicket logic for deleting
 func (s *Service) DeleteTicket(ctx context.Context, ticketID, userID string) error {
 	ticket, err := s.GetTicketByID(ctx, ticketID, userID)
@@ -280,7 +323,11 @@ func (s *Service) DeleteTicket(ctx context.Context, ticketID, userID string) err
 // AddTicketLink adds a link and checks for cycles
 func (s *Service) AddTicketLink(ctx context.Context, sourceID, targetID string, linkType string, projectID, userID string) error {
 	if sourceID == targetID {
-		return errors.New("cannot link ticket to itself")
+		return invalidTicketInput("cannot link ticket to itself")
+	}
+	linkType = strings.TrimSpace(linkType)
+	if linkType == "" {
+		return invalidTicketInput("link type is required")
 	}
 
 	// check access and existence
@@ -294,7 +341,7 @@ func (s *Service) AddTicketLink(ctx context.Context, sourceID, targetID string, 
 	}
 
 	if source.ProjectID != target.ProjectID {
-		return errors.New("cannot link tickets from different projects")
+		return invalidTicketInput("cannot link tickets from different projects")
 	}
 	if err := s.requireProjectPermission(ctx, source.ProjectID, userID, project.CanWriteTickets, "insufficient permissions: viewers cannot update ticket links"); err != nil {
 		return err
@@ -315,7 +362,7 @@ func (s *Service) AddTicketLink(ctx context.Context, sourceID, targetID string, 
 
 	// Check if path exists from targetID to sourceID
 	if hasPath(adj, targetID, sourceID) {
-		return errors.New("cycle detected: path already exists from target to source")
+		return invalidTicketInput("cycle detected: path already exists from target to source")
 	}
 
 	// Create Link

@@ -46,6 +46,13 @@ func TestService_RegisterUser(t *testing.T) {
 		assert.Equal(t, repoErr, err)
 		mockRepo.AssertExpectations(t)
 	})
+
+	t.Run("InvalidInput", func(t *testing.T) {
+		user, err := service.RegisterUser(ctx, "bad/name", email, password)
+
+		assert.ErrorIs(t, err, ErrInvalidUserInput)
+		assert.Nil(t, user)
+	})
 }
 
 func TestService_Login(t *testing.T) {

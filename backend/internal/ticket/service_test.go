@@ -52,7 +52,32 @@ func TestService_CreateTicket(t *testing.T) {
 
 		assert.Error(t, err)
 		assert.Nil(t, ticket)
-		assert.Equal(t, "invalid ticket type", err.Error())
+		assert.ErrorIs(t, err, ErrInvalidTicketInput)
+		assert.Contains(t, err.Error(), "invalid ticket type")
+	})
+
+	t.Run("InvalidTitle", func(t *testing.T) {
+		mockProject.On("GetProjectRole", ctx, projectID, reporterID).Return(project.RoleDeveloper, nil).Once()
+		invalidReq := req
+		invalidReq.Title = "   "
+
+		ticket, err := service.CreateTicket(ctx, invalidReq, projectID, reporterID)
+
+		assert.ErrorIs(t, err, ErrInvalidTicketInput)
+		assert.Nil(t, ticket)
+		assert.Contains(t, err.Error(), "title is required")
+	})
+
+	t.Run("InvalidPriority", func(t *testing.T) {
+		mockProject.On("GetProjectRole", ctx, projectID, reporterID).Return(project.RoleDeveloper, nil).Once()
+		invalidReq := req
+		invalidReq.Priority = "eventually"
+
+		ticket, err := service.CreateTicket(ctx, invalidReq, projectID, reporterID)
+
+		assert.ErrorIs(t, err, ErrInvalidTicketInput)
+		assert.Nil(t, ticket)
+		assert.Contains(t, err.Error(), "invalid ticket priority")
 	})
 }
 
@@ -91,6 +116,39 @@ func TestService_GetTicketByID(t *testing.T) {
 		assert.Nil(t, ticket)
 		assert.Equal(t, "ticket not found", err.Error())
 	})
+}
+
+func TestService_UpdateTicketValidatesFields(t *testing.T) {
+	mockRepo := new(MockRepository)
+	mockProject := new(MockProjectChecker)
+	service := NewService(mockRepo, mockProject, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+
+	ctx := context.Background()
+	projectID := "project-1"
+	ticketID := "ticket-1"
+	actorID := "member-1"
+	blankTitle := " "
+
+	storedTicket := &Ticket{
+		ID:          ticketID,
+		ProjectID:   projectID,
+		ReporterID:  "reporter-1",
+		Title:       "Ticket",
+		Description: "Description",
+		Status:      "open",
+		Priority:    "medium",
+		Type:        "task",
+	}
+
+	mockRepo.On("GetByID", ctx, ticketID).Return(storedTicket, nil).Once()
+	mockProject.On("GetProjectByID", ctx, projectID, actorID).Return(&project.Project{ID: projectID}, nil).Once()
+	mockProject.On("GetProjectRole", ctx, projectID, actorID).Return(project.RoleDeveloper, nil).Once()
+
+	err := service.UpdateTicket(ctx, UpdateTicketRequest{Title: &blankTitle}, ticketID, actorID)
+
+	assert.ErrorIs(t, err, ErrInvalidTicketInput)
+	assert.Contains(t, err.Error(), "title is required")
+	mockRepo.AssertNotCalled(t, "Update")
 }
 
 func TestService_UpdateTicketUsesActingUser(t *testing.T) {

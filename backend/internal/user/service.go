@@ -2,7 +2,10 @@ package user
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"net/mail"
+	"strings"
 
 	"errors"
 	"time"
@@ -11,6 +14,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
+
+var ErrInvalidUserInput = errors.New("invalid user input")
 
 // Service incapsulates business logic for working with users
 // Depends on repository for data access
@@ -32,6 +37,12 @@ func NewService(repo Repository, jwtSecret []byte, apConfig activitypub.Config) 
 // RegisterUser - service method for user registration
 // Hashing password and adds user via repository
 func (s *Service) RegisterUser(ctx context.Context, username, email, password string) (*User, error) {
+	username = strings.TrimSpace(username)
+	email = strings.TrimSpace(email)
+	if err := validateRegistrationInput(username, email, password); err != nil {
+		return nil, err
+	}
+
 	// Hashing password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -75,6 +86,26 @@ func (s *Service) RegisterUser(ctx context.Context, username, email, password st
 	newUser.PasswordHash = ""
 
 	return newUser, nil
+}
+
+func validateRegistrationInput(username, email, password string) error {
+	if username == "" {
+		return invalidUserInput("username is required")
+	}
+	if strings.ContainsAny(username, "/@ \t\r\n") {
+		return invalidUserInput("username may not contain spaces, slashes, or @")
+	}
+	if _, err := mail.ParseAddress(email); err != nil {
+		return invalidUserInput("valid email is required")
+	}
+	if len(password) < 8 {
+		return invalidUserInput("password must be at least 8 characters")
+	}
+	return nil
+}
+
+func invalidUserInput(message string) error {
+	return fmt.Errorf("%w: %s", ErrInvalidUserInput, message)
 }
 
 // Login checks users and returns JWT

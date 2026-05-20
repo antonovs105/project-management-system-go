@@ -1,6 +1,7 @@
 package user
 
 import (
+	"errors"
 	"log"
 	"net/http"
 
@@ -49,6 +50,9 @@ func (h *Handler) Register(c echo.Context) error {
 	// c.Request().Context() to get context.Context from query
 	newUser, err := h.service.RegisterUser(c.Request().Context(), req.Username, req.Email, req.Password)
 	if err != nil {
+		if errors.Is(err, ErrInvalidUserInput) {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		}
 		// if service returned error sending 500 Internal Server Error.
 		// TODO: add error types for more clarity
 		log.Printf("Error registering user: %v", err) // Logging error

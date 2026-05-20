@@ -1,7 +1,9 @@
 package ticket
 
 import (
+	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 )
@@ -56,7 +58,7 @@ func (h *Handler) Create(c echo.Context) error {
 
 	ticket, err := h.service.CreateTicket(c.Request().Context(), serviceReq, projectID, userID)
 	if err != nil {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+		return writeTicketError(c, err)
 	}
 
 	return c.JSON(http.StatusCreated, ticket)
@@ -70,7 +72,7 @@ func (h *Handler) List(c echo.Context) error {
 
 	tickets, err := h.service.ListTicketsInProject(c.Request().Context(), projectID, userID)
 	if err != nil {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+		return writeTicketError(c, err)
 	}
 
 	return c.JSON(http.StatusOK, tickets)
@@ -93,7 +95,7 @@ func (h *Handler) Get(c echo.Context) error {
 
 	ticket, err := h.service.GetTicketByID(c.Request().Context(), ticketID, userID)
 	if err != nil {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+		return writeTicketError(c, err)
 	}
 	return c.JSON(http.StatusOK, ticket)
 }
@@ -119,7 +121,7 @@ func (h *Handler) Update(c echo.Context) error {
 	}
 
 	if err := h.service.UpdateTicket(c.Request().Context(), serviceReq, ticketID, userID); err != nil {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+		return writeTicketError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -130,7 +132,7 @@ func (h *Handler) Delete(c echo.Context) error {
 	userID := c.Get("userID").(string)
 
 	if err := h.service.DeleteTicket(c.Request().Context(), ticketID, userID); err != nil {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+		return writeTicketError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -159,7 +161,7 @@ func (h *Handler) AddLink(c echo.Context) error {
 
 	err = h.service.AddTicketLink(c.Request().Context(), sourceID, req.TargetID, req.LinkType, sourceTicket.ProjectID, userID)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return writeTicketError(c, err)
 	}
 
 	return c.NoContent(http.StatusCreated)
@@ -173,7 +175,7 @@ func (h *Handler) RemoveLink(c echo.Context) error {
 	// Passing 0 as projectID, assuming Service/Repo handles it or simplistic check.
 	err := h.service.RemoveTicketLink(c.Request().Context(), linkID, "", userID)
 	if err != nil {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+		return writeTicketError(c, err)
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -186,8 +188,23 @@ func (h *Handler) GetGraph(c echo.Context) error {
 
 	graph, err := h.service.GetTicketGraph(c.Request().Context(), projectID, userID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return writeTicketError(c, err)
 	}
 
 	return c.JSON(http.StatusOK, graph)
+}
+
+func writeTicketError(c echo.Context, err error) error {
+	switch {
+	case errors.Is(err, ErrInvalidTicketInput):
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case strings.Contains(err.Error(), "insufficient permissions"):
+		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+	case strings.Contains(err.Error(), "access denied"):
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	case strings.Contains(err.Error(), "not found"):
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	default:
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "ticket operation failed"})
+	}
 }

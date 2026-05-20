@@ -3,13 +3,17 @@ package comment
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
+	"strings"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
 	"github.com/antonovs105/project-management-system-go/internal/project"
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
 )
+
+var ErrInvalidCommentInput = errors.New("invalid comment input")
 
 type TicketChecker interface {
 	GetTicketByID(ctx context.Context, ticketID, userID string) (*ticket.Ticket, error)
@@ -38,6 +42,10 @@ func (s *Service) SetDelivery(delivery DeliveryEnqueuer) {
 }
 
 func (s *Service) CreateComment(ctx context.Context, ticketID, authorID, content string) (*Comment, error) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil, invalidCommentInput("content is required")
+	}
 	ticket, err := s.tickets.GetTicketByID(ctx, ticketID, authorID)
 	if err != nil {
 		return nil, err
@@ -66,6 +74,10 @@ func (s *Service) CreateComment(ctx context.Context, ticketID, authorID, content
 	}
 	s.enqueueProjectTicketRecipients(ctx, ticket.ProjectID, ticket.ID, activityID)
 	return comment, nil
+}
+
+func invalidCommentInput(message string) error {
+	return fmt.Errorf("%w: %s", ErrInvalidCommentInput, message)
 }
 
 func (s *Service) ListComments(ctx context.Context, ticketID, userID string) ([]Comment, error) {
