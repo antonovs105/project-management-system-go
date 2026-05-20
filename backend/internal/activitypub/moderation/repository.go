@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -14,6 +15,7 @@ type Repository interface {
 	DeleteDomainBlock(ctx context.Context, domain string) error
 	ListRemoteActors(ctx context.Context, options RemoteActorListOptions) ([]RemoteActorInspection, error)
 	ListFederationDeliveries(ctx context.Context, options FederationDeliveryListOptions) ([]FederationDeliveryInspection, error)
+	RetryFederationDelivery(ctx context.Context, deliveryID string) (*delivery.Delivery, error)
 }
 
 type PgRepository struct {
@@ -141,4 +143,93 @@ func (r *PgRepository) ListFederationDeliveries(ctx context.Context, options Fed
 		return nil, err
 	}
 	return deliveries, nil
+}
+
+func (r *PgRepository) RetryFederationDelivery(ctx context.Context, deliveryID string) (*delivery.Delivery, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var state string
+	if err := tx.GetContext(ctx, &state, `
+		SELECT state
+		FROM activity_deliveries
+		WHERE id = $1
+		FOR UPDATE
+	`, deliveryID); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, delivery.ErrDeliveryNotFound
+		}
+		return nil, err
+	}
+
+	switch state {
+	case delivery.StateFailed, delivery.StateDead:
+	case delivery.StateDelivered:
+		return nil, delivery.ErrDeliveryDone
+	default:
+		return nil, delivery.ErrDeliveryRetryUnavailable
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE activity_deliveries
+		SET state = $2,
+			attempts = 0,
+			max_attempts = $3,
+			next_attempt_at = NULL,
+			last_error = NULL,
+			last_attempt_at = NULL,
+			last_failure_kind = '',
+			last_status_code = NULL,
+			delivered_at = NULL
+		WHERE id = $1
+	`, deliveryID, delivery.StatePending, delivery.DefaultMaxRetry); err != nil {
+		return nil, err
+	}
+
+	retried, err := loadFederationDelivery(ctx, tx, deliveryID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return retried, nil
+}
+
+func loadFederationDelivery(ctx context.Context, q sqlx.QueryerContext, deliveryID string) (*delivery.Delivery, error) {
+	var row delivery.Delivery
+	if err := sqlx.GetContext(ctx, q, &row, `
+		SELECT
+			d.id::text,
+			d.activity_id::text,
+			d.activity_ap_id,
+			d.actor_id::text,
+			actor.ap_id AS actor_ap_id,
+			d.target_inbox_url,
+			d.state,
+			d.attempts,
+			d.max_attempts,
+			d.next_attempt_at,
+			d.last_error,
+			d.last_attempt_at,
+			d.last_failure_kind,
+			d.last_status_code,
+			d.delivered_at,
+			a.document,
+			d.created_at,
+			d.updated_at
+		FROM activity_deliveries d
+		JOIN ap_activities a ON a.id = d.activity_id
+		JOIN actors actor ON actor.id = d.actor_id
+		WHERE d.id = $1
+	`, deliveryID); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, delivery.ErrDeliveryNotFound
+		}
+		return nil, err
+	}
+	return &row, nil
 }

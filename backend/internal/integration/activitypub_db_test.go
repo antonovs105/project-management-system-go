@@ -1346,6 +1346,14 @@ func TestFederationModerationInspection(t *testing.T) {
 	require.NotNil(t, deliveries[0].LastStatusCode)
 	assert.Equal(t, http.StatusServiceUnavailable, *deliveries[0].LastStatusCode)
 	assert.True(t, deliveries[0].CanRetry)
+
+	retried, err := moderationService.RetryFederationDelivery(ctx, admin.ID, createdDelivery.ID)
+	require.NoError(t, err)
+	assert.Equal(t, delivery.StatePending, retried.State)
+	assert.Equal(t, 0, retried.Attempts)
+	assert.Nil(t, retried.LastError)
+	assert.Empty(t, retried.LastFailureKind)
+	assert.Nil(t, retried.LastStatusCode)
 }
 
 func TestRemoteInboxRefreshesRotatedActorKey(t *testing.T) {

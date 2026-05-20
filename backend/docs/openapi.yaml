@@ -584,6 +584,27 @@ paths:
           $ref: "#/components/responses/Error"
         "403":
           $ref: "#/components/responses/Error"
+  /api/admin/federation/deliveries/{deliveryID}/retry:
+    parameters:
+      - $ref: "#/components/parameters/DeliveryID"
+    post:
+      tags: [Federation Moderation]
+      operationId: retryFederationDelivery
+      security:
+        - bearerAuth: []
+      responses:
+        "202":
+          description: Delivery scheduled for retry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Delivery"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
   /.well-known/webfinger:
     get:
       tags: [WebFinger]

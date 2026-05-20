@@ -147,6 +147,33 @@ func TestHandlerListsFederationDeliveries(t *testing.T) {
 	assert.Equal(t, statusCode, *response[0].LastStatusCode)
 }
 
+func TestHandlerRetriesFederationDelivery(t *testing.T) {
+	repo := &fakeRepository{role: RoleAdmin}
+	e := newModerationHandlerEcho(repo, "admin-1")
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/federation/deliveries/delivery-1/retry", nil)
+	rec := httptest.NewRecorder()
+
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusAccepted, rec.Code)
+	assert.Equal(t, "delivery-1", repo.retryDeliveryID)
+	var response delivery.Delivery
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	assert.Equal(t, "delivery-1", response.ID)
+	assert.Equal(t, delivery.StatePending, response.State)
+}
+
+func TestHandlerMapsFederationDeliveryRetryErrors(t *testing.T) {
+	e := newModerationHandlerEcho(&fakeRepository{role: RoleAdmin, retryErr: delivery.ErrDeliveryRetryUnavailable}, "admin-1")
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/federation/deliveries/delivery-1/retry", nil)
+	rec := httptest.NewRecorder()
+
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusConflict, rec.Code)
+	assert.JSONEq(t, `{"error":"activity delivery cannot be retried"}`, rec.Body.String())
+}
+
 func TestHandlerRejectsInvalidInspectionFilters(t *testing.T) {
 	e := newModerationHandlerEcho(&fakeRepository{role: RoleAdmin}, "admin-1")
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/federation/remote-actors?fetch_error=sometimes", nil)

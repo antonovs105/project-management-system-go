@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
 	"github.com/labstack/echo/v4"
 )
 
@@ -28,6 +29,7 @@ func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.DELETE("/admin/federation/domain-blocks/:domain", h.UnblockDomain)
 	api.GET("/admin/federation/remote-actors", h.ListRemoteActors)
 	api.GET("/admin/federation/deliveries", h.ListFederationDeliveries)
+	api.POST("/admin/federation/deliveries/:deliveryID/retry", h.RetryFederationDelivery)
 }
 
 func (h *Handler) ListDomainBlocks(c echo.Context) error {
@@ -82,6 +84,14 @@ func (h *Handler) ListFederationDeliveries(c echo.Context) error {
 	return c.JSON(http.StatusOK, deliveries)
 }
 
+func (h *Handler) RetryFederationDelivery(c echo.Context) error {
+	retried, err := h.service.RetryFederationDelivery(c.Request().Context(), currentUserID(c), c.Param("deliveryID"))
+	if err != nil {
+		return writeModerationError(c, err)
+	}
+	return c.JSON(http.StatusAccepted, retried)
+}
+
 func currentUserID(c echo.Context) string {
 	userID, _ := c.Get("userID").(string)
 	return userID
@@ -97,6 +107,10 @@ func writeModerationError(c echo.Context, err error) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": ErrDomainBlockNotFound.Error()})
 	case errors.Is(err, ErrInvalidFilter):
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case errors.Is(err, delivery.ErrDeliveryNotFound):
+		return c.JSON(http.StatusNotFound, map[string]string{"error": delivery.ErrDeliveryNotFound.Error()})
+	case errors.Is(err, delivery.ErrDeliveryDone), errors.Is(err, delivery.ErrDeliveryRetryUnavailable):
+		return c.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
 	default:
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "federation moderation operation failed"})
 	}

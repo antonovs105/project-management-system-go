@@ -63,6 +63,7 @@ func TestOpenAPIContractDocumentsRegisteredRoutes(t *testing.T) {
 		{method: "delete", path: "/api/admin/federation/domain-blocks/{domain}"},
 		{method: "get", path: "/api/admin/federation/remote-actors"},
 		{method: "get", path: "/api/admin/federation/deliveries"},
+		{method: "post", path: "/api/admin/federation/deliveries/{deliveryID}/retry"},
 		{method: "get", path: "/.well-known/webfinger"},
 		{method: "get", path: "/users/{username}"},
 		{method: "get", path: "/users/{username}/inbox"},

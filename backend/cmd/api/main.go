@@ -242,7 +242,7 @@ func main() {
 		remoteinbox.WithBlockedDomains(splitCSVEnv("FEDERATION_BLOCKED_DOMAINS")),
 	)
 	inboxHandler := remoteinbox.NewHandler(inboxService, apConfig)
-	moderationHandler := apmoderation.NewHandler(apmoderation.NewService(apmoderation.NewRepository(db)))
+	moderationHandler := apmoderation.NewHandler(apmoderation.NewService(apmoderation.NewRepository(db), deliveryQueue))
 
 	// WebFinger discovery dependencies
 	wfRepo := webfinger.NewRepository(db)

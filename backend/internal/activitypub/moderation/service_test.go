@@ -24,6 +24,9 @@ type fakeRepository struct {
 	actorOptions    RemoteActorListOptions
 	deliveries      []FederationDeliveryInspection
 	deliveryOptions FederationDeliveryListOptions
+	retryDeliveryID string
+	retryDelivery   *delivery.Delivery
+	retryErr        error
 }
 
 func (r *fakeRepository) UserRole(ctx context.Context, userID string) (string, error) {
@@ -64,6 +67,33 @@ func (r *fakeRepository) ListRemoteActors(ctx context.Context, options RemoteAct
 func (r *fakeRepository) ListFederationDeliveries(ctx context.Context, options FederationDeliveryListOptions) ([]FederationDeliveryInspection, error) {
 	r.deliveryOptions = options
 	return r.deliveries, nil
+}
+
+func (r *fakeRepository) RetryFederationDelivery(ctx context.Context, deliveryID string) (*delivery.Delivery, error) {
+	r.retryDeliveryID = deliveryID
+	if r.retryErr != nil {
+		return nil, r.retryErr
+	}
+	if r.retryDelivery != nil {
+		return r.retryDelivery, nil
+	}
+	return &delivery.Delivery{ID: deliveryID, MaxAttempts: delivery.DefaultMaxRetry, State: delivery.StatePending}, nil
+}
+
+type fakeQueue struct {
+	deliveryID  string
+	maxAttempts int
+	err         error
+}
+
+func (q *fakeQueue) Enqueue(ctx context.Context, deliveryID string, maxAttempts int) error {
+	q.deliveryID = deliveryID
+	q.maxAttempts = maxAttempts
+	return q.err
+}
+
+func (q *fakeQueue) Close() error {
+	return nil
 }
 
 func TestServiceBlockDomainRequiresAdmin(t *testing.T) {
@@ -136,4 +166,30 @@ func TestServiceListFederationDeliveriesValidatesFilters(t *testing.T) {
 
 	_, err = service.ListFederationDeliveries(context.Background(), "admin-1", FederationDeliveryListOptions{FailureKind: "weird"})
 	require.ErrorIs(t, err, ErrInvalidFilter)
+}
+
+func TestServiceRetryFederationDeliveryQueuesTask(t *testing.T) {
+	repo := &fakeRepository{role: RoleAdmin}
+	queue := &fakeQueue{}
+	service := NewService(repo, queue)
+
+	retried, err := service.RetryFederationDelivery(context.Background(), "admin-1", "delivery-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, "delivery-1", retried.ID)
+	assert.Equal(t, "delivery-1", repo.retryDeliveryID)
+	assert.Equal(t, "delivery-1", queue.deliveryID)
+	assert.Equal(t, delivery.DefaultMaxRetry, queue.maxAttempts)
+}
+
+func TestServiceRetryFederationDeliveryRequiresAdmin(t *testing.T) {
+	repo := &fakeRepository{role: "worker"}
+	queue := &fakeQueue{}
+	service := NewService(repo, queue)
+
+	_, err := service.RetryFederationDelivery(context.Background(), "user-1", "delivery-1")
+
+	require.ErrorIs(t, err, ErrAdminRequired)
+	assert.Empty(t, repo.retryDeliveryID)
+	assert.Empty(t, queue.deliveryID)
 }

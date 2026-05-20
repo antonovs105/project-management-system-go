@@ -16,11 +16,16 @@ const (
 )
 
 type Service struct {
-	repo Repository
+	repo  Repository
+	queue delivery.Queue
 }
 
-func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
+func NewService(repo Repository, queues ...delivery.Queue) *Service {
+	var queue delivery.Queue = delivery.NoopQueue{}
+	if len(queues) > 0 && queues[0] != nil {
+		queue = queues[0]
+	}
+	return &Service{repo: repo, queue: queue}
 }
 
 func (s *Service) ListDomainBlocks(ctx context.Context, userID string) ([]DomainBlock, error) {
@@ -78,6 +83,20 @@ func (s *Service) ListFederationDeliveries(ctx context.Context, userID string, o
 	}
 	options.Limit = normalizeLimit(options.Limit)
 	return s.repo.ListFederationDeliveries(ctx, options)
+}
+
+func (s *Service) RetryFederationDelivery(ctx context.Context, userID string, deliveryID string) (*delivery.Delivery, error) {
+	if err := s.requireAdmin(ctx, userID); err != nil {
+		return nil, err
+	}
+	delivery, err := s.repo.RetryFederationDelivery(ctx, deliveryID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.queue.Enqueue(ctx, delivery.ID, delivery.MaxAttempts); err != nil {
+		return nil, err
+	}
+	return delivery, nil
 }
 
 func (s *Service) requireAdmin(ctx context.Context, userID string) error {
