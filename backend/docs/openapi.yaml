@@ -1,0 +1,1215 @@
+openapi: 3.1.0
+info:
+  title: Project Management Federation API
+  version: 0.1.0
+  description: Backend REST, ActivityPub, C2S, S2S inbox, WebFinger, and delivery administration contract.
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: Health
+  - name: Auth
+  - name: Projects
+  - name: Tickets
+  - name: Comments
+  - name: Delivery
+  - name: WebFinger
+  - name: ActivityPub
+paths:
+  /health:
+    get:
+      tags: [Health]
+      operationId: getHealth
+      responses:
+        "200":
+          description: Database is reachable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "500":
+          $ref: "#/components/responses/Error"
+  /ready:
+    get:
+      tags: [Health]
+      operationId: getReadiness
+      responses:
+        "200":
+          description: Required dependencies are ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessResponse"
+        "503":
+          description: At least one required dependency is not ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessResponse"
+  /register:
+    post:
+      tags: [Auth]
+      operationId: registerUser
+      requestBody:
+        $ref: "#/components/requestBodies/RegisterUser"
+      responses:
+        "201":
+          description: User actor created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/Error"
+  /login:
+    post:
+      tags: [Auth]
+      operationId: loginUser
+      requestBody:
+        $ref: "#/components/requestBodies/LoginUser"
+      responses:
+        "200":
+          description: JWT issued.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token]
+                properties:
+                  token:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/me:
+    get:
+      tags: [Auth]
+      operationId: getCurrentUserProfile
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Authenticated user summary.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message, user_id]
+                properties:
+                  message:
+                    type: string
+                  user_id:
+                    type: string
+                    format: uuid
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/projects:
+    get:
+      tags: [Projects]
+      operationId: listProjects
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Projects visible to the authenticated user.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Project"
+    post:
+      tags: [Projects]
+      operationId: createProject
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: "#/components/requestBodies/CreateProject"
+      responses:
+        "201":
+          description: Project actor created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "400":
+          $ref: "#/components/responses/Error"
+  /api/projects/{projectID}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [Projects]
+      operationId: getProject
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Project.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "404":
+          $ref: "#/components/responses/Error"
+    patch:
+      tags: [Projects]
+      operationId: updateProject
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: "#/components/requestBodies/UpdateProject"
+      responses:
+        "204":
+          description: Project updated.
+        "400":
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [Projects]
+      operationId: deleteProject
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Project deleted.
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/projects/{projectID}/members:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    post:
+      tags: [Projects]
+      operationId: inviteProjectMember
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: "#/components/requestBodies/AddProjectMember"
+      responses:
+        "202":
+          description: Project invite created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectInvite"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/projects/{projectID}/members/{userID}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/UserID"
+    delete:
+      tags: [Projects]
+      operationId: removeProjectMember
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Member removed.
+        "403":
+          $ref: "#/components/responses/Error"
+  /api/invites/{inviteID}/accept:
+    parameters:
+      - $ref: "#/components/parameters/InviteID"
+    post:
+      tags: [Projects]
+      operationId: acceptProjectInvite
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Invite accepted.
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/invites/{inviteID}/reject:
+    parameters:
+      - $ref: "#/components/parameters/InviteID"
+    post:
+      tags: [Projects]
+      operationId: rejectProjectInvite
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Invite rejected.
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/invites/{inviteID}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/InviteID"
+    post:
+      tags: [Projects]
+      operationId: revokeProjectInvite
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Invite revoked.
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/projects/{projectID}/tickets:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [Tickets]
+      operationId: listProjectTickets
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Tickets in the project.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Ticket"
+    post:
+      tags: [Tickets]
+      operationId: createTicket
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: "#/components/requestBodies/CreateTicket"
+      responses:
+        "201":
+          description: Ticket created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        "400":
+          $ref: "#/components/responses/Error"
+  /api/projects/{projectID}/graph:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [Tickets]
+      operationId: getProjectTicketGraph
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Graph projection for project tickets and links.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GraphResponse"
+  /api/tickets/{ticketID}:
+    parameters:
+      - $ref: "#/components/parameters/TicketID"
+    get:
+      tags: [Tickets]
+      operationId: getTicket
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Ticket.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        "404":
+          $ref: "#/components/responses/Error"
+    patch:
+      tags: [Tickets]
+      operationId: updateTicket
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: "#/components/requestBodies/UpdateTicket"
+      responses:
+        "204":
+          description: Ticket updated.
+        "400":
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [Tickets]
+      operationId: deleteTicket
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Ticket deleted.
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/tickets/{ticketID}/links:
+    parameters:
+      - $ref: "#/components/parameters/TicketID"
+    post:
+      tags: [Tickets]
+      operationId: addTicketLink
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: "#/components/requestBodies/AddTicketLink"
+      responses:
+        "201":
+          description: Link created.
+        "400":
+          $ref: "#/components/responses/Error"
+  /api/links/{linkID}:
+    parameters:
+      - $ref: "#/components/parameters/LinkID"
+    delete:
+      tags: [Tickets]
+      operationId: removeTicketLink
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Link removed.
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/tickets/{ticketID}/comments:
+    parameters:
+      - $ref: "#/components/parameters/TicketID"
+    get:
+      tags: [Comments]
+      operationId: listTicketComments
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Comments on a ticket.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Comment"
+    post:
+      tags: [Comments]
+      operationId: createComment
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: "#/components/requestBodies/CreateComment"
+      responses:
+        "201":
+          description: Comment created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comment"
+        "400":
+          $ref: "#/components/responses/Error"
+  /api/comments/{commentID}:
+    parameters:
+      - $ref: "#/components/parameters/CommentID"
+    delete:
+      tags: [Comments]
+      operationId: deleteComment
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Comment deleted.
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/projects/{projectID}/deliveries:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [Delivery]
+      operationId: listProjectDeliveries
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [pending, processing, delivered, failed, dead]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Delivery rows scoped to a project.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Delivery"
+  /api/projects/{projectID}/deliveries/summary:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [Delivery]
+      operationId: getProjectDeliverySummary
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Project delivery counts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverySummary"
+  /api/projects/{projectID}/deliveries/{deliveryID}/retry:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/DeliveryID"
+    post:
+      tags: [Delivery]
+      operationId: retryProjectDelivery
+      security:
+        - bearerAuth: []
+      responses:
+        "202":
+          description: Delivery scheduled for retry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Delivery"
+        "409":
+          $ref: "#/components/responses/Error"
+  /.well-known/webfinger:
+    get:
+      tags: [WebFinger]
+      operationId: resolveWebFinger
+      parameters:
+        - name: resource
+          in: query
+          required: true
+          schema:
+            type: string
+            example: acct:alice@localhost:8080
+      responses:
+        "200":
+          description: WebFinger resource descriptor.
+          content:
+            application/jrd+json:
+              schema:
+                $ref: "#/components/schemas/WebFingerResource"
+        "404":
+          $ref: "#/components/responses/Error"
+  /users/{username}:
+    parameters:
+      - $ref: "#/components/parameters/Username"
+    get:
+      tags: [ActivityPub]
+      operationId: getUserActorDocument
+      responses:
+        "200":
+          $ref: "#/components/responses/ActivityPubDocument"
+        "404":
+          $ref: "#/components/responses/Error"
+  /users/{username}/inbox:
+    parameters:
+      - $ref: "#/components/parameters/Username"
+    get:
+      tags: [ActivityPub]
+      operationId: getUserInbox
+      responses:
+        "200":
+          $ref: "#/components/responses/ActivityPubDocument"
+    post:
+      tags: [ActivityPub]
+      operationId: postUserInbox
+      requestBody:
+        $ref: "#/components/requestBodies/ActivityPubDocument"
+      responses:
+        "202":
+          description: Activity accepted into the target inbox.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InboundActivityAccepted"
+        "401":
+          $ref: "#/components/responses/Error"
+  /users/{username}/outbox:
+    parameters:
+      - $ref: "#/components/parameters/Username"
+    get:
+      tags: [ActivityPub]
+      operationId: getUserOutbox
+      responses:
+        "200":
+          $ref: "#/components/responses/ActivityPubDocument"
+    post:
+      tags: [ActivityPub]
+      operationId: postUserOutboxC2S
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: "#/components/requestBodies/ActivityPubDocument"
+      responses:
+        "201":
+          $ref: "#/components/responses/ActivityPubDocument"
+        "422":
+          $ref: "#/components/responses/Error"
+  /users/{username}/followers:
+    parameters:
+      - $ref: "#/components/parameters/Username"
+    get:
+      tags: [ActivityPub]
+      operationId: getUserFollowers
+      responses:
+        "200":
+          $ref: "#/components/responses/ActivityPubDocument"
+  /projects/{projectID}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [ActivityPub]
+      operationId: getProjectActorDocument
+      responses:
+        "200":
+          $ref: "#/components/responses/ActivityPubDocument"
+        "404":
+          $ref: "#/components/responses/Error"
+  /projects/{projectID}/inbox:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [ActivityPub]
+      operationId: getProjectInbox
+      responses:
+        "200":
+          $ref: "#/components/responses/ActivityPubDocument"
+    post:
+      tags: [ActivityPub]
+      operationId: postProjectInbox
+      requestBody:
+        $ref: "#/components/requestBodies/ActivityPubDocument"
+      responses:
+        "202":
+          description: Activity accepted into the project inbox.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InboundActivityAccepted"
+        "401":
+          $ref: "#/components/responses/Error"
+  /projects/{projectID}/outbox:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [ActivityPub]
+      operationId: getProjectOutbox
+      responses:
+        "200":
+          $ref: "#/components/responses/ActivityPubDocument"
+  /projects/{projectID}/followers:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [ActivityPub]
+      operationId: getProjectFollowers
+      responses:
+        "200":
+          $ref: "#/components/responses/ActivityPubDocument"
+  /projects/{projectID}/tickets:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [ActivityPub]
+      operationId: getProjectTicketsCollection
+      responses:
+        "200":
+          $ref: "#/components/responses/ActivityPubDocument"
+  /tickets/{ticketID}:
+    parameters:
+      - $ref: "#/components/parameters/TicketID"
+    get:
+      tags: [ActivityPub]
+      operationId: getTicketDocument
+      responses:
+        "200":
+          $ref: "#/components/responses/ActivityPubDocument"
+  /comments/{commentID}:
+    parameters:
+      - $ref: "#/components/parameters/CommentID"
+    get:
+      tags: [ActivityPub]
+      operationId: getCommentDocument
+      responses:
+        "200":
+          $ref: "#/components/responses/ActivityPubDocument"
+  /activities/{activityID}:
+    parameters:
+      - $ref: "#/components/parameters/ActivityID"
+    get:
+      tags: [ActivityPub]
+      operationId: getActivityDocument
+      responses:
+        "200":
+          $ref: "#/components/responses/ActivityPubDocument"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ActivityID:
+      name: activityID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CommentID:
+      name: commentID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    DeliveryID:
+      name: deliveryID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    InviteID:
+      name: inviteID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    LinkID:
+      name: linkID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ProjectID:
+      name: projectID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    TicketID:
+      name: ticketID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    UserID:
+      name: userID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Username:
+      name: username
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBodies:
+    ActivityPubDocument:
+      required: true
+      content:
+        application/activity+json:
+          schema:
+            $ref: "#/components/schemas/ActivityPubDocument"
+        application/ld+json:
+          schema:
+            $ref: "#/components/schemas/ActivityPubDocument"
+    AddProjectMember:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [user_id, role]
+            properties:
+              user_id:
+                type: string
+                format: uuid
+              role:
+                $ref: "#/components/schemas/ProjectRole"
+    AddTicketLink:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [target_id, link_type]
+            properties:
+              target_id:
+                type: string
+                format: uuid
+              link_type:
+                type: string
+    CreateComment:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [content]
+            properties:
+              content:
+                type: string
+    CreateProject:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [name]
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+    CreateTicket:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [title, priority, type]
+            properties:
+              title:
+                type: string
+              description:
+                type: string
+              priority:
+                $ref: "#/components/schemas/TicketPriority"
+              type:
+                $ref: "#/components/schemas/TicketType"
+              parent_id:
+                type:
+                  - string
+                  - "null"
+                format: uuid
+              assignee_id:
+                type:
+                  - string
+                  - "null"
+                format: uuid
+    LoginUser:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [email, password]
+            properties:
+              email:
+                type: string
+                format: email
+              password:
+                type: string
+                format: password
+    RegisterUser:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [username, email, password]
+            properties:
+              username:
+                type: string
+              email:
+                type: string
+                format: email
+              password:
+                type: string
+                format: password
+    UpdateProject:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+    UpdateTicket:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              title:
+                type: string
+              description:
+                type: string
+              status:
+                $ref: "#/components/schemas/TicketStatus"
+              priority:
+                $ref: "#/components/schemas/TicketPriority"
+              type:
+                $ref: "#/components/schemas/TicketType"
+              parent_id:
+                type:
+                  - string
+                  - "null"
+                format: uuid
+              assignee_id:
+                type:
+                  - string
+                  - "null"
+                format: uuid
+  responses:
+    ActivityPubDocument:
+      description: ActivityStreams JSON-LD document.
+      content:
+        application/activity+json:
+          schema:
+            $ref: "#/components/schemas/ActivityPubDocument"
+        application/ld+json:
+          schema:
+            $ref: "#/components/schemas/ActivityPubDocument"
+    Error:
+      description: Error response.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    ActivityPubDocument:
+      type: object
+      additionalProperties: true
+    Comment:
+      type: object
+      required: [id, ap_id, ticket_id, author_id, content, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        ap_id:
+          type: string
+          format: uri
+        ticket_id:
+          type: string
+          format: uuid
+        author_id:
+          type: string
+          format: uuid
+        content:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Delivery:
+      type: object
+      required: [id, activity_ap_id, activity_type, target_inbox_url, state, attempts, max_attempts, can_retry, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        activity_ap_id:
+          type: string
+          format: uri
+        activity_type:
+          type: string
+        object_ap_id:
+          type: string
+          format: uri
+        target_ap_id:
+          type: string
+          format: uri
+        target_inbox_url:
+          type: string
+          format: uri
+        state:
+          type: string
+          enum: [pending, processing, delivered, failed, dead]
+        attempts:
+          type: integer
+        max_attempts:
+          type: integer
+        next_attempt_at:
+          type: string
+          format: date-time
+        last_error:
+          type: string
+        delivered_at:
+          type: string
+          format: date-time
+        can_retry:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    DeliverySummary:
+      type: object
+      required: [total, pending, processing, delivered, failed, dead, retryable, can_retry]
+      properties:
+        total:
+          type: integer
+        pending:
+          type: integer
+        processing:
+          type: integer
+        delivered:
+          type: integer
+        failed:
+          type: integer
+        dead:
+          type: integer
+        retryable:
+          type: integer
+        can_retry:
+          type: boolean
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    GraphResponse:
+      type: object
+      required: [nodes, links]
+      properties:
+        nodes:
+          type: array
+          items:
+            type: object
+            required: [id, label, type, status, priority, group]
+            properties:
+              id:
+                type: string
+                format: uuid
+              label:
+                type: string
+              type:
+                $ref: "#/components/schemas/TicketType"
+              status:
+                $ref: "#/components/schemas/TicketStatus"
+              priority:
+                $ref: "#/components/schemas/TicketPriority"
+              group:
+                type: string
+        links:
+          type: array
+          items:
+            type: object
+            required: [source, target, type]
+            properties:
+              source:
+                type: string
+                format: uuid
+              target:
+                type: string
+                format: uuid
+              type:
+                type: string
+    HealthResponse:
+      type: object
+      required: [status, system]
+      properties:
+        status:
+          type: string
+        system:
+          type: string
+    InboundActivityAccepted:
+      type: object
+      required: [activity_id, activity_ap_id, received_at, duplicate]
+      properties:
+        activity_id:
+          type: string
+          format: uuid
+        activity_ap_id:
+          type: string
+          format: uri
+        response_activity_id:
+          type: string
+          format: uuid
+        response_activity_ap_id:
+          type: string
+          format: uri
+        received_at:
+          type: string
+          format: date-time
+        duplicate:
+          type: boolean
+    Project:
+      type: object
+      required: [id, ap_id, name, description, owner_id, handle, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        ap_id:
+          type: string
+          format: uri
+        name:
+          type: string
+        description:
+          type: string
+        owner_id:
+          type: string
+          format: uuid
+        handle:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProjectInvite:
+      type: object
+      required: [id, ap_id, project_id, inviter_actor_id, invitee_actor_id, role, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        ap_id:
+          type: string
+          format: uri
+        project_id:
+          type: string
+          format: uuid
+        inviter_actor_id:
+          type: string
+          format: uuid
+        invitee_actor_id:
+          type: string
+          format: uuid
+        role:
+          $ref: "#/components/schemas/ProjectRole"
+        status:
+          type: string
+          enum: [pending, accepted, rejected, revoked]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProjectRole:
+      type: string
+      enum: [owner, manager, developer, viewer]
+    ReadinessResponse:
+      type: object
+      required: [status, checks]
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
+        checks:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [ok, error, disabled]
+    Ticket:
+      type: object
+      required: [id, ap_id, title, description, status, priority, type, project_id, reporter_id, is_resolved, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        ap_id:
+          type: string
+          format: uri
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          $ref: "#/components/schemas/TicketStatus"
+        priority:
+          $ref: "#/components/schemas/TicketPriority"
+        type:
+          $ref: "#/components/schemas/TicketType"
+        parent_id:
+          type:
+            - string
+            - "null"
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        reporter_id:
+          type: string
+          format: uuid
+        assignee_id:
+          type:
+            - string
+            - "null"
+          format: uuid
+        is_resolved:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    TicketPriority:
+      type: string
+      enum: [low, medium, high, urgent]
+    TicketStatus:
+      type: string
+      enum: [open, in_progress, review, done]
+    TicketType:
+      type: string
+      enum: [epic, task, subtask]
+    User:
+      type: object
+      required: [id, ap_id, username, email, role, handle, name, summary, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        ap_id:
+          type: string
+          format: uri
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+        handle:
+          type: string
+        name:
+          type: string
+        summary:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    WebFingerResource:
+      type: object
+      required: [subject, links]
+      properties:
+        subject:
+          type: string
+        aliases:
+          type: array
+          items:
+            type: string
+        links:
+          type: array
+          items:
+            type: object
+            required: [rel]
+            properties:
+              rel:
+                type: string
+              type:
+                type: string
+              href:
+                type: string
+                format: uri
