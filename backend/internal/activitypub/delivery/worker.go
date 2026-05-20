@@ -30,17 +30,52 @@ type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-type Worker struct {
-	repo   Repository
-	signer Signer
-	client HTTPClient
+type RemoteActorRefresher interface {
+	RefreshIfStale(ctx context.Context, actorAPID string, maxAge time.Duration) error
 }
 
-func NewWorker(repo Repository, signer Signer, client HTTPClient) *Worker {
+type remoteActorInboxResolver interface {
+	RemoteActorAPIDByInboxURL(ctx context.Context, inboxURL string) (string, error)
+}
+
+type Worker struct {
+	repo                     Repository
+	signer                   Signer
+	client                   HTTPClient
+	remoteActorRefresher     RemoteActorRefresher
+	targetActorRefreshMaxAge time.Duration
+}
+
+type WorkerOption func(*Worker)
+
+func NewWorker(repo Repository, signer Signer, client HTTPClient, opts ...WorkerOption) *Worker {
 	if client == nil {
 		client = netguard.NewHTTPClient(20 * time.Second)
 	}
-	return &Worker{repo: repo, signer: signer, client: client}
+	worker := &Worker{
+		repo:                     repo,
+		signer:                   signer,
+		client:                   client,
+		targetActorRefreshMaxAge: 24 * time.Hour,
+	}
+	for _, opt := range opts {
+		opt(worker)
+	}
+	return worker
+}
+
+func WithRemoteActorRefresher(refresher RemoteActorRefresher) WorkerOption {
+	return func(w *Worker) {
+		w.remoteActorRefresher = refresher
+	}
+}
+
+func WithTargetActorRefreshMaxAge(maxAge time.Duration) WorkerOption {
+	return func(w *Worker) {
+		if maxAge >= 0 {
+			w.targetActorRefreshMaxAge = maxAge
+		}
+	}
 }
 
 func NewAsynqServer(redis asynq.RedisConnOpt) *asynq.Server {
@@ -104,6 +139,7 @@ func (w *Worker) deliver(ctx context.Context, delivery *Delivery) error {
 	if err := validateTargetInboxURL(delivery.TargetInboxURL); err != nil {
 		return err
 	}
+	w.refreshTargetActor(ctx, delivery.TargetInboxURL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, delivery.TargetInboxURL, bytes.NewReader(delivery.Document))
 	if err != nil {
@@ -138,6 +174,21 @@ func (w *Worker) deliver(ctx context.Context, delivery *Delivery) error {
 		return errors.New(message)
 	}
 	return permanentError{err: errors.New(message)}
+}
+
+func (w *Worker) refreshTargetActor(ctx context.Context, inboxURL string) {
+	if w.remoteActorRefresher == nil {
+		return
+	}
+	resolver, ok := w.repo.(remoteActorInboxResolver)
+	if !ok {
+		return
+	}
+	actorAPID, err := resolver.RemoteActorAPIDByInboxURL(ctx, inboxURL)
+	if err != nil || actorAPID == "" {
+		return
+	}
+	_ = w.remoteActorRefresher.RefreshIfStale(ctx, actorAPID, w.targetActorRefreshMaxAge)
 }
 
 func responseMessage(resp *http.Response) string {

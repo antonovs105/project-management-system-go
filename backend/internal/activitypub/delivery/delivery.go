@@ -11,6 +11,7 @@ const (
 	StateProcessing = "processing"
 	StateDelivered  = "delivered"
 	StateFailed     = "failed"
+	StateDead       = "dead"
 
 	QueueFederation = "federation"
 	TaskDeliver     = "activitypub:deliver"

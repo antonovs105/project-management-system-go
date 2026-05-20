@@ -97,7 +97,7 @@ func (r *PgRepository) StartAttempt(ctx context.Context, deliveryID string) (*De
 	if state == StateDelivered {
 		return nil, ErrDeliveryDone
 	}
-	if attempts >= maxAttempts {
+	if state == StateDead || attempts >= maxAttempts {
 		return nil, ErrDeliveryExhausted
 	}
 
@@ -135,13 +135,17 @@ func (r *PgRepository) MarkDelivered(ctx context.Context, deliveryID string) err
 }
 
 func (r *PgRepository) MarkFailed(ctx context.Context, deliveryID string, message string, nextAttemptAt *time.Time) error {
+	state := StateFailed
+	if nextAttemptAt == nil {
+		state = StateDead
+	}
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE activity_deliveries
 		SET state = $2,
 			last_error = $3,
 			next_attempt_at = $4
 		WHERE id = $1
-	`, deliveryID, StateFailed, message, nextAttemptAt)
+	`, deliveryID, state, message, nextAttemptAt)
 	return err
 }
 
@@ -227,6 +231,19 @@ func (r *PgRepository) ProjectDeliveries(ctx context.Context, projectID string, 
 		LIMIT 100
 	`, projectID)
 	return deliveries, err
+}
+
+func (r *PgRepository) RemoteActorAPIDByInboxURL(ctx context.Context, inboxURL string) (string, error) {
+	var apID string
+	err := r.db.GetContext(ctx, &apID, `
+		SELECT ap_id
+		FROM actors
+		WHERE inbox_url = $1
+			AND is_local = false
+		ORDER BY updated_at ASC, ap_id ASC
+		LIMIT 1
+	`, inboxURL)
+	return apID, err
 }
 
 func (r *PgRepository) RemoteProjectFollowerInboxes(ctx context.Context, projectID string) ([]string, error) {

@@ -26,9 +26,9 @@ type Actor struct {
 	OutboxURL         string          `db:"outbox_url" json:"outbox_url"`
 	FollowersURL      *string         `db:"followers_url" json:"followers_url,omitempty"`
 	FollowingURL      *string         `db:"following_url" json:"following_url,omitempty"`
-	PublicKeyID       string          `json:"public_key_id"`
-	PublicKeyPEM      string          `json:"-"`
-	Document          json.RawMessage `json:"-"`
+	PublicKeyID       string          `db:"public_key_id" json:"public_key_id"`
+	PublicKeyPEM      string          `db:"public_key_pem" json:"-"`
+	Document          json.RawMessage `db:"document" json:"-"`
 	CreatedAt         time.Time       `db:"created_at" json:"created_at"`
 	UpdatedAt         time.Time       `db:"updated_at" json:"updated_at"`
 }

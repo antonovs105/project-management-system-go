@@ -19,8 +19,10 @@ func (s *Service) Enqueue(ctx context.Context, activityID string, targetInboxURL
 	if err != nil {
 		return nil, err
 	}
-	if err := s.queue.Enqueue(ctx, delivery.ID, delivery.MaxAttempts); err != nil {
-		return nil, err
+	if delivery.State != StateDelivered && delivery.State != StateDead {
+		if err := s.queue.Enqueue(ctx, delivery.ID, delivery.MaxAttempts); err != nil {
+			return nil, err
+		}
 	}
 	return delivery, nil
 }
@@ -61,7 +63,7 @@ func (s *Service) enqueueToInboxes(ctx context.Context, inboxes []string, activi
 			if err != nil {
 				return err
 			}
-			if delivery.State == StateDelivered {
+			if delivery.State == StateDelivered || delivery.State == StateDead {
 				continue
 			}
 			if err := s.queue.Enqueue(ctx, delivery.ID, delivery.MaxAttempts); err != nil {

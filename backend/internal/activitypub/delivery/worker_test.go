@@ -19,12 +19,14 @@ import (
 )
 
 type workerRepo struct {
-	delivery     *Delivery
-	deliveredID  string
-	failedID     string
-	failedMsg    string
-	nextAttempt  *time.Time
-	startAttempt error
+	delivery        *Delivery
+	deliveredID     string
+	failedID        string
+	failedMsg       string
+	nextAttempt     *time.Time
+	startAttempt    error
+	targetActorAPID string
+	targetActorErr  error
 }
 
 func (r *workerRepo) Create(ctx context.Context, activityID string, targetInboxURL string, maxAttempts int) (*Delivery, bool, error) {
@@ -50,6 +52,13 @@ func (r *workerRepo) MarkFailed(ctx context.Context, deliveryID string, message 
 	return nil
 }
 
+func (r *workerRepo) RemoteActorAPIDByInboxURL(ctx context.Context, inboxURL string) (string, error) {
+	if r.targetActorErr != nil {
+		return "", r.targetActorErr
+	}
+	return r.targetActorAPID, nil
+}
+
 type signerFunc func(ctx context.Context, actorID string, req *http.Request, body []byte) error
 
 func (f signerFunc) SignRequest(ctx context.Context, actorID string, req *http.Request, body []byte) error {
@@ -60,6 +69,12 @@ type httpClientFunc func(req *http.Request) (*http.Response, error)
 
 func (f httpClientFunc) Do(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+type actorRefresherFunc func(ctx context.Context, actorAPID string, maxAge time.Duration) error
+
+func (f actorRefresherFunc) RefreshIfStale(ctx context.Context, actorAPID string, maxAge time.Duration) error {
+	return f(ctx, actorAPID, maxAge)
 }
 
 type staticKeyRepo struct {
@@ -160,6 +175,47 @@ func TestWorkerRetriesTransientFailureWithBackoff(t *testing.T) {
 	assert.Contains(t, repo.failedMsg, "500")
 	require.NotNil(t, repo.nextAttempt)
 	assert.WithinDuration(t, time.Now().UTC().Add(2*time.Minute), *repo.nextAttempt, 5*time.Second)
+}
+
+func TestWorkerRefreshesStaleTargetActorBeforeDelivery(t *testing.T) {
+	repo := &workerRepo{delivery: testDelivery(1, 3), targetActorAPID: "https://remote.example/users/alice"}
+	refreshed := false
+	clientCalled := false
+	worker := NewWorker(repo, signerFunc(func(ctx context.Context, actorID string, req *http.Request, body []byte) error {
+		assert.True(t, refreshed)
+		return nil
+	}), httpClientFunc(func(req *http.Request) (*http.Response, error) {
+		clientCalled = true
+		return response(http.StatusAccepted, ""), nil
+	}), WithRemoteActorRefresher(actorRefresherFunc(func(ctx context.Context, actorAPID string, maxAge time.Duration) error {
+		refreshed = true
+		assert.Equal(t, "https://remote.example/users/alice", actorAPID)
+		assert.Equal(t, 24*time.Hour, maxAge)
+		return nil
+	})))
+
+	err := worker.HandleDeliveryTask(context.Background(), taskForDelivery(t, "delivery-1"))
+
+	require.NoError(t, err)
+	assert.True(t, refreshed)
+	assert.True(t, clientCalled)
+	assert.Equal(t, "delivery-1", repo.deliveredID)
+}
+
+func TestWorkerTreatsFinalRetryAsDeadDelivery(t *testing.T) {
+	repo := &workerRepo{delivery: testDelivery(5, 5)}
+	worker := NewWorker(repo, signerFunc(func(ctx context.Context, actorID string, req *http.Request, body []byte) error {
+		return nil
+	}), httpClientFunc(func(req *http.Request) (*http.Response, error) {
+		return response(http.StatusInternalServerError, "still down"), nil
+	}))
+
+	err := worker.HandleDeliveryTask(context.Background(), taskForDelivery(t, "delivery-1"))
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, asynq.SkipRetry))
+	assert.Equal(t, "delivery-1", repo.failedID)
+	assert.Nil(t, repo.nextAttempt)
 }
 
 func TestWorkerRetriesRateLimitFailure(t *testing.T) {

@@ -112,6 +112,18 @@ func (s *Service) Fetch(ctx context.Context, actorURL string) (*Actor, error) {
 	return actor, nil
 }
 
+func (s *Service) RefreshIfStale(ctx context.Context, actorAPID string, maxAge time.Duration) error {
+	actor, err := s.repo.RemoteActorByAPID(ctx, actorAPID)
+	if err != nil {
+		return err
+	}
+	if maxAge > 0 && !actor.UpdatedAt.IsZero() && time.Since(actor.UpdatedAt) < maxAge {
+		return nil
+	}
+	_, err = s.Fetch(ctx, actor.APID)
+	return err
+}
+
 func (s *Service) ResolveKey(ctx context.Context, keyID string) error {
 	return s.fetchAndCacheKey(ctx, keyID, "")
 }

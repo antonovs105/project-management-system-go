@@ -658,6 +658,28 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		require.NoError(t, repo.MarkDelivered(ctx, created.ID))
 		_, err = repo.StartAttempt(ctx, created.ID)
 		require.ErrorIs(t, err, delivery.ErrDeliveryDone)
+
+		finalDelivery, isNew, err := repo.Create(ctx, activityID, "https://remote.example/users/dead/inbox", 2)
+		require.NoError(t, err)
+		assert.True(t, isNew)
+		require.NoError(t, repo.MarkFailed(ctx, finalDelivery.ID, "permanent failure", nil))
+
+		var terminal struct {
+			State         string       `db:"state"`
+			LastError     string       `db:"last_error"`
+			NextAttemptAt sql.NullTime `db:"next_attempt_at"`
+		}
+		require.NoError(t, db.GetContext(ctx, &terminal, `
+			SELECT state, last_error, next_attempt_at
+			FROM activity_deliveries
+			WHERE id = $1
+		`, finalDelivery.ID))
+		assert.Equal(t, delivery.StateDead, terminal.State)
+		assert.Equal(t, "permanent failure", terminal.LastError)
+		assert.False(t, terminal.NextAttemptAt.Valid)
+
+		_, err = repo.StartAttempt(ctx, finalDelivery.ID)
+		require.ErrorIs(t, err, delivery.ErrDeliveryExhausted)
 	})
 }
 

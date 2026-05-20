@@ -10,6 +10,7 @@ import (
 )
 
 type Repository interface {
+	RemoteActorByAPID(ctx context.Context, apID string) (*Actor, error)
 	UpsertRemoteActor(ctx context.Context, actor *Actor) error
 }
 
@@ -19,6 +20,40 @@ type PgRepository struct {
 
 func NewRepository(db *sqlx.DB) Repository {
 	return &PgRepository{db: db}
+}
+
+func (r *PgRepository) RemoteActorByAPID(ctx context.Context, apID string) (*Actor, error) {
+	var actor Actor
+	err := r.db.GetContext(ctx, &actor, `
+		SELECT
+			actor.id::text,
+			actor.ap_id,
+			actor.type,
+			actor.preferred_username,
+			actor.handle,
+			actor.name,
+			actor.summary,
+			actor.inbox_url,
+			actor.outbox_url,
+			actor.followers_url,
+			actor.following_url,
+			COALESCE(key.key_id, '') AS public_key_id,
+			COALESCE(key.public_key_pem, '') AS public_key_pem,
+			COALESCE(object.document, '{}'::jsonb) AS document,
+			actor.created_at,
+			actor.updated_at
+		FROM actors actor
+		LEFT JOIN actor_keys key ON key.actor_id = actor.id AND key.active = true
+		LEFT JOIN ap_objects object ON object.ap_id = actor.ap_id
+		WHERE actor.ap_id = $1 AND actor.is_local = false
+	`, apID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &actor, nil
 }
 
 func (r *PgRepository) UpsertRemoteActor(ctx context.Context, actor *Actor) error {

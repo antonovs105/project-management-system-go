@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/netguard"
@@ -15,8 +16,11 @@ import (
 )
 
 type memoryRepository struct {
-	actor *Actor
-	err   error
+	actor       *Actor
+	lookupActor *Actor
+	err         error
+	findErr     error
+	upsertCount int
 }
 
 func (m *memoryRepository) UpsertRemoteActor(ctx context.Context, actor *Actor) error {
@@ -25,7 +29,29 @@ func (m *memoryRepository) UpsertRemoteActor(ctx context.Context, actor *Actor) 
 	}
 	copy := *actor
 	m.actor = &copy
+	m.upsertCount++
 	return nil
+}
+
+func (m *memoryRepository) RemoteActorByAPID(ctx context.Context, apID string) (*Actor, error) {
+	if m.findErr != nil {
+		return nil, m.findErr
+	}
+	source := m.lookupActor
+	if source == nil {
+		source = m.actor
+	}
+	if source == nil || source.APID != apID {
+		return nil, ErrNotFound
+	}
+	copy := *source
+	return &copy, nil
+}
+
+type httpClientFunc func(req *http.Request) (*http.Response, error)
+
+func (f httpClientFunc) Do(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func TestDiscoverFetchesAndCachesRemoteActor(t *testing.T) {
@@ -188,6 +214,55 @@ func TestFetchRejectsUnsafeActorHost(t *testing.T) {
 	_, err := service.Fetch(context.Background(), "http://127.0.0.1/users/alice")
 
 	require.ErrorIs(t, err, netguard.ErrUnsafeURL)
+}
+
+func TestRefreshIfStaleSkipsFreshRemoteActor(t *testing.T) {
+	repo := &memoryRepository{
+		lookupActor: &Actor{
+			APID:      "https://remote.example/users/alice",
+			UpdatedAt: time.Now().UTC(),
+		},
+	}
+	service := NewService(repo, WithHTTPClient(httpClientFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("fresh actor should not be fetched")
+		return nil, nil
+	})))
+
+	err := service.RefreshIfStale(context.Background(), "https://remote.example/users/alice", 24*time.Hour)
+
+	require.NoError(t, err)
+	assert.Zero(t, repo.upsertCount)
+}
+
+func TestRefreshIfStaleFetchesAndCachesStaleRemoteActor(t *testing.T) {
+	publicKey, _, err := activitypub.GenerateRSAKeyPair()
+	require.NoError(t, err)
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/users/alice" {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(t, w, actorDocumentMap(server.URL, "Person", publicKey))
+	}))
+	defer server.Close()
+
+	repo := &memoryRepository{
+		lookupActor: &Actor{
+			APID:      server.URL + "/users/alice",
+			UpdatedAt: time.Now().UTC().Add(-25 * time.Hour),
+		},
+	}
+	service := NewService(repo, WithHTTPClient(server.Client()))
+
+	err = service.RefreshIfStale(context.Background(), server.URL+"/users/alice", 24*time.Hour)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, repo.upsertCount)
+	require.NotNil(t, repo.actor)
+	assert.Equal(t, server.URL+"/users/alice", repo.actor.APID)
+	assert.Equal(t, server.URL+"/users/alice/inbox", repo.actor.InboxURL)
 }
 
 func TestDiscoverRejectsWebFingerWithoutSelfLink(t *testing.T) {

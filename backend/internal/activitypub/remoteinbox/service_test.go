@@ -271,6 +271,33 @@ func TestServiceReceiveAcceptsProjectFollowAndQueuesResponse(t *testing.T) {
 	assert.Equal(t, "https://remote.example/users/alice/inbox", delivery.targetInboxURL)
 }
 
+func TestServiceReceiveDuplicateProjectFollowDoesNotQueueResponse(t *testing.T) {
+	repo := &memoryRepository{
+		targetActorID: "project-actor",
+		projectActor:  true,
+		storeResult: &AcceptedActivity{
+			ActivityID:   "stored-follow",
+			ActivityAPID: "https://remote.example/activities/follow-1",
+			ReceivedAt:   time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC),
+			Duplicate:    true,
+		},
+	}
+	delivery := &fakeDelivery{}
+	service := NewService(repo, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-actor",
+		ActorAPID: "https://remote.example/users/alice",
+	}}, WithDelivery(delivery))
+	body := []byte(`{"id":"https://remote.example/activities/follow-1","type":"Follow","actor":"https://remote.example/users/alice","object":"http://localhost:8080/projects/project-1"}`)
+
+	accepted, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
+
+	require.NoError(t, err)
+	assert.True(t, accepted.Duplicate)
+	assert.Nil(t, repo.follow)
+	assert.Empty(t, delivery.activityID)
+	assert.Empty(t, delivery.targetInboxURL)
+}
+
 func TestServiceReceiveRejectsProjectFollowWithWrongObject(t *testing.T) {
 	service := NewService(&memoryRepository{targetActorID: "project-actor", projectActor: true}, fakeVerifier{verified: &httpsig.VerifiedRequest{
 		ActorID:   "remote-actor",

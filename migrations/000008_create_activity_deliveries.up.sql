@@ -4,7 +4,7 @@ CREATE TABLE activity_deliveries (
     activity_ap_id TEXT NOT NULL,
     actor_id UUID NOT NULL REFERENCES actors(id) ON DELETE CASCADE,
     target_inbox_url TEXT NOT NULL,
-    state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'processing', 'delivered', 'failed')),
+    state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'processing', 'delivered', 'failed', 'dead')),
     attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
     max_attempts INTEGER NOT NULL DEFAULT 10 CHECK (max_attempts > 0),
     next_attempt_at TIMESTAMPTZ,

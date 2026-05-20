@@ -109,6 +109,18 @@ func TestServiceEnqueueCreatesDeliveryAndQueuesTask(t *testing.T) {
 	assert.Equal(t, 10, queue.maxAttempts)
 }
 
+func TestServiceEnqueueSkipsTerminalDelivery(t *testing.T) {
+	repo := &serviceRepo{delivery: &Delivery{ID: "delivery-1", MaxAttempts: 10, State: StateDead}}
+	queue := &serviceQueue{}
+	service := NewService(repo, queue)
+
+	delivery, err := service.Enqueue(context.Background(), "activity-1", "https://remote.example/inbox")
+
+	require.NoError(t, err)
+	assert.Equal(t, "delivery-1", delivery.ID)
+	assert.Empty(t, queue.deliveryID)
+}
+
 func TestServiceEnqueueProjectFollowersCreatesDeliveriesForRemoteInboxes(t *testing.T) {
 	repo := &serviceRepo{inboxes: []string{"https://remote.example/alice/inbox", "https://remote.example/bob/inbox"}}
 	queue := &serviceQueue{}

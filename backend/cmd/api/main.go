@@ -105,7 +105,12 @@ func main() {
 		deliveryQueue = delivery.NewAsynqQueue(redisOpt)
 		defer deliveryQueue.Close()
 
-		deliveryWorker := delivery.NewWorker(deliveryRepo, sigService, nil)
+		deliveryWorker := delivery.NewWorker(
+			deliveryRepo,
+			sigService,
+			nil,
+			delivery.WithRemoteActorRefresher(remoteActorService),
+		)
 		deliveryServer := delivery.NewAsynqServer(redisOpt)
 		if err := deliveryServer.Start(delivery.NewServeMux(deliveryWorker)); err != nil {
 			log.Fatalf("Can't start ActivityPub delivery worker: %v", err)
