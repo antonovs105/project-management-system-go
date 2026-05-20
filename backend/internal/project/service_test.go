@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -13,32 +14,28 @@ import (
 func TestService_CreateProject(t *testing.T) {
 	mockRepo := new(MockRepository)
 	mockPM := new(MockMemberService)
-	service := NewService(mockRepo, mockPM)
+	service := NewService(mockRepo, mockPM, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
 
 	ctx := context.Background()
 	name := "Test Project"
 	desc := "Description"
-	userID := int64(1)
+	userID := "user-1"
 
 	t.Run("Success", func(t *testing.T) {
 		// Expect Create to be called
 		mockRepo.On("Create", ctx, mock.MatchedBy(func(p *Project) bool {
-			return p.Name == name && p.OwnerID == userID
+			return p.ID != "" && p.APID != "" && p.Name == name && p.OwnerID == userID
 		})).Return(nil).Run(func(args mock.Arguments) {
 			p := args.Get(1).(*Project)
-			p.ID = 100 // Simulate ID assignment
+			p.ID = "project-1"
 		}).Once()
-
-		// Expect AddMember to be called
-		mockPM.On("AddMember", ctx, userID, int64(100), "owner").Return(nil, nil).Once()
 
 		p, err := service.CreateProject(ctx, name, desc, userID)
 
 		assert.NoError(t, err)
 		assert.NotNil(t, p)
-		assert.Equal(t, int64(100), p.ID)
+		assert.Equal(t, "project-1", p.ID)
 		mockRepo.AssertExpectations(t)
-		mockPM.AssertExpectations(t)
 	})
 
 	t.Run("RepoError", func(t *testing.T) {
@@ -55,11 +52,11 @@ func TestService_CreateProject(t *testing.T) {
 func TestService_GetProjectByID(t *testing.T) {
 	mockRepo := new(MockRepository)
 	mockPM := new(MockMemberService)
-	service := NewService(mockRepo, mockPM)
+	service := NewService(mockRepo, mockPM, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
 
 	ctx := context.Background()
-	projectID := int64(100)
-	userID := int64(1)
+	projectID := "project-1"
+	userID := "user-1"
 
 	expectedProject := &Project{
 		ID:        projectID,

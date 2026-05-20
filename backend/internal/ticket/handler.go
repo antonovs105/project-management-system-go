@@ -2,7 +2,6 @@ package ticket
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/labstack/echo/v4"
 )
@@ -16,27 +15,24 @@ func NewHandler(service *Service) *Handler {
 }
 
 type createTicketRequest struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Priority    string `json:"priority"`
-	Type        string `json:"type"`
-	ParentID    *int64 `json:"parent_id"`
-	AssigneeID  *int64 `json:"assignee_id"`
+	Title       string  `json:"title"`
+	Description string  `json:"description"`
+	Priority    string  `json:"priority"`
+	Type        string  `json:"type"`
+	ParentID    *string `json:"parent_id"`
+	AssigneeID  *string `json:"assignee_id"`
 }
 
 // Create handler for POST /api/projects/:projectID/tickets
 func (h *Handler) Create(c echo.Context) error {
-	projectID, err := strconv.ParseInt(c.Param("projectID"), 10, 64)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid project ID"})
-	}
+	projectID := c.Param("projectID")
 
 	var req createTicketRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 	}
 
-	userID := c.Get("userID").(int64)
+	userID := c.Get("userID").(string)
 
 	serviceReq := CreateTicketRequest{
 		Title:       req.Title,
@@ -57,12 +53,9 @@ func (h *Handler) Create(c echo.Context) error {
 
 // List handler for GET /api/projects/:projectID/tickets
 func (h *Handler) List(c echo.Context) error {
-	projectID, err := strconv.ParseInt(c.Param("projectID"), 10, 64)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid project ID"})
-	}
+	projectID := c.Param("projectID")
 
-	userID := c.Get("userID").(int64)
+	userID := c.Get("userID").(string)
 
 	tickets, err := h.service.ListTicketsInProject(c.Request().Context(), projectID, userID)
 	if err != nil {
@@ -73,22 +66,19 @@ func (h *Handler) List(c echo.Context) error {
 }
 
 type updateTicketRequest struct {
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
-	Status      *string `json:"status"`
-	Priority    *string `json:"priority"`
-	Type        *string `json:"type"`
-	ParentID    **int64 `json:"parent_id"`
-	AssigneeID  **int64 `json:"assignee_id"`
+	Title       *string  `json:"title"`
+	Description *string  `json:"description"`
+	Status      *string  `json:"status"`
+	Priority    *string  `json:"priority"`
+	Type        *string  `json:"type"`
+	ParentID    **string `json:"parent_id"`
+	AssigneeID  **string `json:"assignee_id"`
 }
 
 // Get handler for GET /api/tickets/:id
 func (h *Handler) Get(c echo.Context) error {
-	ticketID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid ticket ID"})
-	}
-	userID := c.Get("userID").(int64)
+	ticketID := c.Param("id")
+	userID := c.Get("userID").(string)
 
 	ticket, err := h.service.GetTicketByID(c.Request().Context(), ticketID, userID)
 	if err != nil {
@@ -99,11 +89,8 @@ func (h *Handler) Get(c echo.Context) error {
 
 // Update handler for PATCH /api/tickets/:id
 func (h *Handler) Update(c echo.Context) error {
-	ticketID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid ticket ID"})
-	}
-	userID := c.Get("userID").(int64)
+	ticketID := c.Param("id")
+	userID := c.Get("userID").(string)
 
 	var req updateTicketRequest
 	if err := c.Bind(&req); err != nil {
@@ -120,8 +107,7 @@ func (h *Handler) Update(c echo.Context) error {
 		AssigneeID:  req.AssigneeID,
 	}
 
-	err = h.service.UpdateTicket(c.Request().Context(), serviceReq, ticketID, userID)
-	if err != nil {
+	if err := h.service.UpdateTicket(c.Request().Context(), serviceReq, ticketID, userID); err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -129,37 +115,30 @@ func (h *Handler) Update(c echo.Context) error {
 
 // Delete handler for DELETE /api/tickets/:id
 func (h *Handler) Delete(c echo.Context) error {
-	ticketID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid ticket ID"})
-	}
-	userID := c.Get("userID").(int64)
+	ticketID := c.Param("id")
+	userID := c.Get("userID").(string)
 
-	err = h.service.DeleteTicket(c.Request().Context(), ticketID, userID)
-	if err != nil {
+	if err := h.service.DeleteTicket(c.Request().Context(), ticketID, userID); err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
 	}
 	return c.NoContent(http.StatusNoContent)
 }
 
 type addLinkRequest struct {
-	TargetID int64  `json:"target_id"`
+	TargetID string `json:"target_id"`
 	LinkType string `json:"link_type"`
 }
 
 // AddLink handler for POST /api/tickets/:id/links
 func (h *Handler) AddLink(c echo.Context) error {
-	sourceID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid ticket ID"})
-	}
+	sourceID := c.Param("id")
 
 	var req addLinkRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 	}
 
-	userID := c.Get("userID").(int64)
+	userID := c.Get("userID").(string)
 
 	// Fetch source ticket to get ProjectID
 	sourceTicket, err := h.service.GetTicketByID(c.Request().Context(), sourceID, userID)
@@ -177,14 +156,11 @@ func (h *Handler) AddLink(c echo.Context) error {
 
 // RemoveLink handler for DELETE /api/links/:linkID
 func (h *Handler) RemoveLink(c echo.Context) error {
-	linkID, err := strconv.ParseInt(c.Param("linkID"), 10, 64)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid link ID"})
-	}
-	userID := c.Get("userID").(int64)
+	linkID := c.Param("linkID")
+	userID := c.Get("userID").(string)
 
 	// Passing 0 as projectID, assuming Service/Repo handles it or simplistic check.
-	err = h.service.RemoveTicketLink(c.Request().Context(), linkID, 0, userID)
+	err := h.service.RemoveTicketLink(c.Request().Context(), linkID, "", userID)
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
 	}
@@ -194,11 +170,8 @@ func (h *Handler) RemoveLink(c echo.Context) error {
 
 // GetGraph handler for GET /api/projects/:projectID/graph
 func (h *Handler) GetGraph(c echo.Context) error {
-	projectID, err := strconv.ParseInt(c.Param("projectID"), 10, 64)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid project ID"})
-	}
-	userID := c.Get("userID").(int64)
+	projectID := c.Param("projectID")
+	userID := c.Get("userID").(string)
 
 	graph, err := h.service.GetTicketGraph(c.Request().Context(), projectID, userID)
 	if err != nil {

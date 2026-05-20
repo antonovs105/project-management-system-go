@@ -45,14 +45,10 @@ func JWTMiddleware(secret []byte) echo.MiddlewareFunc {
 			// takes data (claims) and adds it to context
 			if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
 
-				// Claims stores data as interface{} so transform needed
-				userIDFloat, ok := claims["sub"].(float64)
-				if !ok {
+				userID, ok := claims["sub"].(string)
+				if !ok || userID == "" {
 					return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Invalid user ID in token"})
 				}
-
-				// transfrm float64 to int64
-				userID := int64(userIDFloat)
 
 				c.Set("userID", userID)
 

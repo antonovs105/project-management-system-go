@@ -24,7 +24,7 @@ func (r *Repository) Add(ctx context.Context, pm *ProjectMember) error {
 }
 
 // FindByUserAndProject finds if user in project
-func (r *Repository) FindByUserAndProject(ctx context.Context, userID, projectID int64) (*ProjectMember, error) {
+func (r *Repository) FindByUserAndProject(ctx context.Context, userID, projectID string) (*ProjectMember, error) {
 	var pm ProjectMember
 	query := `SELECT * FROM project_members WHERE user_id = $1 AND project_id = $2`
 	err := r.db.GetContext(ctx, &pm, query, userID, projectID)
@@ -32,7 +32,7 @@ func (r *Repository) FindByUserAndProject(ctx context.Context, userID, projectID
 }
 
 // GetUserRoleInProject gets user role in project
-func (r *Repository) GetUserRoleInProject(ctx context.Context, userID, projectID int64) (string, error) {
+func (r *Repository) GetUserRoleInProject(ctx context.Context, userID, projectID string) (string, error) {
 	var role string
 	query := `SELECT role FROM project_members WHERE user_id = $1 AND project_id = $2`
 	err := r.db.GetContext(ctx, &role, query, userID, projectID)

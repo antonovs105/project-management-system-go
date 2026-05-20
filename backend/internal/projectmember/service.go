@@ -12,7 +12,7 @@ func NewService(repo *Repository) *Service {
 }
 
 // AddMember adds user into project
-func (s *Service) AddMember(ctx context.Context, userID, projectID int64, role string) (*ProjectMember, error) {
+func (s *Service) AddMember(ctx context.Context, userID, projectID string, role string) (*ProjectMember, error) {
 	// TODO: check is userID exists
 	// TODO: check is project exists
 
@@ -30,6 +30,6 @@ func (s *Service) AddMember(ctx context.Context, userID, projectID int64, role s
 	return pm, nil
 }
 
-func (s *Service) GetUserRole(ctx context.Context, userID, projectID int64) (string, error) {
+func (s *Service) GetUserRole(ctx context.Context, userID, projectID string) (string, error) {
 	return s.repo.GetUserRoleInProject(ctx, userID, projectID)
 }

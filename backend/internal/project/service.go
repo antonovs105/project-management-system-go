@@ -5,96 +5,86 @@ import (
 	"errors"
 	"log"
 
+	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/antonovs105/project-management-system-go/internal/projectmember"
 )
 
 type MemberAdder interface {
-	AddMember(ctx context.Context, userID, projectID int64, role string) (*projectmember.ProjectMember, error)
-	GetUserRole(ctx context.Context, userID, projectID int64) (string, error)
+	AddMember(ctx context.Context, userID, projectID string, role string) (*projectmember.ProjectMember, error)
+	GetUserRole(ctx context.Context, userID, projectID string) (string, error)
 }
 
 type Service struct {
 	repo                 Repository
 	projectMemberService MemberAdder
+	apConfig             activitypub.Config
 }
 
-func NewService(repo Repository, pmService MemberAdder) *Service {
+func NewService(repo Repository, pmService MemberAdder, apConfig activitypub.Config) *Service {
 	return &Service{
 		repo:                 repo,
 		projectMemberService: pmService,
+		apConfig:             apConfig,
 	}
 }
 
-// CreateProject is business logic for creating project
-func (s *Service) CreateProject(ctx context.Context, name, description string, userID int64) (*Project, error) {
-	// TODO: Business logc here
-
-	p := &Project{
-		Name:        name,
-		Description: description,
-		OwnerID:     userID,
+func (s *Service) CreateProject(ctx context.Context, name, description string, userID string) (*Project, error) {
+	projectID, err := activitypub.NewID()
+	if err != nil {
+		return nil, err
 	}
-
-	err := s.repo.Create(ctx, p)
+	publicKey, privateKey, err := activitypub.GenerateRSAKeyPair()
 	if err != nil {
 		return nil, err
 	}
 
-	// after creating project add creator in table project_members as owner
-	_, err = s.projectMemberService.AddMember(ctx, userID, p.ID, "owner")
-	if err != nil {
-		log.Printf("CRITICAL: project %d created, but failed to add owner role: %v", p.ID, err)
-		return nil, errors.New("failed to finalize project creation")
+	p := &Project{
+		ID:            projectID,
+		APID:          activitypub.ProjectAPID(s.apConfig, projectID),
+		Name:          name,
+		Description:   description,
+		OwnerID:       userID,
+		Handle:        activitypub.Handle("project-"+projectID, s.apConfig),
+		PublicKeyPEM:  publicKey,
+		PrivateKeyPEM: privateKey,
 	}
 
+	if err := s.repo.Create(ctx, p); err != nil {
+		return nil, err
+	}
 	return p, nil
 }
 
-func (s *Service) GetProjectByID(ctx context.Context, projectID, userID int64) (*Project, error) {
+func (s *Service) GetProjectByID(ctx context.Context, projectID, userID string) (*Project, error) {
 	project, err := s.repo.GetByID(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Checking access
 	role, err := s.projectMemberService.GetUserRole(ctx, userID, projectID)
 	if err != nil {
-		// Если `err` (особенно `sql.ErrNoRows`), значит пользователь не участник проекта.
 		return nil, errors.New("project not found or access denied")
 	}
 
-	log.Printf("User %d has role '%s' in project %d", userID, role, projectID)
-
+	log.Printf("User %s has role '%s' in project %s", userID, role, projectID)
 	return project, nil
 }
 
-// ListUserProjects returns projects list of user
-// For now just calls repository
-func (s *Service) ListUserProjects(ctx context.Context, userID int64) ([]Project, error) {
-	// TODO: add logic for projects secondary roles
-	projects, err := s.repo.ListByOwnerID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-
-	return projects, nil
+func (s *Service) ListUserProjects(ctx context.Context, userID string) ([]Project, error) {
+	return s.repo.ListByOwnerID(ctx, userID)
 }
 
-// UpdateProjectRequest struct for providing data for update
 type UpdateProjectRequest struct {
 	Name        *string `json:"name"`
 	Description *string `json:"description"`
 }
 
-// UpdateProject logic for updating project
-func (s *Service) UpdateProject(ctx context.Context, projectID, userID int64, req UpdateProjectRequest) error {
-	// find project, check accwss
+func (s *Service) UpdateProject(ctx context.Context, projectID, userID string, req UpdateProjectRequest) error {
 	projectToUpdate, err := s.GetProjectByID(ctx, projectID, userID)
 	if err != nil {
 		return err
 	}
 
-	// update rows
 	if req.Name != nil {
 		projectToUpdate.Name = *req.Name
 	}
@@ -102,39 +92,49 @@ func (s *Service) UpdateProject(ctx context.Context, projectID, userID int64, re
 		projectToUpdate.Description = *req.Description
 	}
 
-	// save changes
 	return s.repo.Update(ctx, projectToUpdate)
 }
 
-// DeleteProject do i really need to write what it does?
-func (s *Service) DeleteProject(ctx context.Context, projectID, userID int64) error {
-	// Check is project exists and is it belongs to user
+func (s *Service) DeleteProject(ctx context.Context, projectID, userID string) error {
 	_, err := s.GetProjectByID(ctx, projectID, userID)
 	if err != nil {
 		return err
 	}
-
-	// deleting project
 	return s.repo.Delete(ctx, projectID)
 }
 
-func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUserID, newUserID int64, role string) error {
-	// Check priviliges
+func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUserID, newUserID string, role string) (*ProjectInvite, error) {
 	currentUserRole, err := s.projectMemberService.GetUserRole(ctx, currentUserID, projectID)
 	if err != nil {
-		return errors.New("access denied: you are not a member of this project")
+		return nil, errors.New("access denied: you are not a member of this project")
 	}
 
 	if currentUserRole != "owner" && currentUserRole != "manager" {
-		return errors.New("insufficient permissions: only owners or managers can add new members")
+		return nil, errors.New("insufficient permissions: only owners or managers can invite new members")
 	}
 
-	// If good, call projectMemberService to ad new user (newUserID).
-	_, err = s.projectMemberService.AddMember(ctx, newUserID, projectID, role)
+	if role == "" {
+		role = "viewer"
+	}
+
+	inviteID, err := activitypub.NewID()
 	if err != nil {
-		// TODO: add more clarity errors
-		return err
+		return nil, err
 	}
+	invite := &ProjectInvite{
+		ID:             inviteID,
+		ProjectID:      projectID,
+		InviterActorID: currentUserID,
+		InviteeActorID: newUserID,
+		Role:           role,
+		Status:         "pending",
+	}
+	if err := s.repo.CreateInvite(ctx, invite); err != nil {
+		return nil, err
+	}
+	return invite, nil
+}
 
-	return nil
+func (s *Service) AcceptInvite(ctx context.Context, inviteID, userID string) error {
+	return s.repo.AcceptInvite(ctx, inviteID, userID)
 }

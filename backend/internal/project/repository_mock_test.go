@@ -16,7 +16,7 @@ func (m *MockRepository) Create(ctx context.Context, project *Project) error {
 	return args.Error(0)
 }
 
-func (m *MockRepository) GetByID(ctx context.Context, id int64) (*Project, error) {
+func (m *MockRepository) GetByID(ctx context.Context, id string) (*Project, error) {
 	args := m.Called(ctx, id)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -24,7 +24,7 @@ func (m *MockRepository) GetByID(ctx context.Context, id int64) (*Project, error
 	return args.Get(0).(*Project), args.Error(1)
 }
 
-func (m *MockRepository) ListByOwnerID(ctx context.Context, ownerID int64) ([]Project, error) {
+func (m *MockRepository) ListByOwnerID(ctx context.Context, ownerID string) ([]Project, error) {
 	args := m.Called(ctx, ownerID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -37,7 +37,17 @@ func (m *MockRepository) Update(ctx context.Context, project *Project) error {
 	return args.Error(0)
 }
 
-func (m *MockRepository) Delete(ctx context.Context, id int64) error {
+func (m *MockRepository) Delete(ctx context.Context, id string) error {
 	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
+func (m *MockRepository) CreateInvite(ctx context.Context, invite *ProjectInvite) error {
+	args := m.Called(ctx, invite)
+	return args.Error(0)
+}
+
+func (m *MockRepository) AcceptInvite(ctx context.Context, inviteID, userID string) error {
+	args := m.Called(ctx, inviteID, userID)
 	return args.Error(0)
 }

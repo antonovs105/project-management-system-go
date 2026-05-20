@@ -12,7 +12,7 @@ type MockMemberService struct {
 	mock.Mock
 }
 
-func (m *MockMemberService) AddMember(ctx context.Context, userID, projectID int64, role string) (*projectmember.ProjectMember, error) {
+func (m *MockMemberService) AddMember(ctx context.Context, userID, projectID string, role string) (*projectmember.ProjectMember, error) {
 	args := m.Called(ctx, userID, projectID, role)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -20,7 +20,7 @@ func (m *MockMemberService) AddMember(ctx context.Context, userID, projectID int
 	return args.Get(0).(*projectmember.ProjectMember), args.Error(1)
 }
 
-func (m *MockMemberService) GetUserRole(ctx context.Context, userID, projectID int64) (string, error) {
+func (m *MockMemberService) GetUserRole(ctx context.Context, userID, projectID string) (string, error) {
 	args := m.Called(ctx, userID, projectID)
 	return args.String(0), args.Error(1)
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"golang.org/x/crypto/bcrypt"
@@ -12,7 +13,7 @@ import (
 
 func TestService_RegisterUser(t *testing.T) {
 	mockRepo := new(MockRepository)
-	service := NewService(mockRepo, []byte("secret"))
+	service := NewService(mockRepo, []byte("secret"), activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
 
 	ctx := context.Background()
 	username := "testuser"
@@ -49,7 +50,7 @@ func TestService_RegisterUser(t *testing.T) {
 
 func TestService_Login(t *testing.T) {
 	mockRepo := new(MockRepository)
-	service := NewService(mockRepo, []byte("secret"))
+	service := NewService(mockRepo, []byte("secret"), activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
 
 	ctx := context.Background()
 	email := "test@example.com"
@@ -58,7 +59,7 @@ func TestService_Login(t *testing.T) {
 	// Setup a user with hashed password
 	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	existingUser := &User{
-		ID:           1,
+		ID:           "user-1",
 		Username:     "testuser",
 		Email:        email,
 		PasswordHash: string(hashedPassword),

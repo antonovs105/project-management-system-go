@@ -3,7 +3,6 @@ package project
 import (
 	"log"
 	"net/http"
-	"strconv"
 
 	"github.com/labstack/echo/v4"
 )
@@ -29,7 +28,7 @@ func (h *Handler) Create(c echo.Context) error {
 	}
 
 	// Taking userID from context
-	userID := c.Get("userID").(int64)
+	userID := c.Get("userID").(string)
 
 	project, err := h.service.CreateProject(c.Request().Context(), req.Name, req.Description, userID)
 	if err != nil {
@@ -41,13 +40,9 @@ func (h *Handler) Create(c echo.Context) error {
 
 // Get handler for GET /api/projects/:id
 func (h *Handler) Get(c echo.Context) error {
-	projectIDStr := c.Param("id")
-	projectID, err := strconv.ParseInt(projectIDStr, 10, 64)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid project ID"})
-	}
+	projectID := c.Param("id")
 
-	userID := c.Get("userID").(int64)
+	userID := c.Get("userID").(string)
 
 	project, err := h.service.GetProjectByID(c.Request().Context(), projectID, userID)
 	if err != nil {
@@ -59,7 +54,7 @@ func (h *Handler) Get(c echo.Context) error {
 
 // List handler of GET /api/projects
 func (h *Handler) List(c echo.Context) error {
-	userID := c.Get("userID").(int64)
+	userID := c.Get("userID").(string)
 
 	// Call service for projects list
 	projects, err := h.service.ListUserProjects(c.Request().Context(), userID)
@@ -73,12 +68,7 @@ func (h *Handler) List(c echo.Context) error {
 
 // Update handler for PATCH /api/projects/:id
 func (h *Handler) Update(c echo.Context) error {
-	// get project id
-	projectIDStr := c.Param("id")
-	projectID, err := strconv.ParseInt(projectIDStr, 10, 64)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid project ID"})
-	}
+	projectID := c.Param("id")
 
 	// parsing request body
 	var req UpdateProjectRequest
@@ -86,11 +76,10 @@ func (h *Handler) Update(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 	}
 
-	userID := c.Get("userID").(int64)
+	userID := c.Get("userID").(string)
 
 	// call service for update
-	err = h.service.UpdateProject(c.Request().Context(), projectID, userID, req)
-	if err != nil {
+	if err := h.service.UpdateProject(c.Request().Context(), projectID, userID, req); err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
 	}
 
@@ -99,18 +88,12 @@ func (h *Handler) Update(c echo.Context) error {
 
 // Delete handler of DELETE /api/projects/:id
 func (h *Handler) Delete(c echo.Context) error {
-	// get project id (i am repeating myself)
-	projectIDStr := c.Param("id")
-	projectID, err := strconv.ParseInt(projectIDStr, 10, 64)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid project ID"})
-	}
+	projectID := c.Param("id")
 
-	userID := c.Get("userID").(int64)
+	userID := c.Get("userID").(string)
 
 	// call service for deleting
-	err = h.service.DeleteProject(c.Request().Context(), projectID, userID)
-	if err != nil {
+	if err := h.service.DeleteProject(c.Request().Context(), projectID, userID); err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
 	}
 
@@ -119,18 +102,15 @@ func (h *Handler) Delete(c echo.Context) error {
 
 // addMemberRequest struct for parsing JSON request
 type addMemberRequest struct {
-	UserID int64  `json:"user_id"`
+	UserID string `json:"user_id"`
 	Role   string `json:"role"`
 }
 
 // AddMember handler for POST /api/projects/:id/members
 func (h *Handler) AddMember(c echo.Context) error {
-	projectID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid project ID"})
-	}
+	projectID := c.Param("id")
 
-	currentUserID := c.Get("userID").(int64)
+	currentUserID := c.Get("userID").(string)
 
 	// parse request
 	var req addMemberRequest
@@ -139,9 +119,21 @@ func (h *Handler) AddMember(c echo.Context) error {
 	}
 
 	// call service logic
-	err = h.service.AddMemberToProject(c.Request().Context(), projectID, currentUserID, req.UserID, req.Role)
+	invite, err := h.service.AddMemberToProject(c.Request().Context(), projectID, currentUserID, req.UserID, req.Role)
 	if err != nil {
 		// TODO: add more clarity errors
+		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+	}
+
+	return c.JSON(http.StatusAccepted, invite)
+}
+
+// AcceptInvite handler for POST /api/invites/:id/accept
+func (h *Handler) AcceptInvite(c echo.Context) error {
+	inviteID := c.Param("id")
+	userID := c.Get("userID").(string)
+
+	if err := h.service.AcceptInvite(c.Request().Context(), inviteID, userID); err != nil {
 		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
 	}
 
