@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	"github.com/antonovs105/project-management-system-go/internal/activitypub/netguard"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -179,6 +180,14 @@ func TestFetchRejectsUnsupportedActorScheme(t *testing.T) {
 	_, err := service.Fetch(context.Background(), "ftp://remote.example/users/alice")
 
 	require.ErrorIs(t, err, ErrInvalidActorDocument)
+}
+
+func TestFetchRejectsUnsafeActorHost(t *testing.T) {
+	service := NewService(&memoryRepository{})
+
+	_, err := service.Fetch(context.Background(), "http://127.0.0.1/users/alice")
+
+	require.ErrorIs(t, err, netguard.ErrUnsafeURL)
 }
 
 func TestDiscoverRejectsWebFingerWithoutSelfLink(t *testing.T) {

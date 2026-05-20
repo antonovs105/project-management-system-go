@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/httpsig"
+	"github.com/antonovs105/project-management-system-go/internal/activitypub/netguard"
 	"github.com/hibiken/asynq"
 )
 
@@ -38,7 +38,7 @@ type Worker struct {
 
 func NewWorker(repo Repository, signer Signer, client HTTPClient) *Worker {
 	if client == nil {
-		client = &http.Client{Timeout: 20 * time.Second}
+		client = netguard.NewHTTPClient(20 * time.Second)
 	}
 	return &Worker{repo: repo, signer: signer, client: client}
 }
@@ -122,6 +122,9 @@ func (w *Worker) deliver(ctx context.Context, delivery *Delivery) error {
 
 	resp, err := w.client.Do(req)
 	if err != nil {
+		if errors.Is(err, netguard.ErrUnsafeURL) || errors.Is(err, netguard.ErrTooManyRedirects) {
+			return permanentError{err: err}
+		}
 		return err
 	}
 	defer resp.Body.Close()
@@ -181,13 +184,8 @@ func isRetryable(err error) bool {
 }
 
 func validateTargetInboxURL(raw string) error {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return permanentError{err: errors.New("invalid target inbox url")}
-	}
-	scheme := strings.ToLower(parsed.Scheme)
-	if scheme != "http" && scheme != "https" {
-		return permanentError{err: fmt.Errorf("unsupported target inbox url scheme: %s", parsed.Scheme)}
+	if _, err := netguard.ValidateRemoteURL(raw); err != nil {
+		return permanentError{err: err}
 	}
 	return nil
 }

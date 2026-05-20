@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/httpsig"
+	"github.com/antonovs105/project-management-system-go/internal/activitypub/netguard"
 )
 
 const (
@@ -39,7 +40,7 @@ type Option func(*Service)
 func NewService(repo Repository, opts ...Option) *Service {
 	service := &Service{
 		repo:            repo,
-		client:          &http.Client{Timeout: 10 * time.Second},
+		client:          netguard.NewHTTPClient(10 * time.Second),
 		webFingerScheme: defaultWebFingerScheme,
 		userAgent:       defaultUserAgent,
 		maxResponseSize: defaultMaxResponseSize,

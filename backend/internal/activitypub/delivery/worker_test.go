@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -111,8 +110,8 @@ func TestWorkerDeliversVerifiableSignedActivity(t *testing.T) {
 	}
 	verifier := httpsig.NewService(staticKeyRepo{key: key})
 
-	var receivedBody []byte
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	received := false
+	client := httpClientFunc(func(r *http.Request) (*http.Response, error) {
 		assert.Equal(t, "application/activity+json", r.Header.Get("Content-Type"))
 		assert.Equal(t, "application/activity+json", r.Header.Get("Accept"))
 		assert.Equal(t, deliveryUserAgent, r.Header.Get("User-Agent"))
@@ -121,26 +120,26 @@ func TestWorkerDeliversVerifiableSignedActivity(t *testing.T) {
 		assert.NotEmpty(t, r.Header.Get("Signature-Input"))
 		assert.NotEmpty(t, r.Header.Get("Signature"))
 
-		var readErr error
-		receivedBody, readErr = io.ReadAll(r.Body)
+		receivedBody, readErr := io.ReadAll(r.Body)
 		require.NoError(t, readErr)
-		verified, verifyErr := verifier.VerifyRequest(r.Context(), r, receivedBody)
+		verified, verifyErr := verifier.VerifyRequest(context.Background(), r, receivedBody)
 		require.NoError(t, verifyErr)
 		assert.Equal(t, key.ActorID, verified.ActorID)
 		assert.Equal(t, key.ActorAPID, verified.ActorAPID)
-		w.WriteHeader(http.StatusAccepted)
-	}))
-	defer server.Close()
+		assert.Equal(t, []byte(testDelivery(1, 3).Document), receivedBody)
+		received = true
+		return response(http.StatusAccepted, ""), nil
+	})
 
 	delivery := testDelivery(1, 3)
-	delivery.TargetInboxURL = server.URL + "/inbox"
+	delivery.TargetInboxURL = "https://remote.example/inbox"
 	repo := &workerRepo{delivery: delivery}
-	worker := NewWorker(repo, httpsig.NewService(staticKeyRepo{key: key}), server.Client())
+	worker := NewWorker(repo, httpsig.NewService(staticKeyRepo{key: key}), client)
 
 	err = worker.HandleDeliveryTask(context.Background(), taskForDelivery(t, "delivery-1"))
 
 	require.NoError(t, err)
-	assert.Equal(t, []byte(delivery.Document), receivedBody)
+	assert.True(t, received)
 	assert.Equal(t, "delivery-1", repo.deliveredID)
 	assert.Empty(t, repo.failedID)
 }
@@ -231,7 +230,27 @@ func TestWorkerSkipsRetryForUnsupportedInboxScheme(t *testing.T) {
 	assert.True(t, errors.Is(err, asynq.SkipRetry))
 	assert.False(t, clientCalled)
 	assert.Equal(t, "delivery-1", repo.failedID)
-	assert.Contains(t, repo.failedMsg, "unsupported target inbox url scheme")
+	assert.Contains(t, repo.failedMsg, "unsupported scheme")
+	assert.Nil(t, repo.nextAttempt)
+}
+
+func TestWorkerSkipsRetryForUnsafeInboxHost(t *testing.T) {
+	delivery := testDelivery(1, 5)
+	delivery.TargetInboxURL = "http://127.0.0.1/inbox"
+	repo := &workerRepo{delivery: delivery}
+	signerCalled := false
+	worker := NewWorker(repo, signerFunc(func(ctx context.Context, actorID string, req *http.Request, body []byte) error {
+		signerCalled = true
+		return nil
+	}), nil)
+
+	err := worker.HandleDeliveryTask(context.Background(), taskForDelivery(t, "delivery-1"))
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, asynq.SkipRetry))
+	assert.False(t, signerCalled)
+	assert.Equal(t, "delivery-1", repo.failedID)
+	assert.Contains(t, repo.failedMsg, "blocked address")
 	assert.Nil(t, repo.nextAttempt)
 }
 
