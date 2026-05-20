@@ -21,6 +21,7 @@ var (
 
 type ActorKey struct {
 	ActorID       string `db:"actor_id"`
+	ActorAPID     string `db:"actor_ap_id"`
 	KeyID         string `db:"key_id"`
 	Algorithm     string `db:"algorithm"`
 	PublicKeyPEM  string `db:"public_key_pem"`

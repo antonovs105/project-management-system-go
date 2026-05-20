@@ -3,14 +3,18 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	"github.com/antonovs105/project-management-system-go/internal/activitypub/httpsig"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteactor"
+	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteinbox"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
 	"github.com/antonovs105/project-management-system-go/internal/project"
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
@@ -191,6 +195,66 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		`, actor.PublicKeyID))
 		assert.Nil(t, privateKey)
 	})
+
+	t.Run("remote inbox stores inbound activity idempotently", func(t *testing.T) {
+		publicKey, privateKey, err := activitypub.GenerateRSAKeyPair()
+		require.NoError(t, err)
+
+		remoteActorRepo := remoteactor.NewRepository(db)
+		remoteActor := &remoteactor.Actor{
+			APID:              "https://remote.example/users/inbox-bot",
+			Type:              "Service",
+			PreferredUsername: "inbox-bot",
+			Handle:            "inbox-bot@remote.example",
+			Name:              "Inbox Bot",
+			Summary:           "",
+			InboxURL:          "https://remote.example/users/inbox-bot/inbox",
+			OutboxURL:         "https://remote.example/users/inbox-bot/outbox",
+			PublicKeyID:       "https://remote.example/users/inbox-bot#main-key",
+			PublicKeyPEM:      publicKey,
+			Document:          []byte(`{"id":"https://remote.example/users/inbox-bot","type":"Service"}`),
+		}
+		require.NoError(t, remoteActorRepo.UpsertRemoteActor(ctx, remoteActor))
+
+		inboxRepo := remoteinbox.NewRepository(db)
+		objectAPID := "https://remote.example/notes/1"
+		body := []byte(`{"id":"https://remote.example/activities/inbox-create","type":"Create","actor":"https://remote.example/users/inbox-bot","object":"https://remote.example/notes/1"}`)
+		req, err := http.NewRequest(http.MethodPost, project.APID+"/inbox", bytes.NewReader(body))
+		require.NoError(t, err)
+
+		signer := httpsig.NewService(singleKeyRepo{key: &httpsig.ActorKey{
+			ActorID:       remoteActor.ID,
+			ActorAPID:     remoteActor.APID,
+			KeyID:         remoteActor.PublicKeyID,
+			Algorithm:     httpsig.AlgorithmRSAV15SHA256,
+			PublicKeyPEM:  publicKey,
+			PrivateKeyPEM: privateKey,
+		}})
+		require.NoError(t, signer.SignRequest(ctx, remoteActor.ID, req, body))
+
+		receiver := remoteinbox.NewService(inboxRepo, httpsig.NewService(httpsig.NewRepository(db)))
+		first, err := receiver.Receive(ctx, req, project.APID, body)
+		require.NoError(t, err)
+		assert.False(t, first.Duplicate)
+
+		second, err := receiver.Receive(ctx, req, project.APID, body)
+		require.NoError(t, err)
+		assert.True(t, second.Duplicate)
+
+		requireInboxItem(t, db, project.ID, "Create", objectAPID)
+	})
+}
+
+type singleKeyRepo struct {
+	key *httpsig.ActorKey
+}
+
+func (r singleKeyRepo) ActivePrivateKey(ctx context.Context, actorID string) (*httpsig.ActorKey, error) {
+	return r.key, nil
+}
+
+func (r singleKeyRepo) PublicKeyByKeyID(ctx context.Context, keyID string) (*httpsig.ActorKey, error) {
+	return r.key, nil
 }
 
 func openIntegrationDB(t *testing.T) *sqlx.DB {

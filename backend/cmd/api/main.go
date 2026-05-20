@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	"github.com/antonovs105/project-management-system-go/internal/activitypub/httpsig"
+	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteinbox"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
 	authMiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
 	"github.com/antonovs105/project-management-system-go/internal/project"
@@ -27,6 +29,7 @@ type ApiServer struct {
 	ticketHandler  *ticket.Handler
 	commentHandler *comment.Handler
 	apHandler      *activitypub.Handler
+	inboxHandler   *remoteinbox.Handler
 	wfHandler      *webfinger.Handler
 }
 
@@ -77,6 +80,13 @@ func main() {
 	// ActivityPub JSON-LD read dependencies
 	apHandler := activitypub.NewHandler(db, apConfig)
 
+	// Remote ActivityPub inbox dependencies
+	sigRepo := httpsig.NewRepository(db)
+	sigService := httpsig.NewService(sigRepo)
+	inboxRepo := remoteinbox.NewRepository(db)
+	inboxService := remoteinbox.NewService(inboxRepo, sigService)
+	inboxHandler := remoteinbox.NewHandler(inboxService, apConfig)
+
 	// WebFinger discovery dependencies
 	wfRepo := webfinger.NewRepository(db)
 	wfService := webfinger.NewService(wfRepo, apConfig)
@@ -90,6 +100,7 @@ func main() {
 		ticketHandler:  ticketHandler,
 		commentHandler: commentHandler,
 		apHandler:      apHandler,
+		inboxHandler:   inboxHandler,
 		wfHandler:      wfHandler,
 	}
 
@@ -112,8 +123,9 @@ func main() {
 	server.userHandler.RegisterRoutes(e)
 	server.wfHandler.RegisterRoutes(e)
 
-	// Local ActivityPub JSON-LD read routes. Remote inbox POST/S2S is a later milestone.
+	// Local ActivityPub JSON-LD read routes and signed remote inbox POST foundation.
 	server.apHandler.RegisterRoutes(e)
+	server.inboxHandler.RegisterRoutes(e)
 
 	// protected routes
 	api := e.Group("/api")

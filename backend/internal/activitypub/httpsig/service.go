@@ -52,6 +52,7 @@ type Option func(*Service)
 
 type VerifiedRequest struct {
 	ActorID    string
+	ActorAPID  string
 	KeyID      string
 	Algorithm  string
 	CreatedAt  time.Time
@@ -195,6 +196,7 @@ func (s *Service) VerifyRequest(ctx context.Context, req *http.Request, body []b
 
 	return &VerifiedRequest{
 		ActorID:    key.ActorID,
+		ActorAPID:  key.ActorAPID,
 		KeyID:      key.KeyID,
 		Algorithm:  algorithm,
 		CreatedAt:  createdAt,
