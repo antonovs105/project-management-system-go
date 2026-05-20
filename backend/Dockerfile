@@ -14,7 +14,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o main ./cmd/api/main.go
 
 # Final stage
-FROM alpine:latest
+FROM alpine:3.22
 
 RUN apk add --no-cache ca-certificates \
     && addgroup -S app \
