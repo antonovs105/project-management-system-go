@@ -141,9 +141,11 @@ func TestResolveKeyRejectsKeyMismatch(t *testing.T) {
 	}))
 	defer server.Close()
 
-	err = NewService(&memoryRepository{}, WithHTTPClient(server.Client())).ResolveKey(context.Background(), server.URL+"/users/alice#main-key")
+	repo := &memoryRepository{}
+	err = NewService(repo, WithHTTPClient(server.Client())).ResolveKey(context.Background(), server.URL+"/users/alice#main-key")
 
 	require.ErrorIs(t, err, ErrInvalidActorDocument)
+	assert.Nil(t, repo.actor)
 }
 
 func TestFetchRejectsUnsupportedActorScheme(t *testing.T) {

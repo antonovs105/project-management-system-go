@@ -646,6 +646,341 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 	})
 }
 
+func TestRemoteInboxRejectsUnsafeInboundActivities(t *testing.T) {
+	db := openIntegrationDB(t)
+
+	t.Run("rejects signature actor mismatch without persisting", func(t *testing.T) {
+		fx := newInboxIntegrationFixture(t, db)
+		remoteActor, privateKey := createRemoteActor(t, fx.Ctx, db, "mismatch-signer")
+
+		activityAPID := "https://remote.example/activities/mismatch-follow"
+		body := []byte(`{"id":"` + activityAPID + `","type":"Follow","actor":"https://remote.example/users/mallory","object":"` + fx.Project.APID + `"}`)
+		req := signedRemoteInboxRequest(t, fx.Ctx, fx.Project.APID, remoteActor, privateKey, body)
+
+		_, err := fx.Receiver.Receive(fx.Ctx, req, fx.Project.APID, body)
+
+		require.ErrorIs(t, err, remoteinbox.ErrForbiddenActor)
+		requireNoActivityByAPID(t, db, activityAPID)
+		requireNoInboxActivity(t, db, activityAPID)
+		requireNoFollow(t, db, remoteActor.ID, fx.Project.ID)
+	})
+
+	t.Run("rejects missing body digest without persisting", func(t *testing.T) {
+		fx := newInboxIntegrationFixture(t, db)
+		remoteActor, privateKey := createRemoteActor(t, fx.Ctx, db, "missing-digest")
+
+		activityAPID := "https://remote.example/activities/missing-digest-follow"
+		body := []byte(`{"id":"` + activityAPID + `","type":"Follow","actor":"` + remoteActor.APID + `","object":"` + fx.Project.APID + `"}`)
+		req := newInboxPostRequest(t, fx.Project.APID, body)
+		signRemoteInboxRequest(t, fx.Ctx, req, remoteActor, privateKey, nil)
+
+		_, err := fx.Receiver.Receive(fx.Ctx, req, fx.Project.APID, body)
+
+		require.ErrorIs(t, err, remoteinbox.ErrUnauthorized)
+		requireNoActivityByAPID(t, db, activityAPID)
+		requireNoInboxActivity(t, db, activityAPID)
+		requireNoFollow(t, db, remoteActor.ID, fx.Project.ID)
+	})
+
+	t.Run("rejects stale signed date without persisting", func(t *testing.T) {
+		fx := newInboxIntegrationFixture(t, db)
+		remoteActor, privateKey := createRemoteActor(t, fx.Ctx, db, "stale-date")
+
+		activityAPID := "https://remote.example/activities/stale-date-follow"
+		body := []byte(`{"id":"` + activityAPID + `","type":"Follow","actor":"` + remoteActor.APID + `","object":"` + fx.Project.APID + `"}`)
+		req := newInboxPostRequest(t, fx.Project.APID, body)
+		req.Header.Set("Date", time.Now().UTC().Add(-10*time.Minute).Format(http.TimeFormat))
+		signRemoteInboxRequest(t, fx.Ctx, req, remoteActor, privateKey, body)
+
+		_, err := fx.Receiver.Receive(fx.Ctx, req, fx.Project.APID, body)
+
+		require.ErrorIs(t, err, remoteinbox.ErrUnauthorized)
+		requireNoActivityByAPID(t, db, activityAPID)
+		requireNoInboxActivity(t, db, activityAPID)
+		requireNoFollow(t, db, remoteActor.ID, fx.Project.ID)
+	})
+
+	t.Run("rejects resolved actor key mismatch without caching actor", func(t *testing.T) {
+		fx := newInboxIntegrationFixture(t, db)
+		publicKey, privateKey, err := activitypub.GenerateRSAKeyPair()
+		require.NoError(t, err)
+
+		var server *httptest.Server
+		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/users/key-mismatch" {
+				http.NotFound(w, r)
+				return
+			}
+			doc := activitypub.ActorDocument(
+				"Person",
+				server.URL+"/users/key-mismatch",
+				"key-mismatch",
+				"Key Mismatch",
+				"Served with a different key id.",
+				publicKey,
+			)
+			rawDoc, err := activitypub.MarshalDocument(doc)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/activity+json")
+			_, _ = w.Write(rawDoc)
+		}))
+		defer server.Close()
+
+		actorAPID := server.URL + "/users/key-mismatch"
+		keyID := actorAPID + "#rotated-key"
+		activityAPID := server.URL + "/activities/key-mismatch-follow"
+		body := []byte(`{"id":"` + activityAPID + `","type":"Follow","actor":"` + actorAPID + `","object":"` + fx.Project.APID + `"}`)
+		req := newInboxPostRequest(t, fx.Project.APID, body)
+		signRequestWithKey(t, fx.Ctx, req, "remote-key-mismatch-before-cache", &httpsig.ActorKey{
+			ActorID:       "remote-key-mismatch-before-cache",
+			ActorAPID:     actorAPID,
+			KeyID:         keyID,
+			Algorithm:     httpsig.AlgorithmRSAV15SHA256,
+			PublicKeyPEM:  publicKey,
+			PrivateKeyPEM: privateKey,
+		}, body)
+
+		remoteActorService := remoteactor.NewService(
+			remoteactor.NewRepository(db),
+			remoteactor.WithHTTPClient(server.Client()),
+		)
+		receiver := remoteinbox.NewService(
+			remoteinbox.NewRepository(db, fx.Cfg),
+			httpsig.NewService(
+				httpsig.NewRepository(db),
+				httpsig.WithMissingKeyResolver(remoteActorService.ResolveKey),
+			),
+		)
+
+		_, err = receiver.Receive(fx.Ctx, req, fx.Project.APID, body)
+
+		require.ErrorIs(t, err, remoteinbox.ErrUnauthorized)
+		requireNoActorByAPID(t, db, actorAPID)
+		requireNoActivityByAPID(t, db, activityAPID)
+		requireNoInboxActivity(t, db, activityAPID)
+	})
+
+	t.Run("rejects ticket mutations from non followers without projections", func(t *testing.T) {
+		fx := newInboxIntegrationFixture(t, db)
+		remoteActor, privateKey := createRemoteActor(t, fx.Ctx, db, "not-a-follower")
+
+		cases := []struct {
+			name         string
+			activityAPID string
+			ticketAPID   string
+			body         []byte
+		}{
+			{
+				name:         "create ticket",
+				activityAPID: "https://remote.example/activities/non-follower-create-ticket",
+				ticketAPID:   "https://remote.example/tickets/non-follower-create",
+				body:         []byte(`{"id":"https://remote.example/activities/non-follower-create-ticket","type":"Create","actor":"` + remoteActor.APID + `","object":{"id":"https://remote.example/tickets/non-follower-create","type":"forge:Ticket","attributedTo":"` + remoteActor.APID + `","context":"` + fx.Project.APID + `","name":"Blocked remote ticket","content":"Should not land.","forge:priority":"medium","forge:ticketType":"task","forge:isResolved":false}}`),
+			},
+			{
+				name:         "update ticket",
+				activityAPID: "https://remote.example/activities/non-follower-update-ticket",
+				ticketAPID:   "https://remote.example/tickets/non-follower-update",
+				body:         []byte(`{"id":"https://remote.example/activities/non-follower-update-ticket","type":"Update","actor":"` + remoteActor.APID + `","target":"` + fx.Project.APID + `","object":{"id":"https://remote.example/tickets/non-follower-update","type":"forge:Ticket","attributedTo":"` + remoteActor.APID + `","context":"` + fx.Project.APID + `","name":"Blocked update"}}`),
+			},
+			{
+				name:         "delete ticket",
+				activityAPID: "https://remote.example/activities/non-follower-delete-ticket",
+				ticketAPID:   "https://remote.example/tickets/non-follower-delete",
+				body:         []byte(`{"id":"https://remote.example/activities/non-follower-delete-ticket","type":"Delete","actor":"` + remoteActor.APID + `","object":"https://remote.example/tickets/non-follower-delete","target":"` + fx.Project.APID + `"}`),
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				req := signedRemoteInboxRequest(t, fx.Ctx, fx.Project.APID, remoteActor, privateKey, tc.body)
+
+				_, err := fx.Receiver.Receive(fx.Ctx, req, fx.Project.APID, tc.body)
+
+				require.ErrorIs(t, err, remoteinbox.ErrForbiddenActor)
+				requireNoActivityByAPID(t, db, tc.activityAPID)
+				requireNoInboxActivity(t, db, tc.activityAPID)
+				requireNoTicketByAPID(t, db, tc.ticketAPID)
+				requireNoObjectByAPID(t, db, tc.ticketAPID)
+			})
+		}
+	})
+
+	t.Run("rejects duplicate activity id from another actor", func(t *testing.T) {
+		fx := newInboxIntegrationFixture(t, db)
+		firstActor, firstPrivateKey := createRemoteActor(t, fx.Ctx, db, "duplicate-first")
+		secondActor, secondPrivateKey := createRemoteActor(t, fx.Ctx, db, "duplicate-second")
+
+		activityAPID := "https://remote.example/activities/reused-activity-id"
+		firstObjectAPID := "https://remote.example/objects/reused-first"
+		firstBody := []byte(`{"id":"` + activityAPID + `","type":"Create","actor":"` + firstActor.APID + `","object":"` + firstObjectAPID + `"}`)
+		firstReq := signedRemoteInboxRequest(t, fx.Ctx, fx.Project.APID, firstActor, firstPrivateKey, firstBody)
+
+		accepted, err := fx.Receiver.Receive(fx.Ctx, firstReq, fx.Project.APID, firstBody)
+		require.NoError(t, err)
+		require.Equal(t, activityAPID, accepted.ActivityAPID)
+
+		secondBody := []byte(`{"id":"` + activityAPID + `","type":"Create","actor":"` + secondActor.APID + `","object":"https://remote.example/objects/reused-second"}`)
+		secondReq := signedRemoteInboxRequest(t, fx.Ctx, fx.Project.APID, secondActor, secondPrivateKey, secondBody)
+
+		_, err = fx.Receiver.Receive(fx.Ctx, secondReq, fx.Project.APID, secondBody)
+
+		require.ErrorIs(t, err, remoteinbox.ErrActivityConflict)
+		requireActivityActor(t, db, activityAPID, firstActor.ID)
+		requireInboxActivityCount(t, db, activityAPID, 1)
+		requireInboxItem(t, db, fx.Project.ID, "Create", firstObjectAPID)
+	})
+
+	t.Run("rejects malformed project activities without writes", func(t *testing.T) {
+		fx := newInboxIntegrationFixture(t, db)
+		remoteActor, privateKey := createRemoteActor(t, fx.Ctx, db, "malformed")
+
+		cases := []struct {
+			name         string
+			activityAPID string
+			body         []byte
+		}{
+			{
+				name:         "follow wrong object",
+				activityAPID: "https://remote.example/activities/malformed-follow",
+				body:         []byte(`{"id":"https://remote.example/activities/malformed-follow","type":"Follow","actor":"` + remoteActor.APID + `","object":"https://remote.example/projects/other"}`),
+			},
+			{
+				name:         "blank note content",
+				activityAPID: "https://remote.example/activities/malformed-note",
+				body:         []byte(`{"id":"https://remote.example/activities/malformed-note","type":"Create","actor":"` + remoteActor.APID + `","object":{"id":"https://remote.example/notes/malformed","type":"Note","attributedTo":"` + remoteActor.APID + `","inReplyTo":"http://localhost:8080/tickets/missing","content":"   "}}`),
+			},
+			{
+				name:         "invalid ticket priority",
+				activityAPID: "https://remote.example/activities/malformed-ticket",
+				body:         []byte(`{"id":"https://remote.example/activities/malformed-ticket","type":"Create","actor":"` + remoteActor.APID + `","object":{"id":"https://remote.example/tickets/malformed","type":"forge:Ticket","attributedTo":"` + remoteActor.APID + `","context":"` + fx.Project.APID + `","name":"Malformed ticket","forge:priority":"eventually"}}`),
+			},
+			{
+				name:         "add without target",
+				activityAPID: "https://remote.example/activities/malformed-add",
+				body:         []byte(`{"id":"https://remote.example/activities/malformed-add","type":"Add","actor":"` + remoteActor.APID + `","object":"http://localhost:8080/users/owner"}`),
+			},
+			{
+				name:         "delete project object",
+				activityAPID: "https://remote.example/activities/malformed-delete",
+				body:         []byte(`{"id":"https://remote.example/activities/malformed-delete","type":"Delete","actor":"` + remoteActor.APID + `","object":"` + fx.Project.APID + `"}`),
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				req := signedRemoteInboxRequest(t, fx.Ctx, fx.Project.APID, remoteActor, privateKey, tc.body)
+
+				_, err := fx.Receiver.Receive(fx.Ctx, req, fx.Project.APID, tc.body)
+
+				require.ErrorIs(t, err, remoteinbox.ErrInvalidActivity)
+				requireNoActivityByAPID(t, db, tc.activityAPID)
+				requireNoInboxActivity(t, db, tc.activityAPID)
+			})
+		}
+	})
+}
+
+type inboxIntegrationFixture struct {
+	Ctx      context.Context
+	Cfg      activitypub.Config
+	Project  *project.Project
+	Receiver *remoteinbox.Service
+}
+
+func newInboxIntegrationFixture(t *testing.T, db *sqlx.DB) inboxIntegrationFixture {
+	t.Helper()
+
+	resetIntegrationDB(t, db)
+
+	ctx := context.Background()
+	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+	userService := user.NewService(user.NewRepository(db, cfg), []byte("integration-secret"), cfg)
+	projectService := project.NewService(project.NewRepository(db, cfg), cfg)
+
+	owner, err := userService.RegisterUser(ctx, "owner", "owner@example.test", "password123")
+	require.NoError(t, err)
+	createdProject, err := projectService.CreateProject(ctx, "Inbox Rejection Board", "", owner.ID)
+	require.NoError(t, err)
+
+	return inboxIntegrationFixture{
+		Ctx:     ctx,
+		Cfg:     cfg,
+		Project: createdProject,
+		Receiver: remoteinbox.NewService(
+			remoteinbox.NewRepository(db, cfg),
+			httpsig.NewService(httpsig.NewRepository(db)),
+		),
+	}
+}
+
+func createRemoteActor(t *testing.T, ctx context.Context, db *sqlx.DB, username string) (*remoteactor.Actor, string) {
+	t.Helper()
+
+	publicKey, privateKey, err := activitypub.GenerateRSAKeyPair()
+	require.NoError(t, err)
+
+	actorAPID := "https://remote.example/users/" + username
+	doc := activitypub.ActorDocument("Person", actorAPID, username, username, "", publicKey)
+	rawDoc, err := activitypub.MarshalDocument(doc)
+	require.NoError(t, err)
+
+	actor := &remoteactor.Actor{
+		APID:              actorAPID,
+		Type:              "Person",
+		PreferredUsername: username,
+		Handle:            username + "@remote.example",
+		Name:              username,
+		Summary:           "",
+		InboxURL:          activitypub.Inbox(actorAPID),
+		OutboxURL:         activitypub.Outbox(actorAPID),
+		PublicKeyID:       activitypub.KeyID(actorAPID),
+		PublicKeyPEM:      publicKey,
+		Document:          rawDoc,
+	}
+	require.NoError(t, remoteactor.NewRepository(db).UpsertRemoteActor(ctx, actor))
+	return actor, privateKey
+}
+
+func newInboxPostRequest(t *testing.T, targetAPID string, body []byte) *http.Request {
+	t.Helper()
+
+	req, err := http.NewRequest(http.MethodPost, targetAPID+"/inbox", bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/activity+json")
+	return req
+}
+
+func signedRemoteInboxRequest(t *testing.T, ctx context.Context, targetAPID string, actor *remoteactor.Actor, privateKey string, body []byte) *http.Request {
+	t.Helper()
+
+	req := newInboxPostRequest(t, targetAPID, body)
+	signRemoteInboxRequest(t, ctx, req, actor, privateKey, body)
+	return req
+}
+
+func signRemoteInboxRequest(t *testing.T, ctx context.Context, req *http.Request, actor *remoteactor.Actor, privateKey string, body []byte) {
+	t.Helper()
+
+	signRequestWithKey(t, ctx, req, actor.ID, &httpsig.ActorKey{
+		ActorID:       actor.ID,
+		ActorAPID:     actor.APID,
+		KeyID:         actor.PublicKeyID,
+		Algorithm:     httpsig.AlgorithmRSAV15SHA256,
+		PublicKeyPEM:  actor.PublicKeyPEM,
+		PrivateKeyPEM: privateKey,
+	}, body)
+}
+
+func signRequestWithKey(t *testing.T, ctx context.Context, req *http.Request, actorID string, key *httpsig.ActorKey, body []byte) {
+	t.Helper()
+
+	signer := httpsig.NewService(singleKeyRepo{key: key})
+	require.NoError(t, signer.SignRequest(ctx, actorID, req, body))
+}
+
 type singleKeyRepo struct {
 	key *httpsig.ActorKey
 }
@@ -745,6 +1080,24 @@ func requireNoTicketByAPID(t *testing.T, db *sqlx.DB, apID string) {
 	require.Zero(t, count)
 }
 
+func requireNoObjectByAPID(t *testing.T, db *sqlx.DB, apID string) {
+	t.Helper()
+
+	var count int
+	err := db.Get(&count, `SELECT count(*) FROM ap_objects WHERE ap_id = $1`, apID)
+	require.NoError(t, err)
+	require.Zero(t, count)
+}
+
+func requireNoActorByAPID(t *testing.T, db *sqlx.DB, apID string) {
+	t.Helper()
+
+	var count int
+	err := db.Get(&count, `SELECT count(*) FROM actors WHERE ap_id = $1`, apID)
+	require.NoError(t, err)
+	require.Zero(t, count)
+}
+
 func requireProjectRole(t *testing.T, db *sqlx.DB, userID, projectID, expectedRole string) {
 	t.Helper()
 
@@ -791,6 +1144,24 @@ func requireActivityType(t *testing.T, db *sqlx.DB, apID, expectedType string) {
 	err := db.Get(&activityType, `SELECT activity_type FROM ap_activities WHERE ap_id = $1`, apID)
 	require.NoError(t, err)
 	require.Equal(t, expectedType, activityType)
+}
+
+func requireActivityActor(t *testing.T, db *sqlx.DB, apID, expectedActorID string) {
+	t.Helper()
+
+	var actorID string
+	err := db.Get(&actorID, `SELECT actor_id::text FROM ap_activities WHERE ap_id = $1`, apID)
+	require.NoError(t, err)
+	require.Equal(t, expectedActorID, actorID)
+}
+
+func requireNoActivityByAPID(t *testing.T, db *sqlx.DB, apID string) {
+	t.Helper()
+
+	var count int
+	err := db.Get(&count, `SELECT count(*) FROM ap_activities WHERE ap_id = $1`, apID)
+	require.NoError(t, err)
+	require.Zero(t, count)
 }
 
 func requireActivityForObject(t *testing.T, db *sqlx.DB, activityType, objectAPID string) {
@@ -854,6 +1225,21 @@ func requireNoDeliveryForObject(t *testing.T, db *sqlx.DB, activityType, objectA
 func requireInboxItem(t *testing.T, db *sqlx.DB, actorID, activityType, objectAPID string) {
 	t.Helper()
 	requireBoxItem(t, db, "actor_inbox_items", actorID, activityType, objectAPID)
+}
+
+func requireNoInboxActivity(t *testing.T, db *sqlx.DB, activityAPID string) {
+	t.Helper()
+
+	requireInboxActivityCount(t, db, activityAPID, 0)
+}
+
+func requireInboxActivityCount(t *testing.T, db *sqlx.DB, activityAPID string, expected int) {
+	t.Helper()
+
+	var count int
+	err := db.Get(&count, `SELECT count(*) FROM actor_inbox_items WHERE activity_ap_id = $1`, activityAPID)
+	require.NoError(t, err)
+	require.Equal(t, expected, count)
 }
 
 func requireInboxItemForTarget(t *testing.T, db *sqlx.DB, actorID, activityType, targetAPID string) {

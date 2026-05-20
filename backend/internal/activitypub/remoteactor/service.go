@@ -116,14 +116,19 @@ func (s *Service) ResolveKey(ctx context.Context, keyID string) error {
 	if err != nil {
 		return err
 	}
-	actor, err := s.Fetch(ctx, actorURL)
+
+	fallbackUsername, domain, err := fallbackIdentity(actorURL)
+	if err != nil {
+		return err
+	}
+	actor, err := s.fetchActor(ctx, actorURL, fallbackUsername, domain)
 	if err != nil {
 		return err
 	}
 	if actor.PublicKeyID != keyID {
 		return fmt.Errorf("%w: key id mismatch", ErrInvalidActorDocument)
 	}
-	return nil
+	return s.repo.UpsertRemoteActor(ctx, actor)
 }
 
 func (s *Service) resolveWebFinger(ctx context.Context, domain, resource string) (string, error) {
