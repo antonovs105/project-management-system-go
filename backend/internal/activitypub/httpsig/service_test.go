@@ -204,6 +204,185 @@ func TestVerifyRequestResolvesMissingPublicKey(t *testing.T) {
 	assert.Equal(t, key.KeyID, verified.KeyID)
 }
 
+func TestVerifyRequestRefreshesKnownPublicKey(t *testing.T) {
+	oldPublicPEM, _, err := activitypub.GenerateRSAKeyPair()
+	require.NoError(t, err)
+	newPublicPEM, newPrivatePEM, err := activitypub.GenerateRSAKeyPair()
+	require.NoError(t, err)
+
+	now := time.Date(2026, 5, 20, 12, 30, 0, 0, time.UTC)
+	oldKey := &ActorKey{
+		ActorID:      "actor-1",
+		ActorAPID:    "https://example.test/users/alice",
+		KeyID:        "https://example.test/users/alice#main-key",
+		Algorithm:    AlgorithmRSAV15SHA256,
+		PublicKeyPEM: oldPublicPEM,
+	}
+	newKey := &ActorKey{
+		ActorID:       oldKey.ActorID,
+		ActorAPID:     oldKey.ActorAPID,
+		KeyID:         oldKey.KeyID,
+		Algorithm:     AlgorithmRSAV15SHA256,
+		PublicKeyPEM:  newPublicPEM,
+		PrivateKeyPEM: newPrivatePEM,
+	}
+
+	body := []byte(`{"type":"Follow"}`)
+	req := newSignedRequest(t, http.MethodPost, "https://local.test/projects/1/inbox", body)
+	signer := NewService(memoryRepository{key: newKey}, WithClock(func() time.Time { return now }))
+	require.NoError(t, signer.SignRequest(context.Background(), newKey.ActorID, req, body))
+
+	repo := &resolvingRepository{key: oldKey}
+	refreshed := 0
+	verifier := NewService(
+		repo,
+		WithClock(func() time.Time { return now }),
+		WithKeyRefreshResolver(func(ctx context.Context, keyID, actorAPID string) error {
+			refreshed++
+			assert.Equal(t, oldKey.KeyID, keyID)
+			assert.Equal(t, oldKey.ActorAPID, actorAPID)
+			repo.key = newKey
+			return nil
+		}),
+	)
+
+	verified, err := verifier.VerifyRequest(context.Background(), req, body)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, refreshed)
+	assert.Equal(t, oldKey.ActorID, verified.ActorID)
+	assert.Equal(t, oldKey.ActorAPID, verified.ActorAPID)
+	assert.Equal(t, oldKey.KeyID, verified.KeyID)
+}
+
+func TestVerifyRequestRejectsKeyRefreshActorMismatch(t *testing.T) {
+	oldPublicPEM, _, err := activitypub.GenerateRSAKeyPair()
+	require.NoError(t, err)
+	newPublicPEM, newPrivatePEM, err := activitypub.GenerateRSAKeyPair()
+	require.NoError(t, err)
+
+	now := time.Date(2026, 5, 20, 12, 30, 0, 0, time.UTC)
+	oldKey := &ActorKey{
+		ActorID:      "actor-1",
+		ActorAPID:    "https://example.test/users/alice",
+		KeyID:        "https://example.test/users/alice#main-key",
+		Algorithm:    AlgorithmRSAV15SHA256,
+		PublicKeyPEM: oldPublicPEM,
+	}
+	rotatedKey := &ActorKey{
+		ActorID:       "actor-2",
+		ActorAPID:     "https://example.test/users/mallory",
+		KeyID:         oldKey.KeyID,
+		Algorithm:     AlgorithmRSAV15SHA256,
+		PublicKeyPEM:  newPublicPEM,
+		PrivateKeyPEM: newPrivatePEM,
+	}
+
+	body := []byte(`{"type":"Follow"}`)
+	req := newSignedRequest(t, http.MethodPost, "https://local.test/projects/1/inbox", body)
+	signer := NewService(memoryRepository{key: &ActorKey{
+		ActorID:       oldKey.ActorID,
+		ActorAPID:     oldKey.ActorAPID,
+		KeyID:         oldKey.KeyID,
+		Algorithm:     AlgorithmRSAV15SHA256,
+		PublicKeyPEM:  newPublicPEM,
+		PrivateKeyPEM: newPrivatePEM,
+	}}, WithClock(func() time.Time { return now }))
+	require.NoError(t, signer.SignRequest(context.Background(), oldKey.ActorID, req, body))
+
+	repo := &resolvingRepository{key: oldKey}
+	verifier := NewService(
+		repo,
+		WithClock(func() time.Time { return now }),
+		WithKeyRefreshResolver(func(ctx context.Context, keyID, actorAPID string) error {
+			repo.key = rotatedKey
+			return nil
+		}),
+	)
+
+	_, err = verifier.VerifyRequest(context.Background(), req, body)
+
+	require.ErrorIs(t, err, ErrInvalidSignature)
+}
+
+func TestVerifyRequestRejectsRefreshThatDoesNotFixSignature(t *testing.T) {
+	oldPublicPEM, _, err := activitypub.GenerateRSAKeyPair()
+	require.NoError(t, err)
+	newPublicPEM, newPrivatePEM, err := activitypub.GenerateRSAKeyPair()
+	require.NoError(t, err)
+	wrongPublicPEM, _, err := activitypub.GenerateRSAKeyPair()
+	require.NoError(t, err)
+
+	now := time.Date(2026, 5, 20, 12, 30, 0, 0, time.UTC)
+	keyID := "https://example.test/users/alice#main-key"
+	actorAPID := "https://example.test/users/alice"
+	oldKey := &ActorKey{
+		ActorID:      "actor-1",
+		ActorAPID:    actorAPID,
+		KeyID:        keyID,
+		Algorithm:    AlgorithmRSAV15SHA256,
+		PublicKeyPEM: oldPublicPEM,
+	}
+	signingKey := &ActorKey{
+		ActorID:       oldKey.ActorID,
+		ActorAPID:     actorAPID,
+		KeyID:         keyID,
+		Algorithm:     AlgorithmRSAV15SHA256,
+		PublicKeyPEM:  newPublicPEM,
+		PrivateKeyPEM: newPrivatePEM,
+	}
+
+	body := []byte(`{"type":"Follow"}`)
+	req := newSignedRequest(t, http.MethodPost, "https://local.test/projects/1/inbox", body)
+	signer := NewService(memoryRepository{key: signingKey}, WithClock(func() time.Time { return now }))
+	require.NoError(t, signer.SignRequest(context.Background(), oldKey.ActorID, req, body))
+
+	repo := &resolvingRepository{key: oldKey}
+	refreshed := 0
+	verifier := NewService(
+		repo,
+		WithClock(func() time.Time { return now }),
+		WithKeyRefreshResolver(func(ctx context.Context, keyID, actorAPID string) error {
+			refreshed++
+			repo.key = &ActorKey{
+				ActorID:      oldKey.ActorID,
+				ActorAPID:    oldKey.ActorAPID,
+				KeyID:        oldKey.KeyID,
+				Algorithm:    AlgorithmRSAV15SHA256,
+				PublicKeyPEM: wrongPublicPEM,
+			}
+			return nil
+		}),
+	)
+
+	_, err = verifier.VerifyRequest(context.Background(), req, body)
+
+	require.ErrorIs(t, err, ErrInvalidSignature)
+	assert.Equal(t, 1, refreshed)
+}
+
+func TestVerifyRequestDoesNotRefreshDigestFailure(t *testing.T) {
+	service, key, now := newTestService(t, AlgorithmRSAV15SHA256)
+	body := []byte(`{"type":"Create"}`)
+	req := newSignedRequest(t, http.MethodPost, "https://remote.test/inbox", body)
+	require.NoError(t, service.SignRequest(context.Background(), key.ActorID, req, body))
+
+	refreshed := false
+	verifier := NewService(
+		memoryRepository{key: key},
+		WithClock(func() time.Time { return now }),
+		WithKeyRefreshResolver(func(ctx context.Context, keyID, actorAPID string) error {
+			refreshed = true
+			return nil
+		}),
+	)
+
+	_, err := verifier.VerifyRequest(context.Background(), req, []byte(`{"type":"Delete"}`))
+
+	require.ErrorIs(t, err, ErrInvalidDigest)
+	assert.False(t, refreshed)
+}
+
 func newTestService(t *testing.T, algorithm string) (*Service, *ActorKey, time.Time) {
 	t.Helper()
 
@@ -212,6 +391,7 @@ func newTestService(t *testing.T, algorithm string) (*Service, *ActorKey, time.T
 
 	key := &ActorKey{
 		ActorID:       "actor-1",
+		ActorAPID:     "https://example.test/users/alice",
 		KeyID:         "https://example.test/users/alice#main-key",
 		Algorithm:     algorithm,
 		PublicKeyPEM:  publicPEM,

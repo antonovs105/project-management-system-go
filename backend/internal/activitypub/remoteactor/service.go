@@ -112,6 +112,14 @@ func (s *Service) Fetch(ctx context.Context, actorURL string) (*Actor, error) {
 }
 
 func (s *Service) ResolveKey(ctx context.Context, keyID string) error {
+	return s.fetchAndCacheKey(ctx, keyID, "")
+}
+
+func (s *Service) RefreshKey(ctx context.Context, keyID, expectedActorAPID string) error {
+	return s.fetchAndCacheKey(ctx, keyID, expectedActorAPID)
+}
+
+func (s *Service) fetchAndCacheKey(ctx context.Context, keyID, expectedActorAPID string) error {
 	actorURL, err := actorURLFromKeyID(keyID)
 	if err != nil {
 		return err
@@ -127,6 +135,9 @@ func (s *Service) ResolveKey(ctx context.Context, keyID string) error {
 	}
 	if actor.PublicKeyID != keyID {
 		return fmt.Errorf("%w: key id mismatch", ErrInvalidActorDocument)
+	}
+	if expectedActorAPID != "" && actor.APID != expectedActorAPID {
+		return fmt.Errorf("%w: actor id changed", ErrInvalidActorDocument)
 	}
 	return s.repo.UpsertRemoteActor(ctx, actor)
 }

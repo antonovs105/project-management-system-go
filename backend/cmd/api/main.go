@@ -88,7 +88,11 @@ func main() {
 	remoteActorRepo := remoteactor.NewRepository(db)
 	remoteActorService := remoteactor.NewService(remoteActorRepo)
 	sigRepo := httpsig.NewRepository(db)
-	sigService := httpsig.NewService(sigRepo, httpsig.WithMissingKeyResolver(remoteActorService.ResolveKey))
+	sigService := httpsig.NewService(
+		sigRepo,
+		httpsig.WithMissingKeyResolver(remoteActorService.ResolveKey),
+		httpsig.WithKeyRefreshResolver(remoteActorService.RefreshKey),
+	)
 
 	// ActivityPub delivery dependencies. The worker runs in-process for now; the slice can be
 	// moved to a separate worker container later without changing delivery internals.

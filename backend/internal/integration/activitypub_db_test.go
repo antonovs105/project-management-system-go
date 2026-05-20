@@ -646,6 +646,78 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 	})
 }
 
+func TestRemoteInboxRefreshesRotatedActorKey(t *testing.T) {
+	db := openIntegrationDB(t)
+	fx := newInboxIntegrationFixture(t, db)
+
+	oldPublicKey, _, err := activitypub.GenerateRSAKeyPair()
+	require.NoError(t, err)
+	newPublicKey, newPrivateKey, err := activitypub.GenerateRSAKeyPair()
+	require.NoError(t, err)
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/users/rotating-key" {
+			http.NotFound(w, r)
+			return
+		}
+		doc := activitypub.ActorDocument(
+			"Person",
+			server.URL+"/users/rotating-key",
+			"rotating-key",
+			"Rotating Key",
+			"Served after a key rotation.",
+			newPublicKey,
+		)
+		rawDoc, err := activitypub.MarshalDocument(doc)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/activity+json")
+		_, _ = w.Write(rawDoc)
+	}))
+	defer server.Close()
+
+	actorAPID := server.URL + "/users/rotating-key"
+	remoteActor := createRemoteActorWithPublicKey(t, fx.Ctx, db, actorAPID, "rotating-key", oldPublicKey)
+	requireActorPublicKey(t, db, remoteActor.PublicKeyID, oldPublicKey)
+
+	activityAPID := server.URL + "/activities/follow-with-rotated-key"
+	body := []byte(`{"id":"` + activityAPID + `","type":"Follow","actor":"` + actorAPID + `","object":"` + fx.Project.APID + `"}`)
+	req := newInboxPostRequest(t, fx.Project.APID, body)
+	signRequestWithKey(t, fx.Ctx, req, remoteActor.ID, &httpsig.ActorKey{
+		ActorID:       remoteActor.ID,
+		ActorAPID:     remoteActor.APID,
+		KeyID:         remoteActor.PublicKeyID,
+		Algorithm:     httpsig.AlgorithmRSAV15SHA256,
+		PublicKeyPEM:  newPublicKey,
+		PrivateKeyPEM: newPrivateKey,
+	}, body)
+
+	remoteActorService := remoteactor.NewService(
+		remoteactor.NewRepository(db),
+		remoteactor.WithHTTPClient(server.Client()),
+	)
+	receiver := remoteinbox.NewService(
+		remoteinbox.NewRepository(db, fx.Cfg),
+		httpsig.NewService(
+			httpsig.NewRepository(db),
+			httpsig.WithMissingKeyResolver(remoteActorService.ResolveKey),
+			httpsig.WithKeyRefreshResolver(remoteActorService.RefreshKey),
+		),
+	)
+
+	accepted, err := receiver.Receive(fx.Ctx, req, fx.Project.APID, body)
+
+	require.NoError(t, err)
+	require.Equal(t, activityAPID, accepted.ActivityAPID)
+	require.NotEmpty(t, accepted.ResponseActivityID)
+	requireFollow(t, db, remoteActor.ID, fx.Project.ID, "accepted")
+	requireActivityForObject(t, db, "Accept", activityAPID)
+	requireActorPublicKey(t, db, remoteActor.PublicKeyID, newPublicKey)
+}
+
 func TestRemoteInboxRejectsUnsafeInboundActivities(t *testing.T) {
 	db := openIntegrationDB(t)
 
@@ -761,6 +833,74 @@ func TestRemoteInboxRejectsUnsafeInboundActivities(t *testing.T) {
 		requireNoActorByAPID(t, db, actorAPID)
 		requireNoActivityByAPID(t, db, activityAPID)
 		requireNoInboxActivity(t, db, activityAPID)
+	})
+
+	t.Run("rejects known actor refresh with changed key id", func(t *testing.T) {
+		fx := newInboxIntegrationFixture(t, db)
+		oldPublicKey, _, err := activitypub.GenerateRSAKeyPair()
+		require.NoError(t, err)
+		newPublicKey, newPrivateKey, err := activitypub.GenerateRSAKeyPair()
+		require.NoError(t, err)
+
+		var server *httptest.Server
+		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/users/changed-key-id" {
+				http.NotFound(w, r)
+				return
+			}
+			doc := activitypub.ActorDocument(
+				"Person",
+				server.URL+"/users/changed-key-id",
+				"changed-key-id",
+				"Changed Key ID",
+				"Served with an unexpected key id.",
+				newPublicKey,
+			)
+			doc["publicKey"].(map[string]any)["id"] = server.URL + "/users/changed-key-id#rotated-key"
+			rawDoc, err := activitypub.MarshalDocument(doc)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/activity+json")
+			_, _ = w.Write(rawDoc)
+		}))
+		defer server.Close()
+
+		actorAPID := server.URL + "/users/changed-key-id"
+		remoteActor := createRemoteActorWithPublicKey(t, fx.Ctx, db, actorAPID, "changed-key-id", oldPublicKey)
+
+		activityAPID := server.URL + "/activities/reject-changed-key-id"
+		body := []byte(`{"id":"` + activityAPID + `","type":"Follow","actor":"` + actorAPID + `","object":"` + fx.Project.APID + `"}`)
+		req := newInboxPostRequest(t, fx.Project.APID, body)
+		signRequestWithKey(t, fx.Ctx, req, remoteActor.ID, &httpsig.ActorKey{
+			ActorID:       remoteActor.ID,
+			ActorAPID:     remoteActor.APID,
+			KeyID:         remoteActor.PublicKeyID,
+			Algorithm:     httpsig.AlgorithmRSAV15SHA256,
+			PublicKeyPEM:  newPublicKey,
+			PrivateKeyPEM: newPrivateKey,
+		}, body)
+
+		remoteActorService := remoteactor.NewService(
+			remoteactor.NewRepository(db),
+			remoteactor.WithHTTPClient(server.Client()),
+		)
+		receiver := remoteinbox.NewService(
+			remoteinbox.NewRepository(db, fx.Cfg),
+			httpsig.NewService(
+				httpsig.NewRepository(db),
+				httpsig.WithKeyRefreshResolver(remoteActorService.RefreshKey),
+			),
+		)
+
+		_, err = receiver.Receive(fx.Ctx, req, fx.Project.APID, body)
+
+		require.ErrorIs(t, err, remoteinbox.ErrUnauthorized)
+		requireActorPublicKey(t, db, remoteActor.PublicKeyID, oldPublicKey)
+		requireNoActivityByAPID(t, db, activityAPID)
+		requireNoInboxActivity(t, db, activityAPID)
+		requireNoFollow(t, db, remoteActor.ID, fx.Project.ID)
 	})
 
 	t.Run("rejects ticket mutations from non followers without projections", func(t *testing.T) {
@@ -923,6 +1063,13 @@ func createRemoteActor(t *testing.T, ctx context.Context, db *sqlx.DB, username 
 	require.NoError(t, err)
 
 	actorAPID := "https://remote.example/users/" + username
+	actor := createRemoteActorWithPublicKey(t, ctx, db, actorAPID, username, publicKey)
+	return actor, privateKey
+}
+
+func createRemoteActorWithPublicKey(t *testing.T, ctx context.Context, db *sqlx.DB, actorAPID, username, publicKey string) *remoteactor.Actor {
+	t.Helper()
+
 	doc := activitypub.ActorDocument("Person", actorAPID, username, username, "", publicKey)
 	rawDoc, err := activitypub.MarshalDocument(doc)
 	require.NoError(t, err)
@@ -941,7 +1088,7 @@ func createRemoteActor(t *testing.T, ctx context.Context, db *sqlx.DB, username 
 		Document:          rawDoc,
 	}
 	require.NoError(t, remoteactor.NewRepository(db).UpsertRemoteActor(ctx, actor))
-	return actor, privateKey
+	return actor
 }
 
 func newInboxPostRequest(t *testing.T, targetAPID string, body []byte) *http.Request {
@@ -1096,6 +1243,15 @@ func requireNoActorByAPID(t *testing.T, db *sqlx.DB, apID string) {
 	err := db.Get(&count, `SELECT count(*) FROM actors WHERE ap_id = $1`, apID)
 	require.NoError(t, err)
 	require.Zero(t, count)
+}
+
+func requireActorPublicKey(t *testing.T, db *sqlx.DB, keyID, expectedPublicKey string) {
+	t.Helper()
+
+	var publicKey string
+	err := db.Get(&publicKey, `SELECT public_key_pem FROM actor_keys WHERE key_id = $1 AND active = true`, keyID)
+	require.NoError(t, err)
+	require.Equal(t, expectedPublicKey, publicKey)
 }
 
 func requireProjectRole(t *testing.T, db *sqlx.DB, userID, projectID, expectedRole string) {

@@ -117,6 +117,31 @@ func TestResolveKeyFetchesAndCachesActor(t *testing.T) {
 	assert.Equal(t, server.URL+"/users/alice#main-key", repo.actor.PublicKeyID)
 }
 
+func TestRefreshKeyRequiresExpectedActor(t *testing.T) {
+	publicKey, _, err := activitypub.GenerateRSAKeyPair()
+	require.NoError(t, err)
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/users/alice" {
+			http.NotFound(w, r)
+			return
+		}
+		doc := actorDocumentMap(server.URL, "Person", publicKey)
+		doc["publicKey"].(map[string]any)["id"] = server.URL + "/users/alice#main-key"
+		writeJSON(t, w, doc)
+	}))
+	defer server.Close()
+
+	repo := &memoryRepository{}
+	service := NewService(repo, WithHTTPClient(server.Client()))
+
+	err = service.RefreshKey(context.Background(), server.URL+"/users/alice#main-key", "https://remote.example/users/alice")
+
+	require.ErrorIs(t, err, ErrInvalidActorDocument)
+	assert.Nil(t, repo.actor)
+}
+
 func TestResolveKeyRejectsUnsupportedScheme(t *testing.T) {
 	service := NewService(&memoryRepository{})
 

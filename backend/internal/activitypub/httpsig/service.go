@@ -49,6 +49,7 @@ type Service struct {
 	clock              func() time.Time
 	maxAge             time.Duration
 	missingKeyResolver func(context.Context, string) error
+	keyRefreshResolver func(context.Context, string, string) error
 }
 
 type Option func(*Service)
@@ -91,6 +92,12 @@ func WithMaxAge(maxAge time.Duration) Option {
 func WithMissingKeyResolver(resolver func(context.Context, string) error) Option {
 	return func(s *Service) {
 		s.missingKeyResolver = resolver
+	}
+}
+
+func WithKeyRefreshResolver(resolver func(context.Context, string, string) error) Option {
+	return func(s *Service) {
+		s.keyRefreshResolver = resolver
 	}
 }
 
@@ -195,23 +202,27 @@ func (s *Service) VerifyRequest(ctx context.Context, req *http.Request, body []b
 	if err != nil {
 		return nil, err
 	}
-	algorithm, err := key.SignatureAlgorithm()
-	if err != nil {
-		return nil, err
-	}
-	if algorithm != input.Algorithm {
-		return nil, fmt.Errorf("%w: %s", ErrUnsupportedAlgorithm, key.Algorithm)
-	}
-	publicKey, err := ParseRSAPublicKeyPEM(key.PublicKeyPEM)
-	if err != nil {
-		return nil, err
-	}
-
 	base, err := signatureBase(req, input.Components, input.RawValue)
 	if err != nil {
 		return nil, err
 	}
-	if err := verifyRSAV15SHA256(publicKey, []byte(base), signature); err != nil {
+	algorithm, err := s.verifyWithKey(key, input.Algorithm, []byte(base), signature)
+	if errors.Is(err, ErrInvalidSignature) && s.keyRefreshResolver != nil {
+		originalActorID := key.ActorID
+		originalActorAPID := key.ActorAPID
+		if refreshErr := s.keyRefreshResolver(ctx, input.KeyID, originalActorAPID); refreshErr != nil {
+			return nil, err
+		}
+		key, err = s.repo.PublicKeyByKeyID(ctx, input.KeyID)
+		if err != nil {
+			return nil, err
+		}
+		if key.ActorID != originalActorID || key.ActorAPID != originalActorAPID {
+			return nil, ErrInvalidSignature
+		}
+		algorithm, err = s.verifyWithKey(key, input.Algorithm, []byte(base), signature)
+	}
+	if err != nil {
 		return nil, err
 	}
 
@@ -223,6 +234,24 @@ func (s *Service) VerifyRequest(ctx context.Context, req *http.Request, body []b
 		CreatedAt:  createdAt,
 		Components: append([]string(nil), input.Components...),
 	}, nil
+}
+
+func (s *Service) verifyWithKey(key *ActorKey, expectedAlgorithm string, base []byte, signature []byte) (string, error) {
+	algorithm, err := key.SignatureAlgorithm()
+	if err != nil {
+		return "", err
+	}
+	if algorithm != expectedAlgorithm {
+		return "", fmt.Errorf("%w: %s", ErrUnsupportedAlgorithm, key.Algorithm)
+	}
+	publicKey, err := ParseRSAPublicKeyPEM(key.PublicKeyPEM)
+	if err != nil {
+		return "", err
+	}
+	if err := verifyRSAV15SHA256(publicKey, base, signature); err != nil {
+		return "", err
+	}
+	return algorithm, nil
 }
 
 func signRSAV15SHA256(key *rsa.PrivateKey, base []byte) ([]byte, error) {
