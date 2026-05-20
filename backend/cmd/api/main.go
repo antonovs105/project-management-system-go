@@ -11,6 +11,7 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/project"
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
 	"github.com/antonovs105/project-management-system-go/internal/user"
+	"github.com/antonovs105/project-management-system-go/internal/webfinger"
 	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
@@ -26,6 +27,7 @@ type ApiServer struct {
 	ticketHandler  *ticket.Handler
 	commentHandler *comment.Handler
 	apHandler      *activitypub.Handler
+	wfHandler      *webfinger.Handler
 }
 
 func main() {
@@ -75,6 +77,11 @@ func main() {
 	// ActivityPub JSON-LD read dependencies
 	apHandler := activitypub.NewHandler(db, apConfig)
 
+	// WebFinger discovery dependencies
+	wfRepo := webfinger.NewRepository(db)
+	wfService := webfinger.NewService(wfRepo, apConfig)
+	wfHandler := webfinger.NewHandler(wfService)
+
 	// Dependency injection
 	server := &ApiServer{
 		db:             db,
@@ -83,6 +90,7 @@ func main() {
 		ticketHandler:  ticketHandler,
 		commentHandler: commentHandler,
 		apHandler:      apHandler,
+		wfHandler:      wfHandler,
 	}
 
 	// New Echo
@@ -102,6 +110,7 @@ func main() {
 	e.GET("/health", server.healthCheck)
 
 	server.userHandler.RegisterRoutes(e)
+	server.wfHandler.RegisterRoutes(e)
 
 	// Local ActivityPub JSON-LD read routes. Remote inbox POST/S2S is a later milestone.
 	server.apHandler.RegisterRoutes(e)
