@@ -26,15 +26,16 @@ import (
 
 // Server structure
 type ApiServer struct {
-	db             *sqlx.DB
-	userHandler    *user.Handler
-	projectHandler *project.Handler
-	ticketHandler  *ticket.Handler
-	commentHandler *comment.Handler
-	apHandler      *activitypub.Handler
-	inboxHandler   *remoteinbox.Handler
-	deliverySvc    *delivery.Service
-	wfHandler      *webfinger.Handler
+	db              *sqlx.DB
+	userHandler     *user.Handler
+	projectHandler  *project.Handler
+	ticketHandler   *ticket.Handler
+	commentHandler  *comment.Handler
+	apHandler       *activitypub.Handler
+	inboxHandler    *remoteinbox.Handler
+	deliveryHandler *delivery.Handler
+	deliverySvc     *delivery.Service
+	wfHandler       *webfinger.Handler
 }
 
 func main() {
@@ -118,6 +119,7 @@ func main() {
 	deliveryService := delivery.NewService(deliveryRepo, deliveryQueue)
 	ticketService.SetDelivery(deliveryService)
 	commentService.SetDelivery(deliveryService)
+	deliveryHandler := delivery.NewHandler(deliveryService)
 
 	// Remote ActivityPub inbox dependencies
 	inboxRepo := remoteinbox.NewRepository(db, apConfig)
@@ -131,15 +133,16 @@ func main() {
 
 	// Dependency injection
 	server := &ApiServer{
-		db:             db,
-		userHandler:    userHandler,
-		projectHandler: projectHandler,
-		ticketHandler:  ticketHandler,
-		commentHandler: commentHandler,
-		apHandler:      apHandler,
-		inboxHandler:   inboxHandler,
-		deliverySvc:    deliveryService,
-		wfHandler:      wfHandler,
+		db:              db,
+		userHandler:     userHandler,
+		projectHandler:  projectHandler,
+		ticketHandler:   ticketHandler,
+		commentHandler:  commentHandler,
+		apHandler:       apHandler,
+		inboxHandler:    inboxHandler,
+		deliveryHandler: deliveryHandler,
+		deliverySvc:     deliveryService,
+		wfHandler:       wfHandler,
 	}
 
 	// New Echo
@@ -175,6 +178,7 @@ func main() {
 	server.projectHandler.RegisterRoutes(api)
 	server.ticketHandler.RegisterRoutes(api)
 	server.commentHandler.RegisterRoutes(api)
+	server.deliveryHandler.RegisterRoutes(api)
 
 	e.Logger.Fatal(e.Start(":8080"))
 }

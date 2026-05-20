@@ -10,16 +10,18 @@ import (
 )
 
 type serviceRepo struct {
-	activityID     string
-	targetInboxURL string
-	maxAttempts    int
-	inboxes        []string
-	ticketInboxes  []string
-	projectID      string
-	ticketID       string
-	delivery       *Delivery
-	created        []*Delivery
-	err            error
+	activityID        string
+	targetInboxURL    string
+	maxAttempts       int
+	inboxes           []string
+	ticketInboxes     []string
+	projectDeliveries []ProjectDelivery
+	projectID         string
+	userID            string
+	ticketID          string
+	delivery          *Delivery
+	created           []*Delivery
+	err               error
 }
 
 func (r *serviceRepo) Create(ctx context.Context, activityID string, targetInboxURL string, maxAttempts int) (*Delivery, bool, error) {
@@ -47,6 +49,15 @@ func (r *serviceRepo) MarkDelivered(ctx context.Context, deliveryID string) erro
 
 func (r *serviceRepo) MarkFailed(ctx context.Context, deliveryID string, message string, nextAttemptAt *time.Time) error {
 	return nil
+}
+
+func (r *serviceRepo) ProjectDeliveries(ctx context.Context, projectID string, userID string) ([]ProjectDelivery, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	r.projectID = projectID
+	r.userID = userID
+	return r.projectDeliveries, nil
 }
 
 func (r *serviceRepo) RemoteProjectFollowerInboxes(ctx context.Context, projectID string) ([]string, error) {
@@ -125,4 +136,29 @@ func TestServiceEnqueueProjectTicketRecipientsCreatesDeliveriesForRemoteInboxes(
 	assert.Equal(t, "ticket-1", repo.ticketID)
 	assert.Equal(t, "activity-1", repo.activityID)
 	assert.Equal(t, "https://remote.example/thread/inbox", repo.targetInboxURL)
+}
+
+func TestServiceListProjectDeliveriesUsesProjectAndUserScope(t *testing.T) {
+	repo := &serviceRepo{
+		projectDeliveries: []ProjectDelivery{
+			{
+				ID:             "delivery-1",
+				ActivityAPID:   "https://local.example/activities/1",
+				ActivityType:   "Create",
+				TargetInboxURL: "https://remote.example/inbox",
+				State:          StatePending,
+				Attempts:       1,
+				MaxAttempts:    10,
+			},
+		},
+	}
+	service := NewService(repo, &serviceQueue{})
+
+	deliveries, err := service.ListProjectDeliveries(context.Background(), "project-1", "user-1")
+
+	require.NoError(t, err)
+	require.Len(t, deliveries, 1)
+	assert.Equal(t, "project-1", repo.projectID)
+	assert.Equal(t, "user-1", repo.userID)
+	assert.Equal(t, "https://local.example/activities/1", deliveries[0].ActivityAPID)
 }

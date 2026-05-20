@@ -124,6 +124,21 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	requireActivityForObject(t, db, "Create", createdComment.APID)
 	requireOutboxItem(t, db, member.ID, "Create", createdComment.APID)
 	requireDeliveryForObject(t, db, "Create", createdComment.APID, remoteInbox)
+
+	ownerDeliveries, err := deliveryService.ListProjectDeliveries(ctx, project.ID, owner.ID)
+	require.NoError(t, err)
+	requireProjectDelivery(t, ownerDeliveries, "Create", createdTicket.APID, remoteInbox)
+	requireProjectDelivery(t, ownerDeliveries, "Update", createdTicket.APID, remoteInbox)
+	requireProjectDelivery(t, ownerDeliveries, "Create", createdComment.APID, remoteInbox)
+
+	memberDeliveries, err := deliveryService.ListProjectDeliveries(ctx, project.ID, member.ID)
+	require.NoError(t, err)
+	requireProjectDelivery(t, memberDeliveries, "Create", createdTicket.APID, remoteInbox)
+
+	outsider, err := userService.RegisterUser(ctx, "outsider", "outsider@example.test", "password123")
+	require.NoError(t, err)
+	_, err = deliveryService.ListProjectDeliveries(ctx, project.ID, outsider.ID)
+	require.ErrorIs(t, err, delivery.ErrProjectAccessDenied)
 }
 
 func TestActivityPubFoundationConstraints(t *testing.T) {
@@ -1360,6 +1375,20 @@ func requireDeliveryForObject(t *testing.T, db *sqlx.DB, activityType, objectAPI
 	`, activityType, objectAPID, inboxURL)
 	require.NoError(t, err)
 	require.Greater(t, count, 0)
+}
+
+func requireProjectDelivery(t *testing.T, deliveries []delivery.ProjectDelivery, activityType, objectAPID, inboxURL string) {
+	t.Helper()
+
+	for _, item := range deliveries {
+		if item.ActivityType != activityType || item.TargetInboxURL != inboxURL || item.ObjectAPID == nil {
+			continue
+		}
+		if *item.ObjectAPID == objectAPID {
+			return
+		}
+	}
+	t.Fatalf("project delivery not found for %s %s to %s", activityType, objectAPID, inboxURL)
 }
 
 func requireNoDeliveryForObject(t *testing.T, db *sqlx.DB, activityType, objectAPID, inboxURL string) {

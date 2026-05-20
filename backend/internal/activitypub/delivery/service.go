@@ -25,6 +25,10 @@ func (s *Service) Enqueue(ctx context.Context, activityID string, targetInboxURL
 	return delivery, nil
 }
 
+func (s *Service) ListProjectDeliveries(ctx context.Context, projectID string, userID string) ([]ProjectDelivery, error) {
+	return s.repo.ProjectDeliveries(ctx, projectID, userID)
+}
+
 func (s *Service) EnqueueProjectFollowers(ctx context.Context, projectID string, activityIDs ...string) error {
 	if len(activityIDs) == 0 {
 		return nil

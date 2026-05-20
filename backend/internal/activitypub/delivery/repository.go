@@ -18,6 +18,7 @@ type Repository interface {
 
 type RecipientRepository interface {
 	Repository
+	ProjectDeliveries(ctx context.Context, projectID string, userID string) ([]ProjectDelivery, error)
 	RemoteProjectFollowerInboxes(ctx context.Context, projectID string) ([]string, error)
 	RemoteProjectTicketRecipientInboxes(ctx context.Context, projectID string, ticketID string) ([]string, error)
 }
@@ -142,6 +143,90 @@ func (r *PgRepository) MarkFailed(ctx context.Context, deliveryID string, messag
 		WHERE id = $1
 	`, deliveryID, StateFailed, message, nextAttemptAt)
 	return err
+}
+
+func (r *PgRepository) ProjectDeliveries(ctx context.Context, projectID string, userID string) ([]ProjectDelivery, error) {
+	var hasAccess bool
+	if err := r.db.GetContext(ctx, &hasAccess, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM project_members
+			WHERE project_id = $1 AND user_id = $2
+		)
+	`, projectID, userID); err != nil {
+		return nil, err
+	}
+	if !hasAccess {
+		return nil, ErrProjectAccessDenied
+	}
+
+	var deliveries []ProjectDelivery
+	err := r.db.SelectContext(ctx, &deliveries, `
+		WITH project_scope AS (
+			SELECT project.id, actor.ap_id
+			FROM projects project
+			JOIN actors actor ON actor.id = project.id
+			WHERE project.id = $1
+		)
+		SELECT
+			d.id::text,
+			a.ap_id AS activity_ap_id,
+			a.activity_type,
+			a.object_ap_id,
+			a.target_ap_id,
+			d.target_inbox_url,
+			d.state,
+			d.attempts,
+			d.max_attempts,
+			d.next_attempt_at,
+			d.last_error,
+			d.delivered_at,
+			d.created_at,
+			d.updated_at
+		FROM activity_deliveries d
+		JOIN ap_activities a ON a.id = d.activity_id
+		JOIN project_scope project ON true
+		WHERE
+			a.object_ap_id = project.ap_id
+			OR a.target_ap_id = project.ap_id
+			OR EXISTS (
+				SELECT 1
+				FROM ap_objects object
+				JOIN tickets ticket ON ticket.id = object.local_ref_id
+				WHERE object.ap_id = a.object_ap_id
+					AND object.local_ref_table = 'tickets'
+					AND ticket.project_id = project.id
+			)
+			OR EXISTS (
+				SELECT 1
+				FROM ap_objects target
+				JOIN tickets ticket ON ticket.id = target.local_ref_id
+				WHERE target.ap_id = a.target_ap_id
+					AND target.local_ref_table = 'tickets'
+					AND ticket.project_id = project.id
+			)
+			OR EXISTS (
+				SELECT 1
+				FROM ap_objects object
+				JOIN comments comment ON comment.id = object.local_ref_id
+				JOIN tickets ticket ON ticket.id = comment.ticket_id
+				WHERE object.ap_id = a.object_ap_id
+					AND object.local_ref_table = 'comments'
+					AND ticket.project_id = project.id
+			)
+			OR EXISTS (
+				SELECT 1
+				FROM ap_objects target
+				JOIN comments comment ON comment.id = target.local_ref_id
+				JOIN tickets ticket ON ticket.id = comment.ticket_id
+				WHERE target.ap_id = a.target_ap_id
+					AND target.local_ref_table = 'comments'
+					AND ticket.project_id = project.id
+			)
+		ORDER BY d.updated_at DESC, d.created_at DESC
+		LIMIT 100
+	`, projectID)
+	return deliveries, err
 }
 
 func (r *PgRepository) RemoteProjectFollowerInboxes(ctx context.Context, projectID string) ([]string, error) {
