@@ -680,6 +680,29 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 
 		_, err = repo.StartAttempt(ctx, finalDelivery.ID)
 		require.ErrorIs(t, err, delivery.ErrDeliveryExhausted)
+
+		retryQueue := &recordingDeliveryQueue{}
+		retryService := delivery.NewService(delivery.NewRecipientRepository(db), retryQueue)
+		requeued, err := retryService.RetryProjectDelivery(ctx, project.ID, owner.ID, finalDelivery.ID)
+		require.NoError(t, err)
+		assert.Equal(t, delivery.StatePending, requeued.State)
+		assert.Zero(t, requeued.Attempts)
+		assert.Equal(t, delivery.DefaultMaxRetry, requeued.MaxAttempts)
+		assert.Nil(t, requeued.NextAttemptAt)
+		assert.Nil(t, requeued.LastError)
+		assert.Equal(t, finalDelivery.ID, retryQueue.deliveryID)
+		assert.Equal(t, delivery.DefaultMaxRetry, retryQueue.maxAttempts)
+
+		viewer, err := userService.RegisterUser(ctx, "retry-viewer", "retry-viewer@example.test", "password123")
+		require.NoError(t, err)
+		_, err = db.ExecContext(ctx, `
+			INSERT INTO project_members (user_id, project_id, role)
+			VALUES ($1, $2, 'viewer')
+		`, viewer.ID, project.ID)
+		require.NoError(t, err)
+
+		_, err = retryService.RetryProjectDelivery(ctx, project.ID, viewer.ID, finalDelivery.ID)
+		require.ErrorIs(t, err, delivery.ErrDeliveryRetryDenied)
 	})
 }
 
@@ -1167,6 +1190,22 @@ func signRequestWithKey(t *testing.T, ctx context.Context, req *http.Request, ac
 
 type singleKeyRepo struct {
 	key *httpsig.ActorKey
+}
+
+type recordingDeliveryQueue struct {
+	deliveryID  string
+	maxAttempts int
+	err         error
+}
+
+func (q *recordingDeliveryQueue) Enqueue(ctx context.Context, deliveryID string, maxAttempts int) error {
+	q.deliveryID = deliveryID
+	q.maxAttempts = maxAttempts
+	return q.err
+}
+
+func (q *recordingDeliveryQueue) Close() error {
+	return nil
 }
 
 func (r singleKeyRepo) ActivePrivateKey(ctx context.Context, actorID string) (*httpsig.ActorKey, error) {

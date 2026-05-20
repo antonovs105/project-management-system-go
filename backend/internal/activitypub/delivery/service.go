@@ -31,6 +31,17 @@ func (s *Service) ListProjectDeliveries(ctx context.Context, projectID string, u
 	return s.repo.ProjectDeliveries(ctx, projectID, userID)
 }
 
+func (s *Service) RetryProjectDelivery(ctx context.Context, projectID string, userID string, deliveryID string) (*Delivery, error) {
+	delivery, err := s.repo.RetryProjectDelivery(ctx, projectID, userID, deliveryID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.queue.Enqueue(ctx, delivery.ID, delivery.MaxAttempts); err != nil {
+		return nil, err
+	}
+	return delivery, nil
+}
+
 func (s *Service) EnqueueProjectFollowers(ctx context.Context, projectID string, activityIDs ...string) error {
 	if len(activityIDs) == 0 {
 		return nil

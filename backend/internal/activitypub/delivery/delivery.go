@@ -19,11 +19,13 @@ const (
 )
 
 var (
-	ErrDeliveryNotFound    = errors.New("activity delivery not found")
-	ErrDeliveryDone        = errors.New("activity delivery already delivered")
-	ErrDeliveryExhausted   = errors.New("activity delivery attempts exhausted")
-	ErrDeliveryConflict    = errors.New("activity delivery conflicts with existing row")
-	ErrProjectAccessDenied = errors.New("project not found or access denied")
+	ErrDeliveryNotFound         = errors.New("activity delivery not found")
+	ErrDeliveryDone             = errors.New("activity delivery already delivered")
+	ErrDeliveryExhausted        = errors.New("activity delivery attempts exhausted")
+	ErrDeliveryConflict         = errors.New("activity delivery conflicts with existing row")
+	ErrDeliveryRetryDenied      = errors.New("insufficient permissions to retry delivery")
+	ErrDeliveryRetryUnavailable = errors.New("activity delivery cannot be retried")
+	ErrProjectAccessDenied      = errors.New("project not found or access denied")
 )
 
 type Delivery struct {

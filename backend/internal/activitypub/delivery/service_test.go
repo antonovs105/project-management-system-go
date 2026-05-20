@@ -19,9 +19,12 @@ type serviceRepo struct {
 	projectID         string
 	userID            string
 	ticketID          string
+	retryDeliveryID   string
 	delivery          *Delivery
+	retryDelivery     *Delivery
 	created           []*Delivery
 	err               error
+	retryErr          error
 }
 
 func (r *serviceRepo) Create(ctx context.Context, activityID string, targetInboxURL string, maxAttempts int) (*Delivery, bool, error) {
@@ -58,6 +61,19 @@ func (r *serviceRepo) ProjectDeliveries(ctx context.Context, projectID string, u
 	r.projectID = projectID
 	r.userID = userID
 	return r.projectDeliveries, nil
+}
+
+func (r *serviceRepo) RetryProjectDelivery(ctx context.Context, projectID string, userID string, deliveryID string) (*Delivery, error) {
+	r.projectID = projectID
+	r.userID = userID
+	r.retryDeliveryID = deliveryID
+	if r.retryErr != nil {
+		return nil, r.retryErr
+	}
+	if r.retryDelivery != nil {
+		return r.retryDelivery, nil
+	}
+	return &Delivery{ID: deliveryID, State: StatePending, MaxAttempts: DefaultMaxRetry}, nil
 }
 
 func (r *serviceRepo) RemoteProjectFollowerInboxes(ctx context.Context, projectID string) ([]string, error) {
@@ -173,4 +189,43 @@ func TestServiceListProjectDeliveriesUsesProjectAndUserScope(t *testing.T) {
 	assert.Equal(t, "project-1", repo.projectID)
 	assert.Equal(t, "user-1", repo.userID)
 	assert.Equal(t, "https://local.example/activities/1", deliveries[0].ActivityAPID)
+}
+
+func TestServiceRetryProjectDeliveryResetsAndQueuesTask(t *testing.T) {
+	repo := &serviceRepo{
+		retryDelivery: &Delivery{ID: "delivery-1", State: StatePending, MaxAttempts: DefaultMaxRetry},
+	}
+	queue := &serviceQueue{}
+	service := NewService(repo, queue)
+
+	delivery, err := service.RetryProjectDelivery(context.Background(), "project-1", "user-1", "delivery-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, "project-1", repo.projectID)
+	assert.Equal(t, "user-1", repo.userID)
+	assert.Equal(t, "delivery-1", repo.retryDeliveryID)
+	assert.Equal(t, StatePending, delivery.State)
+	assert.Equal(t, "delivery-1", queue.deliveryID)
+	assert.Equal(t, DefaultMaxRetry, queue.maxAttempts)
+}
+
+func TestServiceRetryProjectDeliveryReturnsRepositoryError(t *testing.T) {
+	repo := &serviceRepo{retryErr: ErrDeliveryRetryDenied}
+	queue := &serviceQueue{}
+	service := NewService(repo, queue)
+
+	_, err := service.RetryProjectDelivery(context.Background(), "project-1", "viewer-1", "delivery-1")
+
+	require.ErrorIs(t, err, ErrDeliveryRetryDenied)
+	assert.Empty(t, queue.deliveryID)
+}
+
+func TestServiceRetryProjectDeliveryReturnsQueueError(t *testing.T) {
+	repo := &serviceRepo{}
+	queue := &serviceQueue{err: assert.AnError}
+	service := NewService(repo, queue)
+
+	_, err := service.RetryProjectDelivery(context.Background(), "project-1", "user-1", "delivery-1")
+
+	require.ErrorIs(t, err, assert.AnError)
 }

@@ -19,6 +19,7 @@ type Repository interface {
 type RecipientRepository interface {
 	Repository
 	ProjectDeliveries(ctx context.Context, projectID string, userID string) ([]ProjectDelivery, error)
+	RetryProjectDelivery(ctx context.Context, projectID string, userID string, deliveryID string) (*Delivery, error)
 	RemoteProjectFollowerInboxes(ctx context.Context, projectID string) ([]string, error)
 	RemoteProjectTicketRecipientInboxes(ctx context.Context, projectID string, ticketID string) ([]string, error)
 }
@@ -231,6 +232,119 @@ func (r *PgRepository) ProjectDeliveries(ctx context.Context, projectID string, 
 		LIMIT 100
 	`, projectID)
 	return deliveries, err
+}
+
+func (r *PgRepository) RetryProjectDelivery(ctx context.Context, projectID string, userID string, deliveryID string) (*Delivery, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var role string
+	err = tx.GetContext(ctx, &role, `
+		SELECT role
+		FROM project_members
+		WHERE project_id = $1 AND user_id = $2
+	`, projectID, userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrProjectAccessDenied
+		}
+		return nil, err
+	}
+	if role != "owner" && role != "manager" {
+		return nil, ErrDeliveryRetryDenied
+	}
+
+	var state string
+	err = tx.GetContext(ctx, &state, `
+		WITH project_scope AS (
+			SELECT project.id, actor.ap_id
+			FROM projects project
+			JOIN actors actor ON actor.id = project.id
+			WHERE project.id = $1
+		)
+		SELECT d.state
+		FROM activity_deliveries d
+		JOIN ap_activities a ON a.id = d.activity_id
+		JOIN project_scope project ON true
+		WHERE d.id = $2 AND (
+			a.object_ap_id = project.ap_id
+			OR a.target_ap_id = project.ap_id
+			OR EXISTS (
+				SELECT 1
+				FROM ap_objects object
+				JOIN tickets ticket ON ticket.id = object.local_ref_id
+				WHERE object.ap_id = a.object_ap_id
+					AND object.local_ref_table = 'tickets'
+					AND ticket.project_id = project.id
+			)
+			OR EXISTS (
+				SELECT 1
+				FROM ap_objects target
+				JOIN tickets ticket ON ticket.id = target.local_ref_id
+				WHERE target.ap_id = a.target_ap_id
+					AND target.local_ref_table = 'tickets'
+					AND ticket.project_id = project.id
+			)
+			OR EXISTS (
+				SELECT 1
+				FROM ap_objects object
+				JOIN comments comment ON comment.id = object.local_ref_id
+				JOIN tickets ticket ON ticket.id = comment.ticket_id
+				WHERE object.ap_id = a.object_ap_id
+					AND object.local_ref_table = 'comments'
+					AND ticket.project_id = project.id
+			)
+			OR EXISTS (
+				SELECT 1
+				FROM ap_objects target
+				JOIN comments comment ON comment.id = target.local_ref_id
+				JOIN tickets ticket ON ticket.id = comment.ticket_id
+				WHERE target.ap_id = a.target_ap_id
+					AND target.local_ref_table = 'comments'
+					AND ticket.project_id = project.id
+			)
+		)
+		FOR UPDATE OF d
+	`, projectID, deliveryID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrDeliveryNotFound
+		}
+		return nil, err
+	}
+
+	switch state {
+	case StateFailed, StateDead:
+	case StateDelivered:
+		return nil, ErrDeliveryDone
+	default:
+		return nil, ErrDeliveryRetryUnavailable
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE activity_deliveries
+		SET state = $2,
+			attempts = 0,
+			max_attempts = $3,
+			next_attempt_at = NULL,
+			last_error = NULL,
+			delivered_at = NULL
+		WHERE id = $1
+	`, deliveryID, StatePending, DefaultMaxRetry); err != nil {
+		return nil, err
+	}
+
+	delivery, err := loadByID(ctx, tx, deliveryID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return delivery, nil
 }
 
 func (r *PgRepository) RemoteActorAPIDByInboxURL(ctx context.Context, inboxURL string) (string, error) {
