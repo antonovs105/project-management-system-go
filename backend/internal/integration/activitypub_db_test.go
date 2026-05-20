@@ -745,6 +745,13 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		requireOutboxItem(t, db, project.ID, "Accept", followAPID)
 		requireDeliveryForObject(t, db, "Accept", followAPID, remoteActor.InboxURL)
 
+		fanoutPeer, _ := createRemoteActor(t, ctx, db, "fanout-peer")
+		_, err = db.ExecContext(ctx, `
+			INSERT INTO actor_follows (follower_actor_id, followed_actor_id, state)
+			VALUES ($1, $2, 'accepted')
+		`, fanoutPeer.ID, project.ID)
+		require.NoError(t, err)
+
 		ticketService := ticket.NewService(ticket.NewRepository(db, cfg), projectService, cfg)
 		ticketService.SetDelivery(deliveryService)
 		localTicket, err := ticketService.CreateTicket(ctx, ticket.CreateTicketRequest{
@@ -768,6 +775,8 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		requireObjectType(t, db, noteAPID, "Note")
 		requireActivityForObject(t, db, "Create", noteAPID)
 		requireInboxItem(t, db, project.ID, "Create", noteAPID)
+		requireDeliveryForObject(t, db, "Create", noteAPID, fanoutPeer.InboxURL)
+		requireNoDeliveryForObject(t, db, "Create", noteAPID, remoteActor.InboxURL)
 
 		commentService := comment.NewService(comment.NewRepository(db, cfg), ticketService, cfg)
 		commentService.SetDelivery(deliveryService)
@@ -791,6 +800,13 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		requireObjectType(t, db, remoteTicketAPID, "Ticket")
 		requireActivityForObject(t, db, "Create", remoteTicketAPID)
 		requireInboxItem(t, db, project.ID, "Create", remoteTicketAPID)
+		requireDeliveryForObjectFromActor(t, db, "Create", remoteTicketAPID, fanoutPeer.InboxURL, project.ID)
+		requireNoDeliveryForObject(t, db, "Create", remoteTicketAPID, remoteActor.InboxURL)
+
+		duplicateRemoteTicket, err := receiver.Receive(ctx, ticketReq, project.APID, ticketBody)
+		require.NoError(t, err)
+		require.True(t, duplicateRemoteTicket.Duplicate)
+		requireDeliveryCountForObject(t, db, "Create", remoteTicketAPID, fanoutPeer.InboxURL, 1)
 
 		tickets, err := ticketService.ListTicketsInProject(ctx, project.ID, owner.ID)
 		require.NoError(t, err)
@@ -814,6 +830,8 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		requireObjectType(t, db, remoteTicketAPID, "Ticket")
 		requireActivityForObject(t, db, "Update", remoteTicketAPID)
 		requireInboxItem(t, db, project.ID, "Update", remoteTicketAPID)
+		requireDeliveryForObject(t, db, "Update", remoteTicketAPID, fanoutPeer.InboxURL)
+		requireNoDeliveryForObject(t, db, "Update", remoteTicketAPID, remoteActor.InboxURL)
 
 		tickets, err = ticketService.ListTicketsInProject(ctx, project.ID, owner.ID)
 		require.NoError(t, err)
@@ -844,6 +862,8 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		require.Equal(t, addAssigneeAPID, addedAssignee.ActivityAPID)
 		requireActivityForObjectAndTarget(t, db, "Add", assignee.APID, remoteTicketAPID)
 		requireInboxItemForTarget(t, db, project.ID, "Add", remoteTicketAPID)
+		requireDeliveryForObject(t, db, "Add", assignee.APID, fanoutPeer.InboxURL)
+		requireNoDeliveryForObject(t, db, "Add", assignee.APID, remoteActor.InboxURL)
 		requireTicketAssignee(t, db, remoteTicketAPID, assignee.ID)
 		requireTicketObjectAssignedTo(t, db, remoteTicketAPID, assignee.APID)
 
@@ -865,6 +885,8 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		require.Equal(t, removeAssigneeAPID, removedAssignee.ActivityAPID)
 		requireActivityForObjectAndTarget(t, db, "Remove", assignee.APID, remoteTicketAPID)
 		requireInboxItemForTarget(t, db, project.ID, "Remove", remoteTicketAPID)
+		requireDeliveryForObject(t, db, "Remove", assignee.APID, fanoutPeer.InboxURL)
+		requireNoDeliveryForObject(t, db, "Remove", assignee.APID, remoteActor.InboxURL)
 		requireNoTicketAssignee(t, db, remoteTicketAPID, assignee.ID)
 		requireTicketObjectNotAssignedTo(t, db, remoteTicketAPID, assignee.APID)
 
@@ -889,6 +911,8 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		require.Equal(t, deleteTicketAPID, deletedTicket.ActivityAPID)
 		requireActivityForObject(t, db, "Delete", remoteTicketAPID)
 		requireInboxItem(t, db, project.ID, "Delete", remoteTicketAPID)
+		requireDeliveryForObject(t, db, "Delete", remoteTicketAPID, fanoutPeer.InboxURL)
+		requireNoDeliveryForObject(t, db, "Delete", remoteTicketAPID, remoteActor.InboxURL)
 		requireObjectDeleted(t, db, remoteTicketAPID)
 		requireObjectTombstone(t, db, remoteTicketAPID, "forge:Ticket")
 		requireObjectDeleted(t, db, remoteTicketLocalComment.APID)
@@ -1986,6 +2010,39 @@ func requireDeliveryForObject(t *testing.T, db *sqlx.DB, activityType, objectAPI
 	`, activityType, objectAPID, inboxURL)
 	require.NoError(t, err)
 	require.Greater(t, count, 0)
+}
+
+func requireDeliveryForObjectFromActor(t *testing.T, db *sqlx.DB, activityType, objectAPID, inboxURL, actorID string) {
+	t.Helper()
+
+	var count int
+	err := db.Get(&count, `
+		SELECT count(*)
+		FROM activity_deliveries delivery
+		JOIN ap_activities activity ON activity.id = delivery.activity_id
+		WHERE activity.activity_type = $1
+			AND activity.object_ap_id = $2
+			AND delivery.target_inbox_url = $3
+			AND delivery.actor_id = $4
+	`, activityType, objectAPID, inboxURL, actorID)
+	require.NoError(t, err)
+	require.Greater(t, count, 0)
+}
+
+func requireDeliveryCountForObject(t *testing.T, db *sqlx.DB, activityType, objectAPID, inboxURL string, expected int) {
+	t.Helper()
+
+	var count int
+	err := db.Get(&count, `
+		SELECT count(*)
+		FROM activity_deliveries delivery
+		JOIN ap_activities activity ON activity.id = delivery.activity_id
+		WHERE activity.activity_type = $1
+			AND activity.object_ap_id = $2
+			AND delivery.target_inbox_url = $3
+	`, activityType, objectAPID, inboxURL)
+	require.NoError(t, err)
+	require.Equal(t, expected, count)
 }
 
 func requireProjectDelivery(t *testing.T, deliveries []delivery.ProjectDelivery, activityType, objectAPID, inboxURL string) {

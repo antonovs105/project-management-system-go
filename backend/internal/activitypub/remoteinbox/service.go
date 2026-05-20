@@ -30,6 +30,7 @@ type Service struct {
 
 type DeliveryEnqueuer interface {
 	Enqueue(ctx context.Context, activityID string, targetInboxURL string) (*delivery.Delivery, error)
+	EnqueueWithActor(ctx context.Context, activityID string, actorID string, targetInboxURL string) (*delivery.Delivery, error)
 }
 
 type Option func(*Service)
@@ -137,22 +138,52 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 	}
 
 	if isProjectCreateNote {
-		return s.repo.StoreInboundCreateNote(ctx, targetActorID, activity)
+		accepted, err := s.repo.StoreInboundCreateNote(ctx, targetActorID, activity)
+		if err != nil {
+			return nil, err
+		}
+		s.enqueueProjectFanOut(ctx, targetActorID, activity, accepted)
+		return accepted, nil
 	}
 	if isProjectCreateTicket {
-		return s.repo.StoreInboundCreateTicket(ctx, targetActorID, activity)
+		accepted, err := s.repo.StoreInboundCreateTicket(ctx, targetActorID, activity)
+		if err != nil {
+			return nil, err
+		}
+		s.enqueueProjectFanOut(ctx, targetActorID, activity, accepted)
+		return accepted, nil
 	}
 	if isProjectUpdateTicket {
-		return s.repo.StoreInboundUpdateTicket(ctx, targetActorID, activity)
+		accepted, err := s.repo.StoreInboundUpdateTicket(ctx, targetActorID, activity)
+		if err != nil {
+			return nil, err
+		}
+		s.enqueueProjectFanOut(ctx, targetActorID, activity, accepted)
+		return accepted, nil
 	}
 	if isProjectAddTicketAssignee {
-		return s.repo.StoreInboundAddTicketAssignee(ctx, targetActorID, activity)
+		accepted, err := s.repo.StoreInboundAddTicketAssignee(ctx, targetActorID, activity)
+		if err != nil {
+			return nil, err
+		}
+		s.enqueueProjectFanOut(ctx, targetActorID, activity, accepted)
+		return accepted, nil
 	}
 	if isProjectRemoveTicketAssignee {
-		return s.repo.StoreInboundRemoveTicketAssignee(ctx, targetActorID, activity)
+		accepted, err := s.repo.StoreInboundRemoveTicketAssignee(ctx, targetActorID, activity)
+		if err != nil {
+			return nil, err
+		}
+		s.enqueueProjectFanOut(ctx, targetActorID, activity, accepted)
+		return accepted, nil
 	}
 	if isProjectDeleteTicket {
-		return s.repo.StoreInboundDeleteTicket(ctx, targetActorID, activity)
+		accepted, err := s.repo.StoreInboundDeleteTicket(ctx, targetActorID, activity)
+		if err != nil {
+			return nil, err
+		}
+		s.enqueueProjectFanOut(ctx, targetActorID, activity, accepted)
+		return accepted, nil
 	}
 	if isProjectAcceptInvite {
 		return s.repo.StoreInboundAcceptInvite(ctx, targetActorID, activity)
@@ -207,6 +238,25 @@ func (s *Service) isProjectInviteResponse(ctx context.Context, targetActorID, ta
 		return false, fmt.Errorf("%w: %s target must match inbox actor", ErrInvalidActivity, activityName)
 	}
 	return true, nil
+}
+
+func (s *Service) enqueueProjectFanOut(ctx context.Context, targetActorID string, activity *InboundActivity, accepted *AcceptedActivity) {
+	if s.delivery == nil || accepted == nil || accepted.Duplicate || accepted.ActivityID == "" {
+		return
+	}
+	inboxes, err := s.repo.RemoteProjectFollowerInboxesExceptActor(ctx, targetActorID, activity.ActorID)
+	if err != nil {
+		log.Printf("failed to load ActivityPub fan-out recipients for project %s activity %s: %v", targetActorID, accepted.ActivityID, err)
+		return
+	}
+	for _, inbox := range inboxes {
+		if inbox == "" {
+			continue
+		}
+		if _, err := s.delivery.EnqueueWithActor(ctx, accepted.ActivityID, targetActorID, inbox); err != nil {
+			log.Printf("failed to enqueue ActivityPub fan-out for project %s activity %s inbox %s: %v", targetActorID, accepted.ActivityID, inbox, err)
+		}
+	}
 }
 
 func (s *Service) isProjectDeleteTicket(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {

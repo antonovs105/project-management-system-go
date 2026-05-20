@@ -19,6 +19,18 @@ func (s *Service) Enqueue(ctx context.Context, activityID string, targetInboxURL
 	if err != nil {
 		return nil, err
 	}
+	return s.queueDelivery(ctx, delivery)
+}
+
+func (s *Service) EnqueueWithActor(ctx context.Context, activityID string, actorID string, targetInboxURL string) (*Delivery, error) {
+	delivery, _, err := s.repo.CreateWithActor(ctx, activityID, actorID, targetInboxURL, DefaultMaxRetry)
+	if err != nil {
+		return nil, err
+	}
+	return s.queueDelivery(ctx, delivery)
+}
+
+func (s *Service) queueDelivery(ctx context.Context, delivery *Delivery) (*Delivery, error) {
 	if delivery.State != StateDelivered && delivery.State != StateDead {
 		if err := s.queue.Enqueue(ctx, delivery.ID, delivery.MaxAttempts); err != nil {
 			return nil, err

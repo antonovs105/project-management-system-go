@@ -15,6 +15,7 @@ type Repository interface {
 	FindLocalActorIDByAPID(ctx context.Context, apID string) (string, error)
 	FindActorAPIDByID(ctx context.Context, actorID string) (string, error)
 	IsProjectActor(ctx context.Context, actorID string) (bool, error)
+	RemoteProjectFollowerInboxesExceptActor(ctx context.Context, projectID string, actorID string) ([]string, error)
 	StoreInboundActivity(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	StoreInboundCreateNote(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	StoreInboundCreateTicket(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
@@ -61,6 +62,29 @@ func (r *PgRepository) IsProjectActor(ctx context.Context, actorID string) (bool
 	var exists bool
 	err := r.db.GetContext(ctx, &exists, `SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1)`, actorID)
 	return exists, err
+}
+
+func (r *PgRepository) RemoteProjectFollowerInboxesExceptActor(ctx context.Context, projectID string, actorID string) ([]string, error) {
+	var inboxes []string
+	err := r.db.SelectContext(ctx, &inboxes, `
+		WITH sender AS (
+			SELECT inbox_url
+			FROM actors
+			WHERE id = $2
+		)
+		SELECT DISTINCT follower.inbox_url
+		FROM actor_follows follow
+		JOIN actors follower ON follower.id = follow.follower_actor_id
+		LEFT JOIN sender ON true
+		WHERE follow.followed_actor_id = $1
+			AND follow.state = 'accepted'
+			AND follower.is_local = false
+			AND follower.inbox_url <> ''
+			AND follower.id <> $2
+			AND (sender.inbox_url IS NULL OR follower.inbox_url <> sender.inbox_url)
+		ORDER BY follower.inbox_url ASC
+	`, projectID, actorID)
+	return inboxes, err
 }
 
 func (r *PgRepository) StoreInboundActivity(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {

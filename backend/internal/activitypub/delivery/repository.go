@@ -11,6 +11,7 @@ import (
 
 type Repository interface {
 	Create(ctx context.Context, activityID string, targetInboxURL string, maxAttempts int) (*Delivery, bool, error)
+	CreateWithActor(ctx context.Context, activityID string, actorID string, targetInboxURL string, maxAttempts int) (*Delivery, bool, error)
 	StartAttempt(ctx context.Context, deliveryID string) (*Delivery, error)
 	MarkDelivered(ctx context.Context, deliveryID string) error
 	MarkFailed(ctx context.Context, deliveryID string, message string, nextAttemptAt *time.Time) error
@@ -38,6 +39,14 @@ func NewRecipientRepository(db *sqlx.DB) RecipientRepository {
 }
 
 func (r *PgRepository) Create(ctx context.Context, activityID string, targetInboxURL string, maxAttempts int) (*Delivery, bool, error) {
+	return r.create(ctx, activityID, "", targetInboxURL, maxAttempts)
+}
+
+func (r *PgRepository) CreateWithActor(ctx context.Context, activityID string, actorID string, targetInboxURL string, maxAttempts int) (*Delivery, bool, error) {
+	return r.create(ctx, activityID, actorID, targetInboxURL, maxAttempts)
+}
+
+func (r *PgRepository) create(ctx context.Context, activityID string, actorID string, targetInboxURL string, maxAttempts int) (*Delivery, bool, error) {
 	if maxAttempts <= 0 {
 		maxAttempts = DefaultMaxRetry
 	}
@@ -56,7 +65,7 @@ func (r *PgRepository) Create(ctx context.Context, activityID string, targetInbo
 		SELECT
 			activity.id,
 			activity.ap_id,
-			activity.actor_id,
+			COALESCE(NULLIF($4, '')::uuid, activity.actor_id),
 			COALESCE(
 				target_project_actor.id,
 				object_project_actor.id,
@@ -104,7 +113,7 @@ func (r *PgRepository) Create(ctx context.Context, activityID string, targetInbo
 		WHERE activity.id = $1
 		ON CONFLICT (activity_id, target_inbox_url) DO NOTHING
 		RETURNING id::text
-	`, activityID, targetInboxURL, maxAttempts).Scan(&id)
+	`, activityID, targetInboxURL, maxAttempts, actorID).Scan(&id)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, false, err
 	}

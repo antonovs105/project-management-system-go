@@ -33,6 +33,10 @@ func (r *workerRepo) Create(ctx context.Context, activityID string, targetInboxU
 	return nil, false, nil
 }
 
+func (r *workerRepo) CreateWithActor(ctx context.Context, activityID string, actorID string, targetInboxURL string, maxAttempts int) (*Delivery, bool, error) {
+	return nil, false, nil
+}
+
 func (r *workerRepo) StartAttempt(ctx context.Context, deliveryID string) (*Delivery, error) {
 	if r.startAttempt != nil {
 		return nil, r.startAttempt

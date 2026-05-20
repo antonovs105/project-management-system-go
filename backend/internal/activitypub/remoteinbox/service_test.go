@@ -29,6 +29,10 @@ type memoryRepository struct {
 	rejectedInvite    *InboundActivity
 	storeResult       *AcceptedActivity
 	projectActor      bool
+	fanoutProjectID   string
+	fanoutActorID     string
+	fanoutInboxes     []string
+	fanoutErr         error
 	follow            *InboundActivity
 	followResult      *FollowResponse
 	undo              *InboundActivity
@@ -59,6 +63,15 @@ func (m *memoryRepository) FindActorAPIDByID(ctx context.Context, actorID string
 
 func (m *memoryRepository) IsProjectActor(ctx context.Context, actorID string) (bool, error) {
 	return m.projectActor, nil
+}
+
+func (m *memoryRepository) RemoteProjectFollowerInboxesExceptActor(ctx context.Context, projectID string, actorID string) ([]string, error) {
+	if m.fanoutErr != nil {
+		return nil, m.fanoutErr
+	}
+	m.fanoutProjectID = projectID
+	m.fanoutActorID = actorID
+	return m.fanoutInboxes, nil
 }
 
 func (m *memoryRepository) StoreInboundActivity(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
@@ -244,13 +257,40 @@ func (f fakeVerifier) VerifyRequest(ctx context.Context, req *http.Request, body
 
 type fakeDelivery struct {
 	activityID     string
+	actorID        string
 	targetInboxURL string
+	enqueued       []fakeEnqueuedDelivery
 	err            error
+}
+
+type fakeEnqueuedDelivery struct {
+	ActivityID     string
+	ActorID        string
+	TargetInboxURL string
 }
 
 func (f *fakeDelivery) Enqueue(ctx context.Context, activityID string, targetInboxURL string) (*delivery.Delivery, error) {
 	f.activityID = activityID
 	f.targetInboxURL = targetInboxURL
+	f.enqueued = append(f.enqueued, fakeEnqueuedDelivery{
+		ActivityID:     activityID,
+		TargetInboxURL: targetInboxURL,
+	})
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &delivery.Delivery{ID: "delivery-1"}, nil
+}
+
+func (f *fakeDelivery) EnqueueWithActor(ctx context.Context, activityID string, actorID string, targetInboxURL string) (*delivery.Delivery, error) {
+	f.activityID = activityID
+	f.actorID = actorID
+	f.targetInboxURL = targetInboxURL
+	f.enqueued = append(f.enqueued, fakeEnqueuedDelivery{
+		ActivityID:     activityID,
+		ActorID:        actorID,
+		TargetInboxURL: targetInboxURL,
+	})
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -411,6 +451,63 @@ func TestServiceReceiveStoresProjectCreateTicket(t *testing.T) {
 	assert.Equal(t, "high", repo.storedTicket.ObjectTicket.Priority)
 	require.NotNil(t, repo.storedTicket.ObjectAPID)
 	assert.Equal(t, "https://remote.example/tickets/1", *repo.storedTicket.ObjectAPID)
+}
+
+func TestServiceReceiveFansOutProjectCreateTicket(t *testing.T) {
+	repo := &memoryRepository{
+		targetActorID: "project-actor",
+		projectActor:  true,
+		fanoutInboxes: []string{
+			"https://remote.example/users/bob/inbox",
+			"https://remote.example/users/carol/inbox",
+		},
+	}
+	delivery := &fakeDelivery{}
+	service := NewService(repo, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-actor",
+		ActorAPID: "https://remote.example/users/alice",
+	}}, WithDelivery(delivery))
+	body := []byte(`{"id":"https://remote.example/activities/create-ticket-1","type":"Create","actor":"https://remote.example/users/alice","object":{"id":"https://remote.example/tickets/1","type":["forge:Ticket"],"attributedTo":"https://remote.example/users/alice","context":"http://localhost:8080/projects/project-1","name":"Remote ticket","content":"From another server","forge:priority":"high","forge:ticketType":"task","forge:isResolved":false}}`)
+
+	accepted, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
+
+	require.NoError(t, err)
+	assert.Equal(t, "stored-ticket-activity", accepted.ActivityID)
+	assert.Equal(t, "project-actor", repo.fanoutProjectID)
+	assert.Equal(t, "remote-actor", repo.fanoutActorID)
+	require.Len(t, delivery.enqueued, 2)
+	assert.Equal(t, "stored-ticket-activity", delivery.enqueued[0].ActivityID)
+	assert.Equal(t, "project-actor", delivery.enqueued[0].ActorID)
+	assert.Equal(t, "https://remote.example/users/bob/inbox", delivery.enqueued[0].TargetInboxURL)
+	assert.Equal(t, "https://remote.example/users/carol/inbox", delivery.enqueued[1].TargetInboxURL)
+}
+
+func TestServiceReceiveDuplicateProjectCreateTicketDoesNotFanOut(t *testing.T) {
+	repo := &memoryRepository{
+		targetActorID: "project-actor",
+		projectActor:  true,
+		fanoutInboxes: []string{"https://remote.example/users/bob/inbox"},
+		storeResult: &AcceptedActivity{
+			ActivityID:   "stored-ticket-activity",
+			ActivityAPID: "https://remote.example/activities/create-ticket-1",
+			ReceivedAt:   time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC),
+			Duplicate:    true,
+		},
+	}
+	delivery := &fakeDelivery{}
+	service := NewService(repo, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-actor",
+		ActorAPID: "https://remote.example/users/alice",
+	}}, WithDelivery(delivery))
+	body := []byte(`{"id":"https://remote.example/activities/create-ticket-1","type":"Create","actor":"https://remote.example/users/alice","object":{"id":"https://remote.example/tickets/1","type":["forge:Ticket"],"attributedTo":"https://remote.example/users/alice","context":"http://localhost:8080/projects/project-1","name":"Remote ticket","content":"From another server","forge:priority":"high","forge:ticketType":"task","forge:isResolved":false}}`)
+
+	accepted, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
+
+	require.NoError(t, err)
+	assert.True(t, accepted.Duplicate)
+	assert.Empty(t, repo.fanoutProjectID)
+	assert.Empty(t, repo.fanoutActorID)
+	assert.Empty(t, delivery.enqueued)
 }
 
 func TestServiceReceiveRejectsProjectCreateTicketWrongContext(t *testing.T) {

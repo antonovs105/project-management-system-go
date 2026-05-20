@@ -11,6 +11,7 @@ import (
 
 type serviceRepo struct {
 	activityID        string
+	actorID           string
 	targetInboxURL    string
 	maxAttempts       int
 	inboxes           []string
@@ -30,7 +31,16 @@ type serviceRepo struct {
 }
 
 func (r *serviceRepo) Create(ctx context.Context, activityID string, targetInboxURL string, maxAttempts int) (*Delivery, bool, error) {
+	return r.create(ctx, activityID, "", targetInboxURL, maxAttempts)
+}
+
+func (r *serviceRepo) CreateWithActor(ctx context.Context, activityID string, actorID string, targetInboxURL string, maxAttempts int) (*Delivery, bool, error) {
+	return r.create(ctx, activityID, actorID, targetInboxURL, maxAttempts)
+}
+
+func (r *serviceRepo) create(ctx context.Context, activityID string, actorID string, targetInboxURL string, maxAttempts int) (*Delivery, bool, error) {
 	r.activityID = activityID
+	r.actorID = actorID
 	r.targetInboxURL = targetInboxURL
 	r.maxAttempts = maxAttempts
 	if r.err != nil {
@@ -150,6 +160,21 @@ func TestServiceEnqueueSkipsTerminalDelivery(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "delivery-1", delivery.ID)
 	assert.Empty(t, queue.deliveryID)
+}
+
+func TestServiceEnqueueWithActorCreatesDeliveryWithSigningActor(t *testing.T) {
+	repo := &serviceRepo{delivery: &Delivery{ID: "delivery-1", MaxAttempts: 10}}
+	queue := &serviceQueue{}
+	service := NewService(repo, queue)
+
+	delivery, err := service.EnqueueWithActor(context.Background(), "activity-1", "project-actor", "https://remote.example/inbox")
+
+	require.NoError(t, err)
+	assert.Equal(t, "delivery-1", delivery.ID)
+	assert.Equal(t, "activity-1", repo.activityID)
+	assert.Equal(t, "project-actor", repo.actorID)
+	assert.Equal(t, "https://remote.example/inbox", repo.targetInboxURL)
+	assert.Equal(t, "delivery-1", queue.deliveryID)
 }
 
 func TestServiceEnqueueProjectFollowersCreatesDeliveriesForRemoteInboxes(t *testing.T) {
