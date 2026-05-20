@@ -8,10 +8,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
+	authmiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -135,6 +138,60 @@ func TestPostUserOutboxRejectsActorMismatch(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
 }
 
+func TestRegisterRoutesAppliesJWTMiddleware(t *testing.T) {
+	secret := []byte("test-secret")
+
+	t.Run("missing token is rejected before outbox handling", func(t *testing.T) {
+		comments := &fakeCommentCreator{}
+		handler := NewHandlerWithRepository(newFakeRepository(), &fakeTicketCreator{}, comments)
+
+		rec := postOutboxThroughRoute(t, handler, secret, "", "/users/alice/outbox", validNoteBody())
+
+		require.Equal(t, http.StatusUnauthorized, rec.Code, rec.Body.String())
+		assert.False(t, comments.called)
+	})
+
+	t.Run("valid token reaches the outbox handler", func(t *testing.T) {
+		repo := newFakeRepository()
+		repo.tickets["https://local.test/tickets/1"] = "ticket-1"
+		repo.activities["https://local.test/comments/created"] = &createdActivity{
+			APID:     "https://local.test/activities/create-note-route",
+			Document: json.RawMessage(`{"id":"https://local.test/activities/create-note-route","type":"Create","actor":"https://local.test/users/alice"}`),
+		}
+		comments := &fakeCommentCreator{
+			result: &comment.Comment{ID: "comment-1", APID: "https://local.test/comments/created"},
+		}
+		handler := NewHandlerWithRepository(repo, &fakeTicketCreator{}, comments)
+
+		rec := postOutboxThroughRoute(t, handler, secret, signedTestToken(t, secret, repo.user.ID), "/users/alice/outbox", validNoteBody())
+
+		require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+		assert.True(t, comments.called)
+		assert.Equal(t, repo.user.ID, comments.authorID)
+	})
+
+	t.Run("unknown token subject is rejected", func(t *testing.T) {
+		comments := &fakeCommentCreator{}
+		handler := NewHandlerWithRepository(newFakeRepository(), &fakeTicketCreator{}, comments)
+
+		rec := postOutboxThroughRoute(t, handler, secret, signedTestToken(t, secret, "missing-actor"), "/users/alice/outbox", validNoteBody())
+
+		require.Equal(t, http.StatusUnauthorized, rec.Code, rec.Body.String())
+		assert.False(t, comments.called)
+	})
+
+	t.Run("route username must match authenticated actor", func(t *testing.T) {
+		repo := newFakeRepository()
+		comments := &fakeCommentCreator{}
+		handler := NewHandlerWithRepository(repo, &fakeTicketCreator{}, comments)
+
+		rec := postOutboxThroughRoute(t, handler, secret, signedTestToken(t, secret, repo.user.ID), "/users/bob/outbox", validNoteBody())
+
+		require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+		assert.False(t, comments.called)
+	})
+}
+
 func TestHasType(t *testing.T) {
 	assert.True(t, hasType("Create", "Create"))
 	assert.True(t, hasType([]any{"Activity", "forge:Ticket"}, "forge:Ticket"))
@@ -213,6 +270,37 @@ func postOutbox(t *testing.T, handler *Handler, body map[string]any, contentType
 
 	require.NoError(t, handler.PostUserOutbox(c))
 	return rec
+}
+
+func postOutboxThroughRoute(t *testing.T, handler *Handler, secret []byte, token, path string, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+
+	raw, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	e := echo.New()
+	handler.RegisterRoutes(e, authmiddleware.JWTMiddleware(secret))
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
+	req.Header.Set(echo.HeaderContentType, activitypub.ActivityJSONMediaType)
+	req.Header.Set(echo.HeaderAccept, activitypub.ActivityJSONMediaType)
+	if token != "" {
+		req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+	}
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	return rec
+}
+
+func signedTestToken(t *testing.T, secret []byte, subject string) string {
+	t.Helper()
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub": subject,
+		"exp": time.Now().Add(time.Hour).Unix(),
+	})
+	raw, err := token.SignedString(secret)
+	require.NoError(t, err)
+	return raw
 }
 
 type fakeRepository struct {
