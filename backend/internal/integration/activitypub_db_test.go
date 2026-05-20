@@ -544,6 +544,70 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 			SELECT private_key_pem FROM actor_keys WHERE key_id = $1
 		`, actor.PublicKeyID))
 		assert.Nil(t, privateKey)
+
+		var fetched struct {
+			LastFetchedAt sql.NullTime   `db:"last_fetched_at"`
+			FetchError    sql.NullString `db:"fetch_error"`
+		}
+		require.NoError(t, db.GetContext(ctx, &fetched, `
+			SELECT last_fetched_at, fetch_error
+			FROM actors
+			WHERE ap_id = $1
+		`, actor.APID))
+		require.True(t, fetched.LastFetchedAt.Valid)
+		require.False(t, fetched.FetchError.Valid)
+
+		require.NoError(t, repo.RecordRemoteActorFetchFailure(ctx, actor.APID, "remote actor fetch failed"))
+		require.NoError(t, db.GetContext(ctx, &fetched, `
+			SELECT last_fetched_at, fetch_error
+			FROM actors
+			WHERE ap_id = $1
+		`, actor.APID))
+		require.True(t, fetched.LastFetchedAt.Valid)
+		require.True(t, fetched.FetchError.Valid)
+		assert.Equal(t, "remote actor fetch failed", fetched.FetchError.String)
+
+		actor.Name = "Remote Bot Refreshed"
+		require.NoError(t, repo.UpsertRemoteActor(ctx, actor))
+		require.NoError(t, db.GetContext(ctx, &fetched, `
+			SELECT last_fetched_at, fetch_error
+			FROM actors
+			WHERE ap_id = $1
+		`, actor.APID))
+		require.True(t, fetched.LastFetchedAt.Valid)
+		require.False(t, fetched.FetchError.Valid)
+	})
+
+	t.Run("remote actor key rotation deactivates old key", func(t *testing.T) {
+		repo := remoteactor.NewRepository(db)
+		oldPublicKey, _, err := activitypub.GenerateRSAKeyPair()
+		require.NoError(t, err)
+		newPublicKey, _, err := activitypub.GenerateRSAKeyPair()
+		require.NoError(t, err)
+
+		actorAPID := "https://remote.example/users/rotating-key"
+		actor := &remoteactor.Actor{
+			APID:              actorAPID,
+			Type:              "Person",
+			PreferredUsername: "rotating-key",
+			Handle:            "rotating-key@remote.example",
+			Name:              "Rotating Key",
+			InboxURL:          activitypub.Inbox(actorAPID),
+			OutboxURL:         activitypub.Outbox(actorAPID),
+			PublicKeyID:       actorAPID + "#old-key",
+			PublicKeyPEM:      oldPublicKey,
+			Document:          []byte(`{"id":"https://remote.example/users/rotating-key","type":"Person"}`),
+		}
+		require.NoError(t, repo.UpsertRemoteActor(ctx, actor))
+
+		actor.PublicKeyID = actorAPID + "#new-key"
+		actor.PublicKeyPEM = newPublicKey
+		require.NoError(t, repo.UpsertRemoteActor(ctx, actor))
+
+		var activeOld bool
+		require.NoError(t, db.GetContext(ctx, &activeOld, `SELECT active FROM actor_keys WHERE key_id = $1`, actorAPID+"#old-key"))
+		assert.False(t, activeOld)
+		requireActorPublicKey(t, db, actorAPID+"#new-key", newPublicKey)
 	})
 
 	t.Run("remote actors can author tickets and comments", func(t *testing.T) {

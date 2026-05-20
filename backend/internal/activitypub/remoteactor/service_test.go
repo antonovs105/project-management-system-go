@@ -16,11 +16,13 @@ import (
 )
 
 type memoryRepository struct {
-	actor       *Actor
-	lookupActor *Actor
-	err         error
-	findErr     error
-	upsertCount int
+	actor            *Actor
+	lookupActor      *Actor
+	err              error
+	findErr          error
+	fetchFailureAPID string
+	fetchError       string
+	upsertCount      int
 }
 
 func (m *memoryRepository) UpsertRemoteActor(ctx context.Context, actor *Actor) error {
@@ -46,6 +48,12 @@ func (m *memoryRepository) RemoteActorByAPID(ctx context.Context, apID string) (
 	}
 	copy := *source
 	return &copy, nil
+}
+
+func (m *memoryRepository) RecordRemoteActorFetchFailure(ctx context.Context, apID string, fetchError string) error {
+	m.fetchFailureAPID = apID
+	m.fetchError = fetchError
+	return nil
 }
 
 type httpClientFunc func(req *http.Request) (*http.Response, error)
@@ -150,7 +158,7 @@ func TestRefreshKeyRequiresExpectedActor(t *testing.T) {
 
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/users/alice" {
+		if r.URL.Path != "/users/bob" {
 			http.NotFound(w, r)
 			return
 		}
@@ -163,10 +171,40 @@ func TestRefreshKeyRequiresExpectedActor(t *testing.T) {
 	repo := &memoryRepository{}
 	service := NewService(repo, WithHTTPClient(server.Client()))
 
-	err = service.RefreshKey(context.Background(), server.URL+"/users/alice#main-key", "https://remote.example/users/alice")
+	err = service.RefreshKey(context.Background(), server.URL+"/users/alice#main-key", server.URL+"/users/bob")
 
 	require.ErrorIs(t, err, ErrInvalidActorDocument)
 	assert.Nil(t, repo.actor)
+}
+
+func TestRefreshKeyFetchesExpectedActorURL(t *testing.T) {
+	publicKey, _, err := activitypub.GenerateRSAKeyPair()
+	require.NoError(t, err)
+
+	var requestedPath string
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath = r.URL.Path
+		if r.URL.Path != "/users/alice" {
+			http.NotFound(w, r)
+			return
+		}
+		doc := actorDocumentMap(server.URL, "Person", publicKey)
+		doc["publicKey"].(map[string]any)["id"] = server.URL + "/keys/alice-main"
+		writeJSON(t, w, doc)
+	}))
+	defer server.Close()
+
+	repo := &memoryRepository{}
+	service := NewService(repo, WithHTTPClient(server.Client()))
+
+	err = service.RefreshKey(context.Background(), server.URL+"/keys/alice-main", server.URL+"/users/alice")
+
+	require.NoError(t, err)
+	assert.Equal(t, "/users/alice", requestedPath)
+	require.NotNil(t, repo.actor)
+	assert.Equal(t, server.URL+"/users/alice", repo.actor.APID)
+	assert.Equal(t, server.URL+"/keys/alice-main", repo.actor.PublicKeyID)
 }
 
 func TestResolveKeyRejectsUnsupportedScheme(t *testing.T) {
@@ -200,6 +238,31 @@ func TestResolveKeyRejectsKeyMismatch(t *testing.T) {
 	assert.Nil(t, repo.actor)
 }
 
+func TestFetchRejectsPublicKeyOwnerMismatch(t *testing.T) {
+	publicKey, _, err := activitypub.GenerateRSAKeyPair()
+	require.NoError(t, err)
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/users/alice" {
+			http.NotFound(w, r)
+			return
+		}
+		doc := actorDocumentMap(server.URL, "Person", publicKey)
+		doc["publicKey"].(map[string]any)["owner"] = server.URL + "/users/mallory"
+		writeJSON(t, w, doc)
+	}))
+	defer server.Close()
+
+	repo := &memoryRepository{}
+	_, err = NewService(repo, WithHTTPClient(server.Client())).Fetch(context.Background(), server.URL+"/users/alice")
+
+	require.ErrorIs(t, err, ErrInvalidActorDocument)
+	assert.Nil(t, repo.actor)
+	assert.Equal(t, server.URL+"/users/alice", repo.fetchFailureAPID)
+	assert.Contains(t, repo.fetchError, "publicKey owner mismatch")
+}
+
 func TestFetchRejectsUnsupportedActorScheme(t *testing.T) {
 	service := NewService(&memoryRepository{})
 
@@ -219,8 +282,8 @@ func TestFetchRejectsUnsafeActorHost(t *testing.T) {
 func TestRefreshIfStaleSkipsFreshRemoteActor(t *testing.T) {
 	repo := &memoryRepository{
 		lookupActor: &Actor{
-			APID:      "https://remote.example/users/alice",
-			UpdatedAt: time.Now().UTC(),
+			APID:          "https://remote.example/users/alice",
+			LastFetchedAt: timePtr(time.Now().UTC()),
 		},
 	}
 	service := NewService(repo, WithHTTPClient(httpClientFunc(func(req *http.Request) (*http.Response, error) {
@@ -250,8 +313,8 @@ func TestRefreshIfStaleFetchesAndCachesStaleRemoteActor(t *testing.T) {
 
 	repo := &memoryRepository{
 		lookupActor: &Actor{
-			APID:      server.URL + "/users/alice",
-			UpdatedAt: time.Now().UTC().Add(-25 * time.Hour),
+			APID:          server.URL + "/users/alice",
+			LastFetchedAt: timePtr(time.Now().UTC().Add(-25 * time.Hour)),
 		},
 	}
 	service := NewService(repo, WithHTTPClient(server.Client()))
@@ -263,6 +326,28 @@ func TestRefreshIfStaleFetchesAndCachesStaleRemoteActor(t *testing.T) {
 	require.NotNil(t, repo.actor)
 	assert.Equal(t, server.URL+"/users/alice", repo.actor.APID)
 	assert.Equal(t, server.URL+"/users/alice/inbox", repo.actor.InboxURL)
+}
+
+func TestRefreshIfStaleRecordsFetchFailure(t *testing.T) {
+	repo := &memoryRepository{
+		lookupActor: &Actor{
+			APID:          "https://remote.example/users/alice",
+			LastFetchedAt: timePtr(time.Now().UTC().Add(-25 * time.Hour)),
+		},
+	}
+	service := NewService(repo, WithHTTPClient(httpClientFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusGone,
+			Status:     "410 Gone",
+			Body:       http.NoBody,
+		}, nil
+	})))
+
+	err := service.RefreshIfStale(context.Background(), "https://remote.example/users/alice", 24*time.Hour)
+
+	require.ErrorIs(t, err, ErrNotFound)
+	assert.Equal(t, "https://remote.example/users/alice", repo.fetchFailureAPID)
+	assert.Contains(t, repo.fetchError, "remote actor not found")
 }
 
 func TestDiscoverRejectsWebFingerWithoutSelfLink(t *testing.T) {
@@ -435,4 +520,8 @@ func mustJSON(t *testing.T, value any) string {
 
 func serverHost(server *httptest.Server) string {
 	return strings.TrimPrefix(server.URL, "http://")
+}
+
+func timePtr(value time.Time) *time.Time {
+	return &value
 }

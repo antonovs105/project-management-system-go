@@ -87,14 +87,7 @@ func (s *Service) Discover(ctx context.Context, resource string) (*Actor, error)
 		return nil, err
 	}
 
-	actor, err := s.fetchActor(ctx, actorURL, username, domain)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.repo.UpsertRemoteActor(ctx, actor); err != nil {
-		return nil, err
-	}
-	return actor, nil
+	return s.fetchAndCacheActor(ctx, actorURL, username, domain)
 }
 
 func (s *Service) Fetch(ctx context.Context, actorURL string) (*Actor, error) {
@@ -102,14 +95,7 @@ func (s *Service) Fetch(ctx context.Context, actorURL string) (*Actor, error) {
 	if err != nil {
 		return nil, err
 	}
-	actor, err := s.fetchActor(ctx, actorURL, fallbackUsername, domain)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.repo.UpsertRemoteActor(ctx, actor); err != nil {
-		return nil, err
-	}
-	return actor, nil
+	return s.fetchAndCacheActor(ctx, actorURL, fallbackUsername, domain)
 }
 
 func (s *Service) RefreshIfStale(ctx context.Context, actorAPID string, maxAge time.Duration) error {
@@ -117,7 +103,7 @@ func (s *Service) RefreshIfStale(ctx context.Context, actorAPID string, maxAge t
 	if err != nil {
 		return err
 	}
-	if maxAge > 0 && !actor.UpdatedAt.IsZero() && time.Since(actor.UpdatedAt) < maxAge {
+	if maxAge > 0 && actor.LastFetchedAt != nil && time.Since(actor.LastFetchedAt.UTC()) < maxAge {
 		return nil
 	}
 	_, err = s.Fetch(ctx, actor.APID)
@@ -137,6 +123,9 @@ func (s *Service) fetchAndCacheKey(ctx context.Context, keyID, expectedActorAPID
 	if err != nil {
 		return err
 	}
+	if expectedActorAPID != "" {
+		actorURL = expectedActorAPID
+	}
 
 	fallbackUsername, domain, err := fallbackIdentity(actorURL)
 	if err != nil {
@@ -144,15 +133,39 @@ func (s *Service) fetchAndCacheKey(ctx context.Context, keyID, expectedActorAPID
 	}
 	actor, err := s.fetchActor(ctx, actorURL, fallbackUsername, domain)
 	if err != nil {
+		s.recordFetchFailure(ctx, actorURL, err)
 		return err
 	}
 	if actor.PublicKeyID != keyID {
-		return fmt.Errorf("%w: key id mismatch", ErrInvalidActorDocument)
+		err := fmt.Errorf("%w: key id mismatch", ErrInvalidActorDocument)
+		s.recordFetchFailure(ctx, actor.APID, err)
+		return err
 	}
 	if expectedActorAPID != "" && actor.APID != expectedActorAPID {
-		return fmt.Errorf("%w: actor id changed", ErrInvalidActorDocument)
+		err := fmt.Errorf("%w: actor id changed", ErrInvalidActorDocument)
+		s.recordFetchFailure(ctx, actor.APID, err)
+		return err
 	}
 	return s.repo.UpsertRemoteActor(ctx, actor)
+}
+
+func (s *Service) fetchAndCacheActor(ctx context.Context, actorURL, fallbackUsername, domain string) (*Actor, error) {
+	actor, err := s.fetchActor(ctx, actorURL, fallbackUsername, domain)
+	if err != nil {
+		s.recordFetchFailure(ctx, actorURL, err)
+		return nil, err
+	}
+	if err := s.repo.UpsertRemoteActor(ctx, actor); err != nil {
+		return nil, err
+	}
+	return actor, nil
+}
+
+func (s *Service) recordFetchFailure(ctx context.Context, actorURL string, err error) {
+	if actorURL == "" || err == nil {
+		return
+	}
+	_ = s.repo.RecordRemoteActorFetchFailure(ctx, actorURL, err.Error())
 }
 
 func (s *Service) resolveWebFinger(ctx context.Context, domain, resource string) (string, error) {

@@ -12,6 +12,7 @@ import (
 type Repository interface {
 	RemoteActorByAPID(ctx context.Context, apID string) (*Actor, error)
 	UpsertRemoteActor(ctx context.Context, actor *Actor) error
+	RecordRemoteActorFetchFailure(ctx context.Context, apID string, fetchError string) error
 }
 
 type PgRepository struct {
@@ -40,6 +41,8 @@ func (r *PgRepository) RemoteActorByAPID(ctx context.Context, apID string) (*Act
 			COALESCE(key.key_id, '') AS public_key_id,
 			COALESCE(key.public_key_pem, '') AS public_key_pem,
 			COALESCE(object.document, '{}'::jsonb) AS document,
+			actor.last_fetched_at,
+			actor.fetch_error,
 			actor.created_at,
 			actor.updated_at
 		FROM actors actor
@@ -66,9 +69,10 @@ func (r *PgRepository) UpsertRemoteActor(ctx context.Context, actor *Actor) erro
 	if err := tx.QueryRowxContext(ctx, `
 		INSERT INTO actors (
 			ap_id, type, preferred_username, handle, name, summary,
-			inbox_url, outbox_url, followers_url, following_url, is_local
+			inbox_url, outbox_url, followers_url, following_url,
+			is_local, last_fetched_at, fetch_error
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, now(), NULL)
 		ON CONFLICT (ap_id) DO UPDATE
 		SET
 			type = EXCLUDED.type,
@@ -79,9 +83,11 @@ func (r *PgRepository) UpsertRemoteActor(ctx context.Context, actor *Actor) erro
 			inbox_url = EXCLUDED.inbox_url,
 			outbox_url = EXCLUDED.outbox_url,
 			followers_url = EXCLUDED.followers_url,
-			following_url = EXCLUDED.following_url
+			following_url = EXCLUDED.following_url,
+			last_fetched_at = now(),
+			fetch_error = NULL
 		WHERE actors.is_local = false
-		RETURNING id::text, created_at, updated_at
+		RETURNING id::text, last_fetched_at, fetch_error, created_at, updated_at
 	`,
 		actor.APID,
 		actor.Type,
@@ -93,7 +99,7 @@ func (r *PgRepository) UpsertRemoteActor(ctx context.Context, actor *Actor) erro
 		actor.OutboxURL,
 		actor.FollowersURL,
 		actor.FollowingURL,
-	).Scan(&actor.ID, &actor.CreatedAt, &actor.UpdatedAt); err != nil {
+	).Scan(&actor.ID, &actor.LastFetchedAt, &actor.FetchError, &actor.CreatedAt, &actor.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrLocalActorConflict
 		}
@@ -153,4 +159,13 @@ func (r *PgRepository) UpsertRemoteActor(ctx context.Context, actor *Actor) erro
 	}
 
 	return tx.Commit()
+}
+
+func (r *PgRepository) RecordRemoteActorFetchFailure(ctx context.Context, apID string, fetchError string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE actors
+		SET fetch_error = $2
+		WHERE ap_id = $1 AND is_local = false
+	`, apID, fetchError)
+	return err
 }
