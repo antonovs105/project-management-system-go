@@ -57,6 +57,11 @@ func (m *MockRepository) Delete(ctx context.Context, id string) error {
 	return args.Error(0)
 }
 
+func (m *MockRepository) RemoveMember(ctx context.Context, projectID, actorID, targetUserID string) error {
+	args := m.Called(ctx, projectID, actorID, targetUserID)
+	return args.Error(0)
+}
+
 func (m *MockRepository) CreateInvite(ctx context.Context, invite *ProjectInvite) error {
 	args := m.Called(ctx, invite)
 	return args.Error(0)

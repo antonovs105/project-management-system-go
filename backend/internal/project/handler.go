@@ -22,6 +22,7 @@ func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.PATCH("/projects/:id", h.Update)
 	api.DELETE("/projects/:id", h.Delete)
 	api.POST("/projects/:id/members", h.AddMember)
+	api.DELETE("/projects/:id/members/:userID", h.RemoveMember)
 	api.POST("/invites/:id/accept", h.AcceptInvite)
 	api.POST("/invites/:id/reject", h.RejectInvite)
 	api.POST("/invites/:id/revoke", h.RevokeInvite)
@@ -138,6 +139,18 @@ func (h *Handler) AddMember(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusAccepted, invite)
+}
+
+func (h *Handler) RemoveMember(c echo.Context) error {
+	projectID := c.Param("id")
+	targetUserID := c.Param("userID")
+	currentUserID := c.Get("userID").(string)
+
+	if err := h.service.RemoveMemberFromProject(c.Request().Context(), projectID, currentUserID, targetUserID); err != nil {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+	}
+
+	return c.NoContent(http.StatusNoContent)
 }
 
 // AcceptInvite handler for POST /api/invites/:id/accept

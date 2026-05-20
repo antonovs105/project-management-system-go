@@ -290,6 +290,64 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	require.Contains(t, err.Error(), "only owners can delete projects")
 	requireActivityCount(t, db, deniedActivityCount)
 
+	manager, err := userService.RegisterUser(ctx, "manager", "manager@example.test", "password123")
+	require.NoError(t, err)
+	managerInvite, err := projectService.AddMemberToProject(ctx, project.ID, owner.ID, manager.ID, "manager")
+	require.NoError(t, err)
+	require.NoError(t, projectService.AcceptInvite(ctx, managerInvite.ID, manager.ID))
+	requireProjectRole(t, db, manager.ID, project.ID, "manager")
+
+	removableDev, err := userService.RegisterUser(ctx, "removable-dev", "removable-dev@example.test", "password123")
+	require.NoError(t, err)
+	removableInvite, err := projectService.AddMemberToProject(ctx, project.ID, owner.ID, removableDev.ID, "developer")
+	require.NoError(t, err)
+	require.NoError(t, projectService.AcceptInvite(ctx, removableInvite.ID, removableDev.ID))
+	requireProjectRole(t, db, removableDev.ID, project.ID, "developer")
+
+	memberRemovalTicket, err := ticketService.CreateTicket(ctx, ticket.CreateTicketRequest{
+		Title:       "Remove assignee with member",
+		Description: "Membership removal should clear assignment.",
+		Priority:    "medium",
+		Type:        "task",
+		AssigneeID:  &removableDev.ID,
+	}, project.ID, owner.ID)
+	require.NoError(t, err)
+	requireTicketAssignee(t, db, memberRemovalTicket.APID, removableDev.ID)
+	requireTicketObjectAssignedTo(t, db, memberRemovalTicket.APID, removableDev.APID)
+
+	managerDeniedRemovalCount := activityCount(t, db)
+	err = projectService.RemoveMemberFromProject(ctx, project.ID, manager.ID, owner.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "managers can only remove")
+	requireActivityCount(t, db, managerDeniedRemovalCount)
+
+	require.NoError(t, projectService.RemoveMemberFromProject(ctx, project.ID, manager.ID, removableDev.ID))
+	requireNoProjectMember(t, db, removableDev.ID, project.ID)
+	requireNoFollow(t, db, removableDev.ID, project.ID)
+	requireNoTicketAssignee(t, db, memberRemovalTicket.APID, removableDev.ID)
+	requireTicketObjectNotAssignedTo(t, db, memberRemovalTicket.APID, removableDev.APID)
+	requireActivityForObjectAndTarget(t, db, "Remove", removableDev.APID, project.APID)
+	requireActivityForObjectAndActor(t, db, "Remove", removableDev.APID, manager.ID)
+	requireInboxItem(t, db, project.ID, "Remove", removableDev.APID)
+	requireInboxItem(t, db, removableDev.ID, "Remove", removableDev.APID)
+	_, err = projectService.GetProjectByID(ctx, project.ID, removableDev.ID)
+	require.Error(t, err)
+
+	lastOwnerRemovalCount := activityCount(t, db)
+	err = projectService.RemoveMemberFromProject(ctx, project.ID, owner.ID, owner.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "last project owner")
+	requireActivityCount(t, db, lastOwnerRemovalCount)
+
+	require.NoError(t, projectService.RemoveMemberFromProject(ctx, project.ID, viewer.ID, viewer.ID))
+	requireNoProjectMember(t, db, viewer.ID, project.ID)
+	requireNoFollow(t, db, viewer.ID, project.ID)
+	requireActivityForObjectAndTarget(t, db, "Undo", project.APID, project.APID)
+	requireActivityForObjectAndActor(t, db, "Undo", project.APID, viewer.ID)
+	requireOutboxItem(t, db, viewer.ID, "Undo", project.APID)
+	_, err = projectService.GetProjectByID(ctx, project.ID, viewer.ID)
+	require.Error(t, err)
+
 	_, err = deliveryService.ListProjectDeliveries(ctx, project.ID, outsider.ID)
 	require.ErrorIs(t, err, delivery.ErrProjectAccessDenied)
 }

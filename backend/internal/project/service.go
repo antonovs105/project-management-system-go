@@ -112,6 +112,33 @@ func (s *Service) DeleteProject(ctx context.Context, projectID, userID string) e
 	return s.repo.Delete(ctx, projectID)
 }
 
+func (s *Service) RemoveMemberFromProject(ctx context.Context, projectID, actorID, targetUserID string) error {
+	actorRole, err := s.repo.GetUserRole(ctx, actorID, projectID)
+	if err != nil {
+		return errors.New("access denied: you are not a member of this project")
+	}
+	targetRole, err := s.repo.GetUserRole(ctx, targetUserID, projectID)
+	if err != nil {
+		return errors.New("target user is not a project member")
+	}
+
+	if actorID == targetUserID {
+		return s.repo.RemoveMember(ctx, projectID, actorID, targetUserID)
+	}
+
+	switch actorRole {
+	case RoleOwner:
+		return s.repo.RemoveMember(ctx, projectID, actorID, targetUserID)
+	case RoleManager:
+		if targetRole == RoleDeveloper || targetRole == RoleViewer {
+			return s.repo.RemoveMember(ctx, projectID, actorID, targetUserID)
+		}
+		return errors.New("insufficient permissions: managers can only remove developers or viewers")
+	default:
+		return errors.New("insufficient permissions: only owners or managers can remove members")
+	}
+}
+
 func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUserID, newUserID string, role string) (*ProjectInvite, error) {
 	currentUserRole, err := s.repo.GetUserRole(ctx, currentUserID, projectID)
 	if err != nil {
