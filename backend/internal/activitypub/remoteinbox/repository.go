@@ -9,11 +9,13 @@ import (
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 )
 
 type Repository interface {
 	FindLocalActorIDByAPID(ctx context.Context, apID string) (string, error)
 	FindActorAPIDByID(ctx context.Context, actorID string) (string, error)
+	IsDomainBlocked(ctx context.Context, domains []string) (bool, error)
 	IsProjectActor(ctx context.Context, actorID string) (bool, error)
 	RemoteProjectFollowerInboxesExceptActor(ctx context.Context, projectID string, actorID string) ([]string, error)
 	StoreInboundActivity(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
@@ -56,6 +58,21 @@ func (r *PgRepository) FindActorAPIDByID(ctx context.Context, actorID string) (s
 	var apID string
 	err := r.db.GetContext(ctx, &apID, `SELECT ap_id FROM actors WHERE id = $1`, actorID)
 	return apID, err
+}
+
+func (r *PgRepository) IsDomainBlocked(ctx context.Context, domains []string) (bool, error) {
+	if len(domains) == 0 {
+		return false, nil
+	}
+	var blocked bool
+	err := r.db.GetContext(ctx, &blocked, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM federation_domain_blocks
+			WHERE domain = ANY($1)
+		)
+	`, pq.Array(domains))
+	return blocked, err
 }
 
 func (r *PgRepository) IsProjectActor(ctx context.Context, actorID string) (bool, error) {

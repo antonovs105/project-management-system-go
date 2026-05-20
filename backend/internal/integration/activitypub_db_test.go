@@ -571,6 +571,7 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 			"activity_deliveries",
 			"actor_inbox_items",
 			"actor_outbox_items",
+			"federation_domain_blocks",
 			"project_members",
 			"actor_follows",
 			"project_invites",
@@ -1926,6 +1927,7 @@ func resetIntegrationDB(t *testing.T, db *sqlx.DB) {
 		TRUNCATE TABLE
 			actor_outbox_items,
 			actor_inbox_items,
+			federation_domain_blocks,
 			project_invites,
 			activity_deliveries,
 			ap_activities,

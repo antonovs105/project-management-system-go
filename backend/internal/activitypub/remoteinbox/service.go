@@ -7,12 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
+	"github.com/antonovs105/project-management-system-go/internal/activitypub/domainblock"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/httpsig"
 )
 
@@ -66,7 +66,7 @@ func WithDelivery(delivery DeliveryEnqueuer) Option {
 func WithBlockedDomains(domains []string) Option {
 	return func(s *Service) {
 		for _, domain := range domains {
-			normalized := normalizeBlockedDomain(domain)
+			normalized := domainblock.Normalize(domain)
 			if normalized == "" {
 				continue
 			}
@@ -82,24 +82,19 @@ func (s *Service) MaxBodyBytes() int64 {
 	return s.maxBodyBytes
 }
 
-func (s *Service) isActorDomainBlocked(actorAPID string) bool {
-	if len(s.blockedDomains) == 0 {
-		return false
-	}
-	domain, err := domainFromAPID(actorAPID)
+func (s *Service) isActorDomainBlocked(ctx context.Context, actorAPID string) (bool, error) {
+	domain, err := domainblock.FromActorID(actorAPID)
 	if err != nil {
-		return false
+		return false, nil
 	}
-	for {
-		if _, blocked := s.blockedDomains[domain]; blocked {
-			return true
-		}
-		dot := strings.IndexByte(domain, '.')
-		if dot < 0 {
-			return false
-		}
-		domain = domain[dot+1:]
+	if domainblock.Contains(s.blockedDomains, domain) {
+		return true, nil
 	}
+	blocked, err := s.repo.IsDomainBlocked(ctx, domainblock.Candidates(domain))
+	if err != nil {
+		return false, err
+	}
+	return blocked, nil
 }
 
 func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID string, body []byte) (*AcceptedActivity, error) {
@@ -115,7 +110,11 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 	if err != nil {
 		return nil, err
 	}
-	if s.isActorDomainBlocked(activity.ActorAPID) {
+	blocked, err := s.isActorDomainBlocked(ctx, activity.ActorAPID)
+	if err != nil {
+		return nil, err
+	}
+	if blocked {
 		return nil, ErrBlockedDomain
 	}
 
@@ -760,32 +759,6 @@ func optionalBoolValue(raw map[string]any, key string) (bool, bool, bool) {
 func isAbsoluteURI(value string) bool {
 	parsed, err := url.Parse(value)
 	return err == nil && parsed.Scheme != "" && parsed.Host != ""
-}
-
-func domainFromAPID(value string) (string, error) {
-	parsed, err := url.Parse(value)
-	if err != nil || parsed.Hostname() == "" {
-		return "", ErrInvalidActivity
-	}
-	return normalizeBlockedDomain(parsed.Hostname()), nil
-}
-
-func normalizeBlockedDomain(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
-		return ""
-	}
-	if parsed, err := url.Parse(value); err == nil && parsed.Hostname() != "" {
-		value = parsed.Hostname()
-	}
-	if host, _, err := net.SplitHostPort(value); err == nil {
-		value = host
-	}
-	value = strings.Trim(strings.ToLower(strings.TrimSpace(value)), "[]")
-	if value == "" || strings.ContainsAny(value, " \t\r\n/") {
-		return ""
-	}
-	return value
 }
 
 func isActivityMediaType(value string) bool {

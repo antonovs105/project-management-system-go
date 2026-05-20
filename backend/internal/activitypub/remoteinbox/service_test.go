@@ -33,6 +33,8 @@ type memoryRepository struct {
 	fanoutActorID     string
 	fanoutInboxes     []string
 	fanoutErr         error
+	blockedDomains    map[string]struct{}
+	blockedErr        error
 	follow            *InboundActivity
 	followResult      *FollowResponse
 	undo              *InboundActivity
@@ -59,6 +61,18 @@ func (m *memoryRepository) FindLocalActorIDByAPID(ctx context.Context, apID stri
 
 func (m *memoryRepository) FindActorAPIDByID(ctx context.Context, actorID string) (string, error) {
 	return m.actorAPID, nil
+}
+
+func (m *memoryRepository) IsDomainBlocked(ctx context.Context, domains []string) (bool, error) {
+	if m.blockedErr != nil {
+		return false, m.blockedErr
+	}
+	for _, domain := range domains {
+		if _, ok := m.blockedDomains[domain]; ok {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (m *memoryRepository) IsProjectActor(ctx context.Context, actorID string) (bool, error) {
@@ -833,6 +847,25 @@ func TestServiceReceiveRejectsBlockedActorDomainBeforeVerification(t *testing.T)
 		ActorAPID: "https://blocked.example/users/alice",
 	}}
 	service := NewService(repo, verifier, WithBlockedDomains([]string{"example"}))
+	body := []byte(`{"id":"https://blocked.example/activities/1","type":"Create","actor":"https://blocked.example/users/alice"}`)
+
+	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/users/bob", body)
+
+	require.ErrorIs(t, err, ErrBlockedDomain)
+	assert.Zero(t, verifier.calls)
+	assert.Nil(t, repo.stored)
+}
+
+func TestServiceReceiveRejectsStoredBlockedActorDomainBeforeVerification(t *testing.T) {
+	repo := &memoryRepository{
+		targetActorID:  "target-actor",
+		blockedDomains: map[string]struct{}{"example": {}},
+	}
+	verifier := &countingVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-actor",
+		ActorAPID: "https://blocked.example/users/alice",
+	}}
+	service := NewService(repo, verifier)
 	body := []byte(`{"id":"https://blocked.example/activities/1","type":"Create","actor":"https://blocked.example/users/alice"}`)
 
 	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/users/bob", body)
