@@ -16,6 +16,8 @@ type serviceRepo struct {
 	inboxes           []string
 	ticketInboxes     []string
 	projectDeliveries []ProjectDelivery
+	summary           *ProjectDeliverySummary
+	listOptions       ProjectDeliveryListOptions
 	projectID         string
 	userID            string
 	ticketID          string
@@ -54,13 +56,26 @@ func (r *serviceRepo) MarkFailed(ctx context.Context, deliveryID string, message
 	return nil
 }
 
-func (r *serviceRepo) ProjectDeliveries(ctx context.Context, projectID string, userID string) ([]ProjectDelivery, error) {
+func (r *serviceRepo) ProjectDeliveries(ctx context.Context, projectID string, userID string, options ProjectDeliveryListOptions) ([]ProjectDelivery, error) {
 	if r.err != nil {
 		return nil, r.err
 	}
 	r.projectID = projectID
 	r.userID = userID
+	r.listOptions = options
 	return r.projectDeliveries, nil
+}
+
+func (r *serviceRepo) ProjectDeliverySummary(ctx context.Context, projectID string, userID string) (*ProjectDeliverySummary, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	r.projectID = projectID
+	r.userID = userID
+	if r.summary != nil {
+		return r.summary, nil
+	}
+	return &ProjectDeliverySummary{}, nil
 }
 
 func (r *serviceRepo) RetryProjectDelivery(ctx context.Context, projectID string, userID string, deliveryID string) (*Delivery, error) {
@@ -177,6 +192,7 @@ func TestServiceListProjectDeliveriesUsesProjectAndUserScope(t *testing.T) {
 				State:          StatePending,
 				Attempts:       1,
 				MaxAttempts:    10,
+				CanRetry:       false,
 			},
 		},
 	}
@@ -189,6 +205,46 @@ func TestServiceListProjectDeliveriesUsesProjectAndUserScope(t *testing.T) {
 	assert.Equal(t, "project-1", repo.projectID)
 	assert.Equal(t, "user-1", repo.userID)
 	assert.Equal(t, "https://local.example/activities/1", deliveries[0].ActivityAPID)
+	assert.Equal(t, DefaultProjectDeliveryListLimit, repo.listOptions.Limit)
+}
+
+func TestServiceListProjectDeliveriesUsesFilters(t *testing.T) {
+	repo := &serviceRepo{}
+	service := NewService(repo, &serviceQueue{})
+
+	_, err := service.ListProjectDeliveriesWithOptions(context.Background(), "project-1", "user-1", ProjectDeliveryListOptions{
+		State: StateDead,
+		Limit: 25,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, StateDead, repo.listOptions.State)
+	assert.Equal(t, 25, repo.listOptions.Limit)
+}
+
+func TestServiceListProjectDeliveriesRejectsInvalidFilters(t *testing.T) {
+	repo := &serviceRepo{}
+	service := NewService(repo, &serviceQueue{})
+
+	_, err := service.ListProjectDeliveriesWithOptions(context.Background(), "project-1", "user-1", ProjectDeliveryListOptions{
+		State: "lost",
+	})
+
+	require.ErrorIs(t, err, ErrInvalidDeliveryFilter)
+}
+
+func TestServiceGetProjectDeliverySummary(t *testing.T) {
+	repo := &serviceRepo{summary: &ProjectDeliverySummary{Total: 3, Failed: 1, Dead: 1, Retryable: 2, CanRetry: true}}
+	service := NewService(repo, &serviceQueue{})
+
+	summary, err := service.GetProjectDeliverySummary(context.Background(), "project-1", "user-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, "project-1", repo.projectID)
+	assert.Equal(t, "user-1", repo.userID)
+	assert.Equal(t, 3, summary.Total)
+	assert.Equal(t, 2, summary.Retryable)
+	assert.True(t, summary.CanRetry)
 }
 
 func TestServiceRetryProjectDeliveryResetsAndQueuesTask(t *testing.T) {

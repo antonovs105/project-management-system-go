@@ -3,6 +3,8 @@ package delivery
 import (
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 )
@@ -17,22 +19,45 @@ func NewHandler(service *Service) *Handler {
 
 func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.GET("/projects/:projectID/deliveries", h.ListProjectDeliveries)
+	api.GET("/projects/:projectID/deliveries/summary", h.GetProjectDeliverySummary)
 	api.POST("/projects/:projectID/deliveries/:deliveryID/retry", h.RetryProjectDelivery)
 }
 
 func (h *Handler) ListProjectDeliveries(c echo.Context) error {
 	projectID := c.Param("projectID")
 	userID := c.Get("userID").(string)
+	options, err := projectDeliveryListOptions(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
 
-	deliveries, err := h.service.ListProjectDeliveries(c.Request().Context(), projectID, userID)
+	deliveries, err := h.service.ListProjectDeliveriesWithOptions(c.Request().Context(), projectID, userID, options)
 	if err != nil {
 		if errors.Is(err, ErrProjectAccessDenied) {
 			return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		}
+		if errors.Is(err, ErrInvalidDeliveryFilter) {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to list project deliveries"})
 	}
 
 	return c.JSON(http.StatusOK, deliveries)
+}
+
+func (h *Handler) GetProjectDeliverySummary(c echo.Context) error {
+	projectID := c.Param("projectID")
+	userID := c.Get("userID").(string)
+
+	summary, err := h.service.GetProjectDeliverySummary(c.Request().Context(), projectID, userID)
+	if err != nil {
+		if errors.Is(err, ErrProjectAccessDenied) {
+			return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to get project delivery summary"})
+	}
+
+	return c.JSON(http.StatusOK, summary)
 }
 
 func (h *Handler) RetryProjectDelivery(c echo.Context) error {
@@ -55,4 +80,21 @@ func (h *Handler) RetryProjectDelivery(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusAccepted, delivery)
+}
+
+func projectDeliveryListOptions(c echo.Context) (ProjectDeliveryListOptions, error) {
+	options := ProjectDeliveryListOptions{
+		State: strings.TrimSpace(c.QueryParam("state")),
+	}
+	if rawLimit := strings.TrimSpace(c.QueryParam("limit")); rawLimit != "" {
+		limit, err := strconv.Atoi(rawLimit)
+		if err != nil {
+			return ProjectDeliveryListOptions{}, ErrInvalidDeliveryFilter
+		}
+		if limit <= 0 {
+			return ProjectDeliveryListOptions{}, ErrInvalidDeliveryFilter
+		}
+		options.Limit = limit
+	}
+	return NormalizeProjectDeliveryListOptions(options)
 }

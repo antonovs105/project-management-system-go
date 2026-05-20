@@ -23,18 +23,21 @@ func TestHandlerListsProjectDeliveries(t *testing.T) {
 				State:          StateFailed,
 				Attempts:       2,
 				MaxAttempts:    10,
+				CanRetry:       true,
 			},
 		},
 	}
 	e := newDeliveryHandlerEcho(repo, "user-1")
 
-	req := httptest.NewRequest(http.MethodGet, "/api/projects/project-1/deliveries", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/project-1/deliveries?state=failed&limit=25", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "project-1", repo.projectID)
 	assert.Equal(t, "user-1", repo.userID)
+	assert.Equal(t, StateFailed, repo.listOptions.State)
+	assert.Equal(t, 25, repo.listOptions.Limit)
 
 	var response []ProjectDelivery
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
@@ -42,6 +45,70 @@ func TestHandlerListsProjectDeliveries(t *testing.T) {
 	assert.Equal(t, "delivery-1", response[0].ID)
 	assert.Equal(t, "https://local.example/activities/1", response[0].ActivityAPID)
 	assert.Equal(t, StateFailed, response[0].State)
+	assert.True(t, response[0].CanRetry)
+}
+
+func TestHandlerRejectsInvalidProjectDeliveryFilters(t *testing.T) {
+	e := newDeliveryHandlerEcho(&serviceRepo{}, "user-1")
+
+	for _, path := range []string{
+		"/api/projects/project-1/deliveries?state=lost",
+		"/api/projects/project-1/deliveries?limit=0",
+		"/api/projects/project-1/deliveries?limit=nope",
+	} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.JSONEq(t, `{"error":"invalid delivery filter"}`, rec.Body.String())
+		})
+	}
+}
+
+func TestHandlerReturnsProjectDeliverySummary(t *testing.T) {
+	repo := &serviceRepo{summary: &ProjectDeliverySummary{
+		Total:      5,
+		Pending:    1,
+		Processing: 1,
+		Delivered:  1,
+		Failed:     1,
+		Dead:       1,
+		Retryable:  2,
+		CanRetry:   true,
+	}}
+	e := newDeliveryHandlerEcho(repo, "owner-1")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/project-1/deliveries/summary", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "project-1", repo.projectID)
+	assert.Equal(t, "owner-1", repo.userID)
+	assert.JSONEq(t, `{
+		"total":5,
+		"pending":1,
+		"processing":1,
+		"delivered":1,
+		"failed":1,
+		"dead":1,
+		"retryable":2,
+		"can_retry":true
+	}`, rec.Body.String())
+}
+
+func TestHandlerRejectsProjectDeliverySummaryAccessDenied(t *testing.T) {
+	repo := &serviceRepo{err: ErrProjectAccessDenied}
+	e := newDeliveryHandlerEcho(repo, "outsider")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/project-1/deliveries/summary", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	assert.JSONEq(t, `{"error":"project not found or access denied"}`, rec.Body.String())
 }
 
 func TestHandlerRejectsProjectDeliveryAccessDenied(t *testing.T) {

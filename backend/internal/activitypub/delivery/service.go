@@ -28,7 +28,19 @@ func (s *Service) Enqueue(ctx context.Context, activityID string, targetInboxURL
 }
 
 func (s *Service) ListProjectDeliveries(ctx context.Context, projectID string, userID string) ([]ProjectDelivery, error) {
-	return s.repo.ProjectDeliveries(ctx, projectID, userID)
+	return s.ListProjectDeliveriesWithOptions(ctx, projectID, userID, ProjectDeliveryListOptions{})
+}
+
+func (s *Service) ListProjectDeliveriesWithOptions(ctx context.Context, projectID string, userID string, options ProjectDeliveryListOptions) ([]ProjectDelivery, error) {
+	options, err := NormalizeProjectDeliveryListOptions(options)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.ProjectDeliveries(ctx, projectID, userID, options)
+}
+
+func (s *Service) GetProjectDeliverySummary(ctx context.Context, projectID string, userID string) (*ProjectDeliverySummary, error) {
+	return s.repo.ProjectDeliverySummary(ctx, projectID, userID)
 }
 
 func (s *Service) RetryProjectDelivery(ctx context.Context, projectID string, userID string, deliveryID string) (*Delivery, error) {

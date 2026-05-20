@@ -18,7 +18,8 @@ type Repository interface {
 
 type RecipientRepository interface {
 	Repository
-	ProjectDeliveries(ctx context.Context, projectID string, userID string) ([]ProjectDelivery, error)
+	ProjectDeliveries(ctx context.Context, projectID string, userID string, options ProjectDeliveryListOptions) ([]ProjectDelivery, error)
+	ProjectDeliverySummary(ctx context.Context, projectID string, userID string) (*ProjectDeliverySummary, error)
 	RetryProjectDelivery(ctx context.Context, projectID string, userID string, deliveryID string) (*Delivery, error)
 	RemoteProjectFollowerInboxes(ctx context.Context, projectID string) ([]string, error)
 	RemoteProjectTicketRecipientInboxes(ctx context.Context, projectID string, ticketID string) ([]string, error)
@@ -150,23 +151,20 @@ func (r *PgRepository) MarkFailed(ctx context.Context, deliveryID string, messag
 	return err
 }
 
-func (r *PgRepository) ProjectDeliveries(ctx context.Context, projectID string, userID string) ([]ProjectDelivery, error) {
-	var hasAccess bool
-	if err := r.db.GetContext(ctx, &hasAccess, `
-		SELECT EXISTS(
-			SELECT 1
-			FROM project_members
-			WHERE project_id = $1 AND user_id = $2
-		)
-	`, projectID, userID); err != nil {
+func (r *PgRepository) ProjectDeliveries(ctx context.Context, projectID string, userID string, options ProjectDeliveryListOptions) ([]ProjectDelivery, error) {
+	options, err := NormalizeProjectDeliveryListOptions(options)
+	if err != nil {
 		return nil, err
 	}
-	if !hasAccess {
-		return nil, ErrProjectAccessDenied
+
+	role, err := r.projectMemberRole(ctx, r.db, projectID, userID)
+	if err != nil {
+		return nil, err
 	}
+	canRetry := canRetryProjectDeliveries(role)
 
 	var deliveries []ProjectDelivery
-	err := r.db.SelectContext(ctx, &deliveries, `
+	err = r.db.SelectContext(ctx, &deliveries, `
 		WITH project_scope AS (
 			SELECT project.id, actor.ap_id
 			FROM projects project
@@ -186,12 +184,13 @@ func (r *PgRepository) ProjectDeliveries(ctx context.Context, projectID string, 
 			d.next_attempt_at,
 			d.last_error,
 			d.delivered_at,
+			($3 AND d.state IN ('failed', 'dead')) AS can_retry,
 			d.created_at,
 			d.updated_at
 		FROM activity_deliveries d
 		JOIN ap_activities a ON a.id = d.activity_id
 		JOIN project_scope project ON true
-		WHERE
+		WHERE (
 			a.object_ap_id = project.ap_id
 			OR a.target_ap_id = project.ap_id
 			OR EXISTS (
@@ -228,10 +227,87 @@ func (r *PgRepository) ProjectDeliveries(ctx context.Context, projectID string, 
 					AND target.local_ref_table = 'comments'
 					AND ticket.project_id = project.id
 			)
+		)
+		AND ($2 = '' OR d.state = $2)
 		ORDER BY d.updated_at DESC, d.created_at DESC
-		LIMIT 100
-	`, projectID)
+		LIMIT $4
+	`, projectID, options.State, canRetry, options.Limit)
 	return deliveries, err
+}
+
+func (r *PgRepository) ProjectDeliverySummary(ctx context.Context, projectID string, userID string) (*ProjectDeliverySummary, error) {
+	role, err := r.projectMemberRole(ctx, r.db, projectID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	var summary ProjectDeliverySummary
+	err = r.db.GetContext(ctx, &summary, `
+		WITH project_scope AS (
+			SELECT project.id, actor.ap_id
+			FROM projects project
+			JOIN actors actor ON actor.id = project.id
+			WHERE project.id = $1
+		),
+		scoped_deliveries AS (
+			SELECT d.state
+			FROM activity_deliveries d
+			JOIN ap_activities a ON a.id = d.activity_id
+			JOIN project_scope project ON true
+			WHERE (
+				a.object_ap_id = project.ap_id
+				OR a.target_ap_id = project.ap_id
+				OR EXISTS (
+					SELECT 1
+					FROM ap_objects object
+					JOIN tickets ticket ON ticket.id = object.local_ref_id
+					WHERE object.ap_id = a.object_ap_id
+						AND object.local_ref_table = 'tickets'
+						AND ticket.project_id = project.id
+				)
+				OR EXISTS (
+					SELECT 1
+					FROM ap_objects target
+					JOIN tickets ticket ON ticket.id = target.local_ref_id
+					WHERE target.ap_id = a.target_ap_id
+						AND target.local_ref_table = 'tickets'
+						AND ticket.project_id = project.id
+				)
+				OR EXISTS (
+					SELECT 1
+					FROM ap_objects object
+					JOIN comments comment ON comment.id = object.local_ref_id
+					JOIN tickets ticket ON ticket.id = comment.ticket_id
+					WHERE object.ap_id = a.object_ap_id
+						AND object.local_ref_table = 'comments'
+						AND ticket.project_id = project.id
+				)
+				OR EXISTS (
+					SELECT 1
+					FROM ap_objects target
+					JOIN comments comment ON comment.id = target.local_ref_id
+					JOIN tickets ticket ON ticket.id = comment.ticket_id
+					WHERE target.ap_id = a.target_ap_id
+						AND target.local_ref_table = 'comments'
+						AND ticket.project_id = project.id
+				)
+			)
+		)
+		SELECT
+			COUNT(*)::int AS total,
+			COUNT(*) FILTER (WHERE state = 'pending')::int AS pending,
+			COUNT(*) FILTER (WHERE state = 'processing')::int AS processing,
+			COUNT(*) FILTER (WHERE state = 'delivered')::int AS delivered,
+			COUNT(*) FILTER (WHERE state = 'failed')::int AS failed,
+			COUNT(*) FILTER (WHERE state = 'dead')::int AS dead,
+			COUNT(*) FILTER (WHERE state IN ('failed', 'dead'))::int AS retryable,
+			$2 AS can_retry
+		FROM scoped_deliveries
+	`, projectID, canRetryProjectDeliveries(role))
+	if err != nil {
+		return nil, err
+	}
+	return &summary, nil
 }
 
 func (r *PgRepository) RetryProjectDelivery(ctx context.Context, projectID string, userID string, deliveryID string) (*Delivery, error) {
@@ -241,19 +317,11 @@ func (r *PgRepository) RetryProjectDelivery(ctx context.Context, projectID strin
 	}
 	defer tx.Rollback()
 
-	var role string
-	err = tx.GetContext(ctx, &role, `
-		SELECT role
-		FROM project_members
-		WHERE project_id = $1 AND user_id = $2
-	`, projectID, userID)
+	role, err := r.projectMemberRole(ctx, tx, projectID, userID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrProjectAccessDenied
-		}
 		return nil, err
 	}
-	if role != "owner" && role != "manager" {
+	if !canRetryProjectDeliveries(role) {
 		return nil, ErrDeliveryRetryDenied
 	}
 
@@ -476,4 +544,24 @@ func deliverySelect() string {
 		JOIN ap_activities a ON a.id = d.activity_id
 		JOIN actors actor ON actor.id = d.actor_id
 	`
+}
+
+func (r *PgRepository) projectMemberRole(ctx context.Context, q sqlx.QueryerContext, projectID string, userID string) (string, error) {
+	var role string
+	err := sqlx.GetContext(ctx, q, &role, `
+		SELECT role
+		FROM project_members
+		WHERE project_id = $1 AND user_id = $2
+	`, projectID, userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrProjectAccessDenied
+		}
+		return "", err
+	}
+	return role, nil
+}
+
+func canRetryProjectDeliveries(role string) bool {
+	return role == "owner" || role == "manager"
 }

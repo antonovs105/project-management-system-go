@@ -13,9 +13,11 @@ const (
 	StateFailed     = "failed"
 	StateDead       = "dead"
 
-	QueueFederation = "federation"
-	TaskDeliver     = "activitypub:deliver"
-	DefaultMaxRetry = 10
+	QueueFederation                 = "federation"
+	TaskDeliver                     = "activitypub:deliver"
+	DefaultMaxRetry                 = 10
+	DefaultProjectDeliveryListLimit = 100
+	MaxProjectDeliveryListLimit     = 500
 )
 
 var (
@@ -23,6 +25,7 @@ var (
 	ErrDeliveryDone             = errors.New("activity delivery already delivered")
 	ErrDeliveryExhausted        = errors.New("activity delivery attempts exhausted")
 	ErrDeliveryConflict         = errors.New("activity delivery conflicts with existing row")
+	ErrInvalidDeliveryFilter    = errors.New("invalid delivery filter")
 	ErrDeliveryRetryDenied      = errors.New("insufficient permissions to retry delivery")
 	ErrDeliveryRetryUnavailable = errors.New("activity delivery cannot be retried")
 	ErrProjectAccessDenied      = errors.New("project not found or access denied")
@@ -59,10 +62,52 @@ type ProjectDelivery struct {
 	NextAttemptAt  *time.Time `db:"next_attempt_at" json:"next_attempt_at,omitempty"`
 	LastError      *string    `db:"last_error" json:"last_error,omitempty"`
 	DeliveredAt    *time.Time `db:"delivered_at" json:"delivered_at,omitempty"`
+	CanRetry       bool       `db:"can_retry" json:"can_retry"`
 	CreatedAt      time.Time  `db:"created_at" json:"created_at"`
 	UpdatedAt      time.Time  `db:"updated_at" json:"updated_at"`
 }
 
+type ProjectDeliveryListOptions struct {
+	State string
+	Limit int
+}
+
+type ProjectDeliverySummary struct {
+	Total      int  `db:"total" json:"total"`
+	Pending    int  `db:"pending" json:"pending"`
+	Processing int  `db:"processing" json:"processing"`
+	Delivered  int  `db:"delivered" json:"delivered"`
+	Failed     int  `db:"failed" json:"failed"`
+	Dead       int  `db:"dead" json:"dead"`
+	Retryable  int  `db:"retryable" json:"retryable"`
+	CanRetry   bool `db:"can_retry" json:"can_retry"`
+}
+
 type TaskPayload struct {
 	DeliveryID string `json:"delivery_id"`
+}
+
+func NormalizeProjectDeliveryListOptions(options ProjectDeliveryListOptions) (ProjectDeliveryListOptions, error) {
+	if options.State != "" && !IsDeliveryState(options.State) {
+		return ProjectDeliveryListOptions{}, ErrInvalidDeliveryFilter
+	}
+	if options.Limit == 0 {
+		options.Limit = DefaultProjectDeliveryListLimit
+	}
+	if options.Limit < 0 {
+		return ProjectDeliveryListOptions{}, ErrInvalidDeliveryFilter
+	}
+	if options.Limit > MaxProjectDeliveryListLimit {
+		options.Limit = MaxProjectDeliveryListLimit
+	}
+	return options, nil
+}
+
+func IsDeliveryState(state string) bool {
+	switch state {
+	case StatePending, StateProcessing, StateDelivered, StateFailed, StateDead:
+		return true
+	default:
+		return false
+	}
 }

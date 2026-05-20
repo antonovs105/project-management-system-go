@@ -681,8 +681,39 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		_, err = repo.StartAttempt(ctx, finalDelivery.ID)
 		require.ErrorIs(t, err, delivery.ErrDeliveryExhausted)
 
+		viewer, err := userService.RegisterUser(ctx, "retry-viewer", "retry-viewer@example.test", "password123")
+		require.NoError(t, err)
+		_, err = db.ExecContext(ctx, `
+			INSERT INTO project_members (user_id, project_id, role)
+			VALUES ($1, $2, 'viewer')
+		`, viewer.ID, project.ID)
+		require.NoError(t, err)
+
 		retryQueue := &recordingDeliveryQueue{}
 		retryService := delivery.NewService(delivery.NewRecipientRepository(db), retryQueue)
+		summary, err := retryService.GetProjectDeliverySummary(ctx, project.ID, owner.ID)
+		require.NoError(t, err)
+		assert.True(t, summary.CanRetry)
+		assert.GreaterOrEqual(t, summary.Dead, 1)
+		assert.GreaterOrEqual(t, summary.Retryable, 1)
+
+		deadDeliveries, err := retryService.ListProjectDeliveriesWithOptions(ctx, project.ID, owner.ID, delivery.ProjectDeliveryListOptions{
+			State: delivery.StateDead,
+			Limit: 1,
+		})
+		require.NoError(t, err)
+		require.Len(t, deadDeliveries, 1)
+		assert.Equal(t, finalDelivery.ID, deadDeliveries[0].ID)
+		assert.True(t, deadDeliveries[0].CanRetry)
+
+		viewerDeadDeliveries, err := retryService.ListProjectDeliveriesWithOptions(ctx, project.ID, viewer.ID, delivery.ProjectDeliveryListOptions{
+			State: delivery.StateDead,
+			Limit: 1,
+		})
+		require.NoError(t, err)
+		require.Len(t, viewerDeadDeliveries, 1)
+		assert.False(t, viewerDeadDeliveries[0].CanRetry)
+
 		requeued, err := retryService.RetryProjectDelivery(ctx, project.ID, owner.ID, finalDelivery.ID)
 		require.NoError(t, err)
 		assert.Equal(t, delivery.StatePending, requeued.State)
@@ -692,14 +723,6 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		assert.Nil(t, requeued.LastError)
 		assert.Equal(t, finalDelivery.ID, retryQueue.deliveryID)
 		assert.Equal(t, delivery.DefaultMaxRetry, retryQueue.maxAttempts)
-
-		viewer, err := userService.RegisterUser(ctx, "retry-viewer", "retry-viewer@example.test", "password123")
-		require.NoError(t, err)
-		_, err = db.ExecContext(ctx, `
-			INSERT INTO project_members (user_id, project_id, role)
-			VALUES ($1, $2, 'viewer')
-		`, viewer.ID, project.ID)
-		require.NoError(t, err)
 
 		_, err = retryService.RetryProjectDelivery(ctx, project.ID, viewer.ID, finalDelivery.ID)
 		require.ErrorIs(t, err, delivery.ErrDeliveryRetryDenied)
