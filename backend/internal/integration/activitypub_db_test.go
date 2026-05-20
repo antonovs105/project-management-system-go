@@ -454,6 +454,97 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	requireProjectActorEndpointTombstone(t, db, cfg, project.ID, "Group")
 }
 
+func TestActivityPubReadAuthorization(t *testing.T) {
+	db := openIntegrationDB(t)
+	resetIntegrationDB(t, db)
+
+	ctx := context.Background()
+	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+	jwtSecret := []byte("integration-secret")
+
+	userService := user.NewService(user.NewRepository(db, cfg), jwtSecret, cfg)
+	projectService := project.NewService(project.NewRepository(db, cfg), cfg)
+	ticketService := ticket.NewService(ticket.NewRepository(db, cfg), projectService, cfg)
+	commentService := comment.NewService(comment.NewRepository(db, cfg), ticketService, cfg)
+	deliveryService := delivery.NewService(delivery.NewRecipientRepository(db), delivery.NoopQueue{})
+	projectService.SetDelivery(deliveryService)
+	ticketService.SetDelivery(deliveryService)
+	commentService.SetDelivery(deliveryService)
+
+	owner, err := userService.RegisterUser(ctx, "auth-owner", "auth-owner@example.test", "password123")
+	require.NoError(t, err)
+	outsider, err := userService.RegisterUser(ctx, "auth-outsider", "auth-outsider@example.test", "password123")
+	require.NoError(t, err)
+	createdProject, err := projectService.CreateProject(ctx, "Protected AP Board", "", owner.ID)
+	require.NoError(t, err)
+	createdTicket, err := ticketService.CreateTicket(ctx, ticket.CreateTicketRequest{
+		Title:       "Protect ActivityPub reads",
+		Description: "ActivityPub object reads should respect project access.",
+		Priority:    "medium",
+		Type:        "task",
+	}, createdProject.ID, owner.ID)
+	require.NoError(t, err)
+	createdComment, err := commentService.CreateComment(ctx, createdTicket.ID, owner.ID, "Only project participants should read this.")
+	require.NoError(t, err)
+
+	ticketCreateActivityAPID := requireActivityAPIDForObject(t, db, "Create", createdTicket.APID)
+	ticketCreateActivityID := strings.TrimPrefix(ticketCreateActivityAPID, cfg.BaseURL+"/activities/")
+	ownerToken, err := userService.Login(ctx, owner.Email, "password123")
+	require.NoError(t, err)
+	outsiderToken, err := userService.Login(ctx, outsider.Email, "password123")
+	require.NoError(t, err)
+
+	remoteFollower, remoteFollowerPrivateKey := createRemoteActor(t, ctx, db, "auth-follower")
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO actor_follows (follower_actor_id, followed_actor_id, state)
+		VALUES ($1, $2, 'accepted')
+	`, remoteFollower.ID, createdProject.ID)
+	require.NoError(t, err)
+	remoteStranger, remoteStrangerPrivateKey := createRemoteActor(t, ctx, db, "auth-stranger")
+
+	e := echo.New()
+	activitypub.NewHandlerWithAuthorizer(
+		db,
+		cfg,
+		activitypub.NewAccessAuthorizer(
+			db,
+			jwtSecret,
+			integrationSignatureActorVerifier{service: httpsig.NewService(httpsig.NewRepository(db))},
+		),
+	).RegisterRoutes(e)
+
+	for _, path := range []string{
+		"/users/" + owner.Username,
+		"/projects/" + createdProject.ID,
+	} {
+		requireActivityPubReadStatus(t, e, path, "", nil, http.StatusOK)
+	}
+
+	for _, path := range []string{
+		"/tickets/" + createdTicket.ID,
+		"/comments/" + createdComment.ID,
+		"/activities/" + ticketCreateActivityID,
+		"/projects/" + createdProject.ID + "/outbox?page=true",
+		"/projects/" + createdProject.ID + "/tickets?page=true",
+	} {
+		requireActivityPubReadStatus(t, e, path, "", nil, http.StatusUnauthorized)
+		requireActivityPubReadStatus(t, e, path, "Bearer "+ownerToken, nil, http.StatusOK)
+		requireActivityPubReadStatus(t, e, path, "Bearer "+outsiderToken, nil, http.StatusForbidden)
+	}
+
+	for _, path := range []string{
+		"/tickets/" + createdTicket.ID,
+		"/projects/" + createdProject.ID + "/tickets?page=true",
+	} {
+		requireActivityPubReadStatus(t, e, path, "", func(req *http.Request) {
+			signRemoteInboxRequest(t, ctx, req, remoteFollower, remoteFollowerPrivateKey, nil)
+		}, http.StatusOK)
+		requireActivityPubReadStatus(t, e, path, "", func(req *http.Request) {
+			signRemoteInboxRequest(t, ctx, req, remoteStranger, remoteStrangerPrivateKey, nil)
+		}, http.StatusForbidden)
+	}
+}
+
 func TestActivityPubFoundationConstraints(t *testing.T) {
 	db := openIntegrationDB(t)
 	resetIntegrationDB(t, db)
@@ -1737,6 +1828,37 @@ func signRequestWithKey(t *testing.T, ctx context.Context, req *http.Request, ac
 
 	signer := httpsig.NewService(singleKeyRepo{key: key})
 	require.NoError(t, signer.SignRequest(ctx, actorID, req, body))
+}
+
+func requireActivityPubReadStatus(t *testing.T, e *echo.Echo, path, authorization string, prepare func(*http.Request), expectedStatus int) {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	if authorization != "" {
+		req.Header.Set(echo.HeaderAuthorization, authorization)
+	}
+	if prepare != nil {
+		prepare(req)
+	}
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, expectedStatus, rec.Code, rec.Body.String())
+	if expectedStatus == http.StatusOK {
+		require.Contains(t, rec.Header().Get(echo.HeaderContentType), activitypub.ActivityJSONMediaType)
+	}
+}
+
+type integrationSignatureActorVerifier struct {
+	service *httpsig.Service
+}
+
+func (v integrationSignatureActorVerifier) VerifyActorID(ctx context.Context, req *http.Request) (string, error) {
+	verified, err := v.service.VerifyRequest(ctx, req, nil)
+	if err != nil {
+		return "", err
+	}
+	return verified.ActorID, nil
 }
 
 type singleKeyRepo struct {
