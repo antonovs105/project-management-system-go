@@ -16,10 +16,16 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o main ./cmd/api/main.go
 # Final stage
 FROM alpine:latest
 
+RUN apk add --no-cache ca-certificates \
+    && addgroup -S app \
+    && adduser -S -G app app
+
 WORKDIR /app
 
 # Copy the binary from the builder stage
 COPY --from=builder /app/main .
+
+USER app
 
 # Expose port
 EXPOSE 8080

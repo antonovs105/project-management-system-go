@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/c2s"
@@ -53,11 +57,73 @@ func (v signatureActorVerifier) VerifyActorID(ctx context.Context, req *http.Req
 	return verified.ActorID, nil
 }
 
+func normalizedEnv(name, fallback string) string {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func splitCSVEnv(name string) []string {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		if value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
+func validateRuntimeConfig(production bool, jwtSecret, publicBaseURL, localDomain string) error {
+	parsedBaseURL, err := url.Parse(strings.TrimSpace(publicBaseURL))
+	if err != nil || parsedBaseURL.Scheme == "" || parsedBaseURL.Host == "" {
+		return fmt.Errorf("PUBLIC_BASE_URL must be an absolute HTTP URL")
+	}
+	if parsedBaseURL.Scheme != "http" && parsedBaseURL.Scheme != "https" {
+		return fmt.Errorf("PUBLIC_BASE_URL must use http or https")
+	}
+	if strings.ContainsAny(localDomain, " \t\r\n/") {
+		return fmt.Errorf("LOCAL_DOMAIN must be a host name, not a URL")
+	}
+	if !production {
+		return nil
+	}
+
+	if jwtSecret == "your_secret_key_here" || len(jwtSecret) < 32 {
+		return fmt.Errorf("JWT_SECRET_KEY must be a production-grade secret")
+	}
+	if parsedBaseURL.Scheme != "https" {
+		return fmt.Errorf("PUBLIC_BASE_URL must use https in production")
+	}
+	if isLocalHost(parsedBaseURL.Hostname()) || isLocalHost(localDomain) {
+		return fmt.Errorf("PUBLIC_BASE_URL and LOCAL_DOMAIN must not use localhost in production")
+	}
+	return nil
+}
+
+func isLocalHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+		host = parsedHost
+	}
+	host = strings.ToLower(strings.Trim(host, "[]"))
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
 func main() {
 	// Load config
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found")
 	}
+	appEnv := normalizedEnv("APP_ENV", "development")
+	production := appEnv == "production"
 	dbSource := os.Getenv("DB_SOURCE")
 	if dbSource == "" {
 		log.Fatal("DB_SOURCE environment variable is not set")
@@ -66,7 +132,18 @@ func main() {
 	if jwtSecret == "" {
 		log.Fatal("JWT_SECRET_KEY environment variable is not set")
 	}
-	apConfig := activitypub.NewConfig(os.Getenv("PUBLIC_BASE_URL"), os.Getenv("LOCAL_DOMAIN"))
+	publicBaseURL := os.Getenv("PUBLIC_BASE_URL")
+	if publicBaseURL == "" {
+		log.Fatal("PUBLIC_BASE_URL environment variable is not set")
+	}
+	localDomain := os.Getenv("LOCAL_DOMAIN")
+	if localDomain == "" {
+		log.Fatal("LOCAL_DOMAIN environment variable is not set")
+	}
+	if err := validateRuntimeConfig(production, jwtSecret, publicBaseURL, localDomain); err != nil {
+		log.Fatal(err)
+	}
+	apConfig := activitypub.NewConfig(publicBaseURL, localDomain)
 
 	// Connecting DB
 	db, err := sqlx.Connect("postgres", dbSource)
@@ -139,6 +216,9 @@ func main() {
 
 		log.Printf("ActivityPub delivery worker started with Redis at %s", redisAddr)
 	} else {
+		if production {
+			log.Fatal("REDIS_ADDR environment variable is required in production")
+		}
 		log.Println("REDIS_ADDR is not set; ActivityPub delivery worker disabled")
 	}
 	deliveryService := delivery.NewService(deliveryRepo, deliveryQueue)
@@ -180,8 +260,15 @@ func main() {
 	e.Use(middleware.Recover())
 
 	// CORS
+	corsOrigins := splitCSVEnv("CORS_ALLOWED_ORIGINS")
+	if len(corsOrigins) == 0 {
+		if production {
+			log.Fatal("CORS_ALLOWED_ORIGINS environment variable is required in production")
+		}
+		corsOrigins = []string{"http://localhost:5173"}
+	}
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins: []string{"http://localhost:5173"},
+		AllowOrigins: corsOrigins,
 		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
 	}))
 
