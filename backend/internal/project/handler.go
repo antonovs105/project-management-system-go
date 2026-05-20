@@ -39,7 +39,7 @@ type createProjectRequest struct {
 func (h *Handler) Create(c echo.Context) error {
 	var req createProjectRequest
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
 
 	// Taking userID from context
@@ -75,7 +75,7 @@ func (h *Handler) List(c echo.Context) error {
 	projects, err := h.service.ListUserProjects(c.Request().Context(), userID)
 	if err != nil {
 		log.Printf("Error listing user projects: %v", err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to retrieve projects"})
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to retrieve projects"})
 	}
 
 	return c.JSON(http.StatusOK, projects)
@@ -88,7 +88,7 @@ func (h *Handler) Update(c echo.Context) error {
 	// parsing request body
 	var req UpdateProjectRequest
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
 
 	userID := c.Get("userID").(string)
@@ -130,7 +130,7 @@ func (h *Handler) AddMember(c echo.Context) error {
 	// parse request
 	var req addMemberRequest
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
 
 	// call service logic

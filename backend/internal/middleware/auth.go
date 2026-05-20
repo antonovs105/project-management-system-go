@@ -18,13 +18,13 @@ func JWTMiddleware(secret []byte) echo.MiddlewareFunc {
 			// taking jwt
 			authHeader := c.Request().Header.Get("Authorization")
 			if authHeader == "" {
-				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Missing authorization header"})
+				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "missing authorization header"})
 			}
 
 			// Expected format "Bearer <token>"
 			headerParts := strings.Split(authHeader, " ")
 			if len(headerParts) != 2 || headerParts[0] != "Bearer" {
-				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Invalid authorization header format"})
+				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid authorization header format"})
 			}
 
 			tokenString := headerParts[1]
@@ -39,7 +39,7 @@ func JWTMiddleware(secret []byte) echo.MiddlewareFunc {
 
 			if err != nil {
 				log.Printf("Error parsing token: %v", err)
-				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Invalid token"})
+				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid token"})
 			}
 
 			// takes data (claims) and adds it to context
@@ -47,7 +47,7 @@ func JWTMiddleware(secret []byte) echo.MiddlewareFunc {
 
 				userID, ok := claims["sub"].(string)
 				if !ok || userID == "" {
-					return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Invalid user ID in token"})
+					return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid user id in token"})
 				}
 
 				c.Set("userID", userID)
@@ -56,7 +56,7 @@ func JWTMiddleware(secret []byte) echo.MiddlewareFunc {
 				return next(c)
 			}
 
-			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Invalid token claims"})
+			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid token claims"})
 		}
 	}
 }

@@ -32,7 +32,7 @@ func (h *Handler) Create(c echo.Context) error {
 
 	var req createCommentRequest
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
 
 	comment, err := h.service.CreateComment(c.Request().Context(), ticketID, userID, req.Content)

@@ -42,7 +42,7 @@ func (h *Handler) Create(c echo.Context) error {
 
 	var req createTicketRequest
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
 
 	userID := c.Get("userID").(string)
@@ -107,7 +107,7 @@ func (h *Handler) Update(c echo.Context) error {
 
 	var req updateTicketRequest
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
 
 	serviceReq := UpdateTicketRequest{
@@ -148,7 +148,7 @@ func (h *Handler) AddLink(c echo.Context) error {
 
 	var req addLinkRequest
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
 
 	userID := c.Get("userID").(string)
