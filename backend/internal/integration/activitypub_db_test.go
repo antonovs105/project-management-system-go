@@ -487,6 +487,24 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		require.NotNil(t, unassignedRemoteTicket)
 		assert.Nil(t, unassignedRemoteTicket.AssigneeID)
 
+		deleteTicketAPID := "https://remote.example/activities/delete-project-ticket"
+		deleteTicketBody := []byte(`{"id":"` + deleteTicketAPID + `","type":"Delete","actor":"` + remoteActor.APID + `","object":"` + remoteTicketAPID + `","target":"` + project.APID + `"}`)
+		deleteTicketReq, err := http.NewRequest(http.MethodPost, project.APID+"/inbox", bytes.NewReader(deleteTicketBody))
+		require.NoError(t, err)
+		require.NoError(t, signer.SignRequest(ctx, remoteActor.ID, deleteTicketReq, deleteTicketBody))
+
+		deletedTicket, err := receiver.Receive(ctx, deleteTicketReq, project.APID, deleteTicketBody)
+		require.NoError(t, err)
+		require.Equal(t, deleteTicketAPID, deletedTicket.ActivityAPID)
+		requireActivityForObject(t, db, "Delete", remoteTicketAPID)
+		requireInboxItem(t, db, project.ID, "Delete", remoteTicketAPID)
+		requireObjectDeleted(t, db, remoteTicketAPID)
+		requireNoTicketByAPID(t, db, remoteTicketAPID)
+
+		tickets, err = ticketService.ListTicketsInProject(ctx, project.ID, owner.ID)
+		require.NoError(t, err)
+		assert.Nil(t, findTicketByAPID(tickets, remoteTicketAPID))
+
 		undoAPID := "https://remote.example/activities/undo-follow-project"
 		undoBody := []byte(`{"id":"` + undoAPID + `","type":"Undo","actor":"` + remoteActor.APID + `","object":{"id":"` + followAPID + `","type":"Follow","actor":"` + remoteActor.APID + `","object":"` + project.APID + `"}}`)
 		undoReq, err := http.NewRequest(http.MethodPost, project.APID+"/inbox", bytes.NewReader(undoBody))
@@ -632,6 +650,24 @@ func requireObjectType(t *testing.T, db *sqlx.DB, apID, expectedType string) {
 	err := db.Get(&objectType, `SELECT object_type FROM ap_objects WHERE ap_id = $1`, apID)
 	require.NoError(t, err)
 	require.Equal(t, expectedType, objectType)
+}
+
+func requireObjectDeleted(t *testing.T, db *sqlx.DB, apID string) {
+	t.Helper()
+
+	var isDeleted bool
+	err := db.Get(&isDeleted, `SELECT is_deleted FROM ap_objects WHERE ap_id = $1`, apID)
+	require.NoError(t, err)
+	require.True(t, isDeleted)
+}
+
+func requireNoTicketByAPID(t *testing.T, db *sqlx.DB, apID string) {
+	t.Helper()
+
+	var count int
+	err := db.Get(&count, `SELECT count(*) FROM tickets WHERE ap_id = $1`, apID)
+	require.NoError(t, err)
+	require.Zero(t, count)
 }
 
 func requireProjectRole(t *testing.T, db *sqlx.DB, userID, projectID, expectedRole string) {

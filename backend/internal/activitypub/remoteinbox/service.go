@@ -123,6 +123,10 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 	if err != nil {
 		return nil, err
 	}
+	isProjectDeleteTicket, err := s.isProjectDeleteTicket(ctx, targetActorID, targetAPID, activity)
+	if err != nil {
+		return nil, err
+	}
 
 	if isProjectCreateNote {
 		return s.repo.StoreInboundCreateNote(ctx, targetActorID, activity)
@@ -138,6 +142,9 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 	}
 	if isProjectRemoveTicketAssignee {
 		return s.repo.StoreInboundRemoveTicketAssignee(ctx, targetActorID, activity)
+	}
+	if isProjectDeleteTicket {
+		return s.repo.StoreInboundDeleteTicket(ctx, targetActorID, activity)
 	}
 
 	accepted, err := s.repo.StoreInboundActivity(ctx, targetActorID, activity)
@@ -159,6 +166,29 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 		}
 	}
 	return accepted, nil
+}
+
+func (s *Service) isProjectDeleteTicket(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
+	if activity.Type != "Delete" {
+		return false, nil
+	}
+	isProjectActor, err := s.repo.IsProjectActor(ctx, targetActorID)
+	if err != nil {
+		return false, err
+	}
+	if !isProjectActor {
+		return false, nil
+	}
+	if activity.ObjectAPID == nil || !isAbsoluteURI(*activity.ObjectAPID) {
+		return false, fmt.Errorf("%w: delete object must be a ticket", ErrInvalidActivity)
+	}
+	if *activity.ObjectAPID == targetAPID {
+		return false, fmt.Errorf("%w: delete object must be a ticket", ErrInvalidActivity)
+	}
+	if activity.TargetAPID != nil && *activity.TargetAPID != targetAPID {
+		return false, fmt.Errorf("%w: delete target must match inbox actor", ErrInvalidActivity)
+	}
+	return true, nil
 }
 
 func (s *Service) isProjectRemoveTicketAssignee(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {

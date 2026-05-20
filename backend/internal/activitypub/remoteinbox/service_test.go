@@ -24,6 +24,7 @@ type memoryRepository struct {
 	updatedTicket     *InboundActivity
 	assignedTicket    *InboundActivity
 	unassignedTicket  *InboundActivity
+	deletedTicket     *InboundActivity
 	storeResult       *AcceptedActivity
 	projectActor      bool
 	follow            *InboundActivity
@@ -36,6 +37,7 @@ type memoryRepository struct {
 	updateTicketErr   error
 	assignTicketErr   error
 	unassignTicketErr error
+	deleteTicketErr   error
 	followErr         error
 	undoErr           error
 }
@@ -146,6 +148,22 @@ func (m *memoryRepository) StoreInboundRemoveTicketAssignee(ctx context.Context,
 	}
 	return &AcceptedActivity{
 		ActivityID:   "unassigned-ticket-activity",
+		ActivityAPID: activity.ID,
+		ReceivedAt:   time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC),
+	}, nil
+}
+
+func (m *memoryRepository) StoreInboundDeleteTicket(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
+	if m.deleteTicketErr != nil {
+		return nil, m.deleteTicketErr
+	}
+	copy := *activity
+	m.deletedTicket = &copy
+	if m.storeResult != nil {
+		return m.storeResult, nil
+	}
+	return &AcceptedActivity{
+		ActivityID:   "deleted-ticket-activity",
 		ActivityAPID: activity.ID,
 		ReceivedAt:   time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC),
 	}, nil
@@ -473,6 +491,49 @@ func TestServiceReceiveRejectsProjectRemoveTicketAssigneeWithoutTarget(t *testin
 		ActorAPID: "https://remote.example/users/alice",
 	}})
 	body := []byte(`{"id":"https://remote.example/activities/remove-assignee-1","type":"Remove","actor":"https://remote.example/users/alice","object":"http://localhost:8080/users/bob"}`)
+
+	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
+
+	require.ErrorIs(t, err, ErrInvalidActivity)
+}
+
+func TestServiceReceiveStoresProjectDeleteTicket(t *testing.T) {
+	repo := &memoryRepository{targetActorID: "project-actor", projectActor: true}
+	service := NewService(repo, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-actor",
+		ActorAPID: "https://remote.example/users/alice",
+	}})
+	body := []byte(`{"id":"https://remote.example/activities/delete-ticket-1","type":"Delete","actor":"https://remote.example/users/alice","object":"https://remote.example/tickets/1","target":"http://localhost:8080/projects/project-1"}`)
+
+	accepted, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://remote.example/activities/delete-ticket-1", accepted.ActivityAPID)
+	require.NotNil(t, repo.deletedTicket)
+	require.NotNil(t, repo.deletedTicket.ObjectAPID)
+	require.NotNil(t, repo.deletedTicket.TargetAPID)
+	assert.Equal(t, "https://remote.example/tickets/1", *repo.deletedTicket.ObjectAPID)
+	assert.Equal(t, "http://localhost:8080/projects/project-1", *repo.deletedTicket.TargetAPID)
+}
+
+func TestServiceReceiveRejectsProjectDeleteTicketWithoutObject(t *testing.T) {
+	service := NewService(&memoryRepository{targetActorID: "project-actor", projectActor: true}, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-actor",
+		ActorAPID: "https://remote.example/users/alice",
+	}})
+	body := []byte(`{"id":"https://remote.example/activities/delete-ticket-1","type":"Delete","actor":"https://remote.example/users/alice","target":"http://localhost:8080/projects/project-1"}`)
+
+	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
+
+	require.ErrorIs(t, err, ErrInvalidActivity)
+}
+
+func TestServiceReceiveRejectsProjectDeleteTicketProjectObject(t *testing.T) {
+	service := NewService(&memoryRepository{targetActorID: "project-actor", projectActor: true}, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-actor",
+		ActorAPID: "https://remote.example/users/alice",
+	}})
+	body := []byte(`{"id":"https://remote.example/activities/delete-ticket-1","type":"Delete","actor":"https://remote.example/users/alice","object":"http://localhost:8080/projects/project-1"}`)
 
 	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
 

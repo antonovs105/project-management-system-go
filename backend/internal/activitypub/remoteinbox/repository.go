@@ -21,6 +21,7 @@ type Repository interface {
 	StoreInboundUpdateTicket(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	StoreInboundAddTicketAssignee(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	StoreInboundRemoveTicketAssignee(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
+	StoreInboundDeleteTicket(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	AcceptProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) (*FollowResponse, error)
 	UndoProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) error
 }
@@ -198,6 +199,32 @@ func (r *PgRepository) StoreInboundRemoveTicketAssignee(ctx context.Context, tar
 	}
 	if !accepted.Duplicate {
 		if err := r.deleteRemoteTicketAssigneeTx(ctx, tx, targetActorID, activity); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return accepted, nil
+}
+
+func (r *PgRepository) StoreInboundDeleteTicket(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
+	if activity.ObjectAPID == nil {
+		return nil, ErrInvalidActivity
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	accepted, err := r.storeInboundActivityTx(ctx, tx, targetActorID, activity)
+	if err != nil {
+		return nil, err
+	}
+	if !accepted.Duplicate {
+		if err := r.deleteRemoteTicketTx(ctx, tx, targetActorID, activity); err != nil {
 			return nil, err
 		}
 	}
@@ -707,6 +734,70 @@ func (r *PgRepository) deleteRemoteTicketAssigneeTx(ctx context.Context, tx *sql
 	}
 
 	return updateTicketAssignedToDocumentTx(ctx, tx, storedTicket.ID, ticketAPID)
+}
+
+func (r *PgRepository) deleteRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity) error {
+	ticketAPID := *activity.ObjectAPID
+
+	var acceptedFollower bool
+	if err := tx.GetContext(ctx, &acceptedFollower, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM actor_follows
+			WHERE follower_actor_id = $1
+				AND followed_actor_id = $2
+				AND state = 'accepted'
+		)
+	`, activity.ActorID, targetActorID); err != nil {
+		return err
+	}
+	if !acceptedFollower {
+		return ErrForbiddenActor
+	}
+
+	var storedTicket struct {
+		ID         string `db:"id"`
+		ProjectID  string `db:"project_id"`
+		ReporterID string `db:"reporter_id"`
+	}
+	if err := tx.GetContext(ctx, &storedTicket, `
+		SELECT id::text, project_id::text, reporter_id::text
+		FROM tickets
+		WHERE ap_id = $1
+		FOR UPDATE
+	`, ticketAPID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrInvalidActivity
+		}
+		return err
+	}
+	if storedTicket.ProjectID != targetActorID || storedTicket.ReporterID != activity.ActorID {
+		return ErrActivityConflict
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE ap_objects
+		SET is_deleted = true
+		WHERE ap_id = $1
+	`, ticketAPID); err != nil {
+		return err
+	}
+
+	result, err := tx.ExecContext(ctx, `
+		DELETE FROM tickets
+		WHERE id = $1
+	`, storedTicket.ID)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return ErrInvalidActivity
+	}
+	return nil
 }
 
 func updateTicketAssignedToDocumentTx(ctx context.Context, tx *sqlx.Tx, ticketID, ticketAPID string) error {
