@@ -119,6 +119,10 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 	if err != nil {
 		return nil, err
 	}
+	isProjectRemoveTicketAssignee, err := s.isProjectRemoveTicketAssignee(ctx, targetActorID, targetAPID, activity)
+	if err != nil {
+		return nil, err
+	}
 
 	if isProjectCreateNote {
 		return s.repo.StoreInboundCreateNote(ctx, targetActorID, activity)
@@ -131,6 +135,9 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 	}
 	if isProjectAddTicketAssignee {
 		return s.repo.StoreInboundAddTicketAssignee(ctx, targetActorID, activity)
+	}
+	if isProjectRemoveTicketAssignee {
+		return s.repo.StoreInboundRemoveTicketAssignee(ctx, targetActorID, activity)
 	}
 
 	accepted, err := s.repo.StoreInboundActivity(ctx, targetActorID, activity)
@@ -154,10 +161,19 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 	return accepted, nil
 }
 
+func (s *Service) isProjectRemoveTicketAssignee(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
+	return s.isProjectTicketAssigneeActivity(ctx, targetActorID, targetAPID, activity, "Remove")
+}
+
 func (s *Service) isProjectAddTicketAssignee(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
-	if activity.Type != "Add" {
+	return s.isProjectTicketAssigneeActivity(ctx, targetActorID, targetAPID, activity, "Add")
+}
+
+func (s *Service) isProjectTicketAssigneeActivity(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity, activityType string) (bool, error) {
+	if activity.Type != activityType {
 		return false, nil
 	}
+	activityName := strings.ToLower(activityType)
 	isProjectActor, err := s.repo.IsProjectActor(ctx, targetActorID)
 	if err != nil {
 		return false, err
@@ -166,13 +182,13 @@ func (s *Service) isProjectAddTicketAssignee(ctx context.Context, targetActorID,
 		return false, nil
 	}
 	if activity.ObjectAPID == nil || !isAbsoluteURI(*activity.ObjectAPID) {
-		return false, fmt.Errorf("%w: add object must be an assignee actor", ErrInvalidActivity)
+		return false, fmt.Errorf("%w: %s object must be an assignee actor", ErrInvalidActivity, activityName)
 	}
 	if activity.TargetAPID == nil || !isAbsoluteURI(*activity.TargetAPID) {
-		return false, fmt.Errorf("%w: add target must be a ticket", ErrInvalidActivity)
+		return false, fmt.Errorf("%w: %s target must be a ticket", ErrInvalidActivity, activityName)
 	}
 	if *activity.TargetAPID == targetAPID {
-		return false, fmt.Errorf("%w: add target must be a ticket", ErrInvalidActivity)
+		return false, fmt.Errorf("%w: %s target must be a ticket", ErrInvalidActivity, activityName)
 	}
 	return true, nil
 }

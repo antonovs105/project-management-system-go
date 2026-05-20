@@ -16,26 +16,28 @@ import (
 )
 
 type memoryRepository struct {
-	targetActorID   string
-	actorAPID       string
-	stored          *InboundActivity
-	storedNote      *InboundActivity
-	storedTicket    *InboundActivity
-	updatedTicket   *InboundActivity
-	assignedTicket  *InboundActivity
-	storeResult     *AcceptedActivity
-	projectActor    bool
-	follow          *InboundActivity
-	followResult    *FollowResponse
-	undo            *InboundActivity
-	findErr         error
-	storeErr        error
-	storeNoteErr    error
-	storeTicketErr  error
-	updateTicketErr error
-	assignTicketErr error
-	followErr       error
-	undoErr         error
+	targetActorID     string
+	actorAPID         string
+	stored            *InboundActivity
+	storedNote        *InboundActivity
+	storedTicket      *InboundActivity
+	updatedTicket     *InboundActivity
+	assignedTicket    *InboundActivity
+	unassignedTicket  *InboundActivity
+	storeResult       *AcceptedActivity
+	projectActor      bool
+	follow            *InboundActivity
+	followResult      *FollowResponse
+	undo              *InboundActivity
+	findErr           error
+	storeErr          error
+	storeNoteErr      error
+	storeTicketErr    error
+	updateTicketErr   error
+	assignTicketErr   error
+	unassignTicketErr error
+	followErr         error
+	undoErr           error
 }
 
 func (m *memoryRepository) FindLocalActorIDByAPID(ctx context.Context, apID string) (string, error) {
@@ -128,6 +130,22 @@ func (m *memoryRepository) StoreInboundAddTicketAssignee(ctx context.Context, ta
 	}
 	return &AcceptedActivity{
 		ActivityID:   "assigned-ticket-activity",
+		ActivityAPID: activity.ID,
+		ReceivedAt:   time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC),
+	}, nil
+}
+
+func (m *memoryRepository) StoreInboundRemoveTicketAssignee(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
+	if m.unassignTicketErr != nil {
+		return nil, m.unassignTicketErr
+	}
+	copy := *activity
+	m.unassignedTicket = &copy
+	if m.storeResult != nil {
+		return m.storeResult, nil
+	}
+	return &AcceptedActivity{
+		ActivityID:   "unassigned-ticket-activity",
 		ActivityAPID: activity.ID,
 		ReceivedAt:   time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC),
 	}, nil
@@ -424,6 +442,37 @@ func TestServiceReceiveRejectsProjectAddTicketAssigneeProjectTarget(t *testing.T
 		ActorAPID: "https://remote.example/users/alice",
 	}})
 	body := []byte(`{"id":"https://remote.example/activities/add-assignee-1","type":"Add","actor":"https://remote.example/users/alice","object":"http://localhost:8080/users/bob","target":"http://localhost:8080/projects/project-1"}`)
+
+	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
+
+	require.ErrorIs(t, err, ErrInvalidActivity)
+}
+
+func TestServiceReceiveStoresProjectRemoveTicketAssignee(t *testing.T) {
+	repo := &memoryRepository{targetActorID: "project-actor", projectActor: true}
+	service := NewService(repo, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-actor",
+		ActorAPID: "https://remote.example/users/alice",
+	}})
+	body := []byte(`{"id":"https://remote.example/activities/remove-assignee-1","type":"Remove","actor":"https://remote.example/users/alice","object":"http://localhost:8080/users/bob","target":"https://remote.example/tickets/1"}`)
+
+	accepted, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://remote.example/activities/remove-assignee-1", accepted.ActivityAPID)
+	require.NotNil(t, repo.unassignedTicket)
+	require.NotNil(t, repo.unassignedTicket.ObjectAPID)
+	require.NotNil(t, repo.unassignedTicket.TargetAPID)
+	assert.Equal(t, "http://localhost:8080/users/bob", *repo.unassignedTicket.ObjectAPID)
+	assert.Equal(t, "https://remote.example/tickets/1", *repo.unassignedTicket.TargetAPID)
+}
+
+func TestServiceReceiveRejectsProjectRemoveTicketAssigneeWithoutTarget(t *testing.T) {
+	service := NewService(&memoryRepository{targetActorID: "project-actor", projectActor: true}, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-actor",
+		ActorAPID: "https://remote.example/users/alice",
+	}})
+	body := []byte(`{"id":"https://remote.example/activities/remove-assignee-1","type":"Remove","actor":"https://remote.example/users/alice","object":"http://localhost:8080/users/bob"}`)
 
 	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
 

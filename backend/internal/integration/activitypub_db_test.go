@@ -467,6 +467,26 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		require.NotNil(t, assignedRemoteTicket.AssigneeID)
 		assert.Equal(t, assignee.ID, *assignedRemoteTicket.AssigneeID)
 
+		removeAssigneeAPID := "https://remote.example/activities/remove-project-ticket-assignee"
+		removeAssigneeBody := []byte(`{"id":"` + removeAssigneeAPID + `","type":"Remove","actor":"` + remoteActor.APID + `","object":"` + assignee.APID + `","target":"` + remoteTicketAPID + `"}`)
+		removeAssigneeReq, err := http.NewRequest(http.MethodPost, project.APID+"/inbox", bytes.NewReader(removeAssigneeBody))
+		require.NoError(t, err)
+		require.NoError(t, signer.SignRequest(ctx, remoteActor.ID, removeAssigneeReq, removeAssigneeBody))
+
+		removedAssignee, err := receiver.Receive(ctx, removeAssigneeReq, project.APID, removeAssigneeBody)
+		require.NoError(t, err)
+		require.Equal(t, removeAssigneeAPID, removedAssignee.ActivityAPID)
+		requireActivityForObjectAndTarget(t, db, "Remove", assignee.APID, remoteTicketAPID)
+		requireInboxItemForTarget(t, db, project.ID, "Remove", remoteTicketAPID)
+		requireNoTicketAssignee(t, db, remoteTicketAPID, assignee.ID)
+		requireTicketObjectNotAssignedTo(t, db, remoteTicketAPID, assignee.APID)
+
+		tickets, err = ticketService.ListTicketsInProject(ctx, project.ID, owner.ID)
+		require.NoError(t, err)
+		unassignedRemoteTicket := findTicketByAPID(tickets, remoteTicketAPID)
+		require.NotNil(t, unassignedRemoteTicket)
+		assert.Nil(t, unassignedRemoteTicket.AssigneeID)
+
 		undoAPID := "https://remote.example/activities/undo-follow-project"
 		undoBody := []byte(`{"id":"` + undoAPID + `","type":"Undo","actor":"` + remoteActor.APID + `","object":{"id":"` + followAPID + `","type":"Follow","actor":"` + remoteActor.APID + `","object":"` + project.APID + `"}}`)
 		undoReq, err := http.NewRequest(http.MethodPost, project.APID+"/inbox", bytes.NewReader(undoBody))
@@ -790,6 +810,20 @@ func requireTicketAssignee(t *testing.T, db *sqlx.DB, ticketAPID, assigneeID str
 	require.Greater(t, count, 0)
 }
 
+func requireNoTicketAssignee(t *testing.T, db *sqlx.DB, ticketAPID, assigneeID string) {
+	t.Helper()
+
+	var count int
+	err := db.Get(&count, `
+		SELECT count(*)
+		FROM ticket_assignees assignee
+		JOIN tickets ticket ON ticket.id = assignee.ticket_id
+		WHERE ticket.ap_id = $1 AND assignee.actor_id = $2
+	`, ticketAPID, assigneeID)
+	require.NoError(t, err)
+	require.Zero(t, count)
+}
+
 func requireTicketObjectAssignedTo(t *testing.T, db *sqlx.DB, ticketAPID, assigneeAPID string) {
 	t.Helper()
 
@@ -801,6 +835,19 @@ func requireTicketObjectAssignedTo(t *testing.T, db *sqlx.DB, ticketAPID, assign
 	`, ticketAPID, assigneeAPID)
 	require.NoError(t, err)
 	require.True(t, assigned)
+}
+
+func requireTicketObjectNotAssignedTo(t *testing.T, db *sqlx.DB, ticketAPID, assigneeAPID string) {
+	t.Helper()
+
+	var assigned bool
+	err := db.Get(&assigned, `
+		SELECT COALESCE(document->'forge:assignedTo' ? $2, false)
+		FROM ap_objects
+		WHERE ap_id = $1
+	`, ticketAPID, assigneeAPID)
+	require.NoError(t, err)
+	require.False(t, assigned)
 }
 
 func TestIntegrationDBSourceLooksSafe(t *testing.T) {
