@@ -46,11 +46,6 @@ func TestHandlerReceiveProjectInbox(t *testing.T) {
 	repo := &memoryRepository{
 		targetActorID: "project-actor",
 		projectActor:  true,
-		followResult: &FollowResponse{
-			ActivityID:     "accept-activity",
-			ActivityAPID:   "http://localhost:8080/activities/accept-activity",
-			TargetInboxURL: "https://remote.example/users/alice/inbox",
-		},
 	}
 	service := NewService(repo, fakeVerifier{verified: &httpsig.VerifiedRequest{
 		ActorID:   "remote-actor",
@@ -68,10 +63,10 @@ func TestHandlerReceiveProjectInbox(t *testing.T) {
 	e.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusAccepted, rec.Code)
-	require.NotNil(t, repo.follow)
-	assert.Equal(t, "Follow", repo.follow.Type)
+	require.NotNil(t, repo.stored)
+	assert.Equal(t, "Follow", repo.stored.Type)
 	assert.Equal(t, "https://remote.example/activities/project-follow", jsonField(t, rec.Body.String(), "activity_ap_id"))
-	assert.Equal(t, "accept-activity", jsonField(t, rec.Body.String(), "response_activity_id"))
+	assert.NotContains(t, rec.Body.String(), "response_activity_id")
 }
 
 func TestHandlerRejectsUnsupportedMediaType(t *testing.T) {

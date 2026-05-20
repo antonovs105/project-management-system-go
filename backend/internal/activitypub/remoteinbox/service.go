@@ -197,13 +197,10 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 		return nil, err
 	}
 	if isProjectFollow && !accepted.Duplicate {
-		response, err := s.repo.AcceptProjectFollow(ctx, targetActorID, activity)
-		if err != nil {
-			return nil, err
-		}
-		accepted.ResponseActivityID = response.ActivityID
-		accepted.ResponseActivityAPID = response.ActivityAPID
-		s.enqueueFollowResponse(ctx, response)
+		// A project Follow is a subscription request, not collaboration access.
+		// Project write access is granted by Invite/Accept so random remote actors
+		// cannot become contributors by following a project actor.
+		return accepted, nil
 	}
 	if isProjectUndoFollow && !accepted.Duplicate {
 		if err := s.repo.UndoProjectFollow(ctx, targetActorID, activity); err != nil {

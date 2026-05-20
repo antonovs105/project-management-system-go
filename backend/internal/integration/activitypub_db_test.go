@@ -763,7 +763,7 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		accepted, err := receiver.Receive(ctx, req, project.APID, body)
 		require.NoError(t, err)
 		require.Equal(t, followAPID, accepted.ActivityAPID)
-		require.NotEmpty(t, accepted.ResponseActivityID)
+		require.Empty(t, accepted.ResponseActivityID)
 
 		var storedActorID string
 		require.NoError(t, db.GetContext(ctx, &storedActorID, `
@@ -771,12 +771,12 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 			FROM actors
 			WHERE ap_id = $1 AND is_local = false
 		`, actorAPID))
-		requireFollow(t, db, storedActorID, project.ID, "accepted")
-		requireActivityForObject(t, db, "Accept", followAPID)
-		requireOutboxItem(t, db, project.ID, "Accept", followAPID)
+		requireNoFollow(t, db, storedActorID, project.ID)
+		requireActivityForObject(t, db, "Follow", project.APID)
+		requireInboxItem(t, db, project.ID, "Follow", project.APID)
 	})
 
-	t.Run("remote inbox accepts project follow and queues response", func(t *testing.T) {
+	t.Run("remote inbox accepts invited project actor mutations and fans out", func(t *testing.T) {
 		publicKey, privateKey, err := activitypub.GenerateRSAKeyPair()
 		require.NoError(t, err)
 
@@ -795,11 +795,6 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		}
 		require.NoError(t, remoteactor.NewRepository(db).UpsertRemoteActor(ctx, remoteActor))
 
-		followAPID := "https://remote.example/activities/follow-project"
-		body := []byte(`{"id":"` + followAPID + `","type":"Follow","actor":"` + remoteActor.APID + `","object":"` + project.APID + `"}`)
-		req, err := http.NewRequest(http.MethodPost, project.APID+"/inbox", bytes.NewReader(body))
-		require.NoError(t, err)
-
 		signer := httpsig.NewService(singleKeyRepo{key: &httpsig.ActorKey{
 			ActorID:       remoteActor.ID,
 			ActorAPID:     remoteActor.APID,
@@ -808,7 +803,6 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 			PublicKeyPEM:  publicKey,
 			PrivateKeyPEM: privateKey,
 		}})
-		require.NoError(t, signer.SignRequest(ctx, remoteActor.ID, req, body))
 
 		deliveryService := delivery.NewService(delivery.NewRecipientRepository(db), delivery.NoopQueue{})
 		receiver := remoteinbox.NewService(
@@ -816,14 +810,32 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 			httpsig.NewService(httpsig.NewRepository(db)),
 			remoteinbox.WithDelivery(deliveryService),
 		)
+
+		invite, err := projectService.AddMemberToProject(ctx, project.ID, owner.ID, remoteActor.ID, "developer")
+		require.NoError(t, err)
+		acceptInviteAPID := "https://remote.example/activities/accept-follow-bot-invite"
+		acceptInviteBody := []byte(`{"id":"` + acceptInviteAPID + `","type":"Accept","actor":"` + remoteActor.APID + `","object":"` + invite.APID + `","target":"` + project.APID + `"}`)
+		acceptInviteReq, err := http.NewRequest(http.MethodPost, project.APID+"/inbox", bytes.NewReader(acceptInviteBody))
+		require.NoError(t, err)
+		require.NoError(t, signer.SignRequest(ctx, remoteActor.ID, acceptInviteReq, acceptInviteBody))
+		acceptedInvite, err := receiver.Receive(ctx, acceptInviteReq, project.APID, acceptInviteBody)
+		require.NoError(t, err)
+		require.Equal(t, acceptInviteAPID, acceptedInvite.ActivityAPID)
+		requireInviteStatus(t, db, invite.ID, "accepted")
+		requireFollow(t, db, remoteActor.ID, project.ID, "accepted")
+		requireActivityForObjectAndActor(t, db, "Accept", invite.APID, remoteActor.ID)
+		requireInboxItem(t, db, project.ID, "Accept", invite.APID)
+
+		followAPID := "https://remote.example/activities/follow-project"
+		body := []byte(`{"id":"` + followAPID + `","type":"Follow","actor":"` + remoteActor.APID + `","object":"` + project.APID + `"}`)
+		req, err := http.NewRequest(http.MethodPost, project.APID+"/inbox", bytes.NewReader(body))
+		require.NoError(t, err)
+		require.NoError(t, signer.SignRequest(ctx, remoteActor.ID, req, body))
 		accepted, err := receiver.Receive(ctx, req, project.APID, body)
 		require.NoError(t, err)
-		require.NotEmpty(t, accepted.ResponseActivityID)
-
+		require.Empty(t, accepted.ResponseActivityID)
+		requireActivityForObject(t, db, "Follow", project.APID)
 		requireFollow(t, db, remoteActor.ID, project.ID, "accepted")
-		requireActivityForObject(t, db, "Accept", followAPID)
-		requireOutboxItem(t, db, project.ID, "Accept", followAPID)
-		requireDeliveryForObject(t, db, "Accept", followAPID, remoteActor.InboxURL)
 
 		fanoutPeer, _ := createRemoteActor(t, ctx, db, "fanout-peer")
 		_, err = db.ExecContext(ctx, `
@@ -1203,9 +1215,9 @@ func TestRemoteInboxRefreshesRotatedActorKey(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, activityAPID, accepted.ActivityAPID)
-	require.NotEmpty(t, accepted.ResponseActivityID)
-	requireFollow(t, db, remoteActor.ID, fx.Project.ID, "accepted")
-	requireActivityForObject(t, db, "Accept", activityAPID)
+	require.Empty(t, accepted.ResponseActivityID)
+	requireNoFollow(t, db, remoteActor.ID, fx.Project.ID)
+	requireActivityForObject(t, db, "Follow", fx.Project.APID)
 	requireActorPublicKey(t, db, remoteActor.PublicKeyID, newPublicKey)
 }
 

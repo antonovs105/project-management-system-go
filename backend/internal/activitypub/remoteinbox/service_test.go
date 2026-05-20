@@ -320,15 +320,10 @@ func TestServiceReceiveStoresValidSignedActivity(t *testing.T) {
 	assert.Equal(t, "http://localhost:8080/users/bob", *repo.stored.TargetAPID)
 }
 
-func TestServiceReceiveAcceptsProjectFollowAndQueuesResponse(t *testing.T) {
+func TestServiceReceiveStoresProjectFollowWithoutGrantingAccess(t *testing.T) {
 	repo := &memoryRepository{
 		targetActorID: "project-actor",
 		projectActor:  true,
-		followResult: &FollowResponse{
-			ActivityID:     "accept-activity",
-			ActivityAPID:   "http://localhost:8080/activities/accept-activity",
-			TargetInboxURL: "https://remote.example/users/alice/inbox",
-		},
 	}
 	delivery := &fakeDelivery{}
 	service := NewService(repo, fakeVerifier{verified: &httpsig.VerifiedRequest{
@@ -340,11 +335,12 @@ func TestServiceReceiveAcceptsProjectFollowAndQueuesResponse(t *testing.T) {
 	accepted, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
 
 	require.NoError(t, err)
-	require.NotNil(t, repo.follow)
-	assert.Equal(t, "Follow", repo.follow.Type)
-	assert.Equal(t, "accept-activity", accepted.ResponseActivityID)
-	assert.Equal(t, "accept-activity", delivery.activityID)
-	assert.Equal(t, "https://remote.example/users/alice/inbox", delivery.targetInboxURL)
+	require.NotNil(t, repo.stored)
+	assert.Equal(t, "Follow", repo.stored.Type)
+	assert.Empty(t, accepted.ResponseActivityID)
+	assert.Nil(t, repo.follow)
+	assert.Empty(t, delivery.activityID)
+	assert.Empty(t, delivery.targetInboxURL)
 }
 
 func TestServiceReceiveDuplicateProjectFollowDoesNotQueueResponse(t *testing.T) {
