@@ -8,13 +8,19 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/httpsig"
 	"github.com/hibiken/asynq"
 )
 
-const deliveryUserAgent = "project-management-system-go/activitypub-delivery"
+const (
+	deliveryUserAgent       = "project-management-system-go/activitypub-delivery"
+	maxResponseSnippetBytes = int64(1024)
+)
 
 type Signer interface {
 	SignRequest(ctx context.Context, actorID string, req *http.Request, body []byte) error
@@ -95,6 +101,10 @@ func (w *Worker) HandleDeliveryTask(ctx context.Context, task *asynq.Task) error
 }
 
 func (w *Worker) deliver(ctx context.Context, delivery *Delivery) error {
+	if err := validateTargetInboxURL(delivery.TargetInboxURL); err != nil {
+		return err
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, delivery.TargetInboxURL, bytes.NewReader(delivery.Document))
 	if err != nil {
 		return permanentError{err: err}
@@ -128,11 +138,19 @@ func (w *Worker) deliver(ctx context.Context, delivery *Delivery) error {
 }
 
 func responseMessage(resp *http.Response) string {
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSnippetBytes+1))
 	if len(raw) == 0 {
 		return fmt.Sprintf("delivery failed: %s", resp.Status)
 	}
-	return fmt.Sprintf("delivery failed: %s: %s", resp.Status, string(raw))
+	truncated := int64(len(raw)) > maxResponseSnippetBytes
+	if truncated {
+		raw = raw[:maxResponseSnippetBytes]
+	}
+	snippet := sanitizeResponseSnippet(string(raw))
+	if truncated {
+		snippet += "..."
+	}
+	return fmt.Sprintf("delivery failed: %s: %s", resp.Status, snippet)
 }
 
 func RetryDelay(n int, err error, task *asynq.Task) time.Duration {
@@ -160,6 +178,32 @@ func isRetryableStatus(status int) bool {
 func isRetryable(err error) bool {
 	var permanent permanentError
 	return !errors.As(err, &permanent)
+}
+
+func validateTargetInboxURL(raw string) error {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return permanentError{err: errors.New("invalid target inbox url")}
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return permanentError{err: fmt.Errorf("unsupported target inbox url scheme: %s", parsed.Scheme)}
+	}
+	return nil
+}
+
+func sanitizeResponseSnippet(raw string) string {
+	raw = strings.ToValidUTF8(raw, "")
+	raw = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == '\t' {
+			return ' '
+		}
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, raw)
+	return strings.TrimSpace(raw)
 }
 
 type permanentError struct {
