@@ -1288,6 +1288,66 @@ func TestFederationDomainBlockModeration(t *testing.T) {
 	requireRowCount(t, db, "federation_domain_blocks", 0)
 }
 
+func TestFederationModerationInspection(t *testing.T) {
+	db := openIntegrationDB(t)
+	resetIntegrationDB(t, db)
+
+	ctx := context.Background()
+	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+	userService := user.NewService(user.NewRepository(db, cfg), []byte("integration-secret"), cfg)
+	projectService := project.NewService(project.NewRepository(db, cfg), cfg)
+	ticketService := ticket.NewService(ticket.NewRepository(db, cfg), projectService, cfg)
+	moderationService := apmoderation.NewService(apmoderation.NewRepository(db))
+
+	admin, err := userService.RegisterUser(ctx, "ops-admin", "ops-admin@example.test", "password123")
+	require.NoError(t, err)
+	owner, err := userService.RegisterUser(ctx, "ops-owner", "ops-owner@example.test", "password123")
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `UPDATE users SET role = 'admin' WHERE id = $1`, admin.ID)
+	require.NoError(t, err)
+
+	remoteActor := createRemoteActorWithPublicKey(t, ctx, db, "https://ops-remote.example/users/reviewer", "ops-reviewer", "public key")
+	require.NoError(t, remoteactor.NewRepository(db).RecordRemoteActorFetchFailure(ctx, remoteActor.APID, "actor document timed out"))
+
+	actors, err := moderationService.ListRemoteActors(ctx, admin.ID, apmoderation.RemoteActorListOptions{FetchErrorOnly: true})
+	require.NoError(t, err)
+	require.Len(t, actors, 1)
+	assert.Equal(t, remoteActor.APID, actors[0].APID)
+	require.NotNil(t, actors[0].FetchError)
+	assert.Equal(t, "actor document timed out", *actors[0].FetchError)
+	require.NotNil(t, actors[0].FetchErrorAt)
+
+	createdProject, err := projectService.CreateProject(ctx, "Ops Inspection Board", "", owner.ID)
+	require.NoError(t, err)
+	createdTicket, err := ticketService.CreateTicket(ctx, ticket.CreateTicketRequest{
+		Title:    "Inspect failed delivery",
+		Priority: "high",
+		Type:     "task",
+	}, createdProject.ID, owner.ID)
+	require.NoError(t, err)
+	activityID := requireActivityIDForObject(t, db, createdTicket.APID)
+	deliveryRepo := delivery.NewRepository(db)
+	createdDelivery, isNew, err := deliveryRepo.Create(ctx, activityID, remoteActor.InboxURL, 3)
+	require.NoError(t, err)
+	require.True(t, isNew)
+	_, err = deliveryRepo.StartAttempt(ctx, createdDelivery.ID)
+	require.NoError(t, err)
+	require.NoError(t, deliveryRepo.MarkFailed(ctx, createdDelivery.ID, "remote 503", delivery.FailureDetails{Kind: delivery.FailureKindHTTP, StatusCode: intPtr(http.StatusServiceUnavailable)}, nil))
+
+	deliveries, err := moderationService.ListFederationDeliveries(ctx, admin.ID, apmoderation.FederationDeliveryListOptions{
+		State:       delivery.StateDead,
+		FailureKind: delivery.FailureKindHTTP,
+	})
+	require.NoError(t, err)
+	require.Len(t, deliveries, 1)
+	assert.Equal(t, createdDelivery.ID, deliveries[0].ID)
+	assert.Equal(t, delivery.StateDead, deliveries[0].State)
+	assert.Equal(t, delivery.FailureKindHTTP, deliveries[0].LastFailureKind)
+	require.NotNil(t, deliveries[0].LastStatusCode)
+	assert.Equal(t, http.StatusServiceUnavailable, *deliveries[0].LastStatusCode)
+	assert.True(t, deliveries[0].CanRetry)
+}
+
 func TestRemoteInboxRefreshesRotatedActorKey(t *testing.T) {
 	db := openIntegrationDB(t)
 	fx := newInboxIntegrationFixture(t, db)

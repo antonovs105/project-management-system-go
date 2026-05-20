@@ -127,3 +127,12 @@ func IsDeliveryState(state string) bool {
 		return false
 	}
 }
+
+func IsFailureKind(kind string) bool {
+	switch kind {
+	case FailureKindHTTP, FailureKindNetwork, FailureKindSigning, FailureKindSafety, FailureKindUnknown:
+		return true
+	default:
+		return false
+	}
+}

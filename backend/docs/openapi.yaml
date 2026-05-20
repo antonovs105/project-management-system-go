@@ -520,6 +520,70 @@ paths:
           $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
+  /api/admin/federation/remote-actors:
+    get:
+      tags: [Federation Moderation]
+      operationId: listFederationRemoteActors
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: fetch_error
+          in: query
+          schema:
+            type: boolean
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+      responses:
+        "200":
+          description: Remote actors cached by federation discovery.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FederationRemoteActor"
+        "403":
+          $ref: "#/components/responses/Error"
+  /api/admin/federation/deliveries:
+    get:
+      tags: [Federation Moderation]
+      operationId: listFederationDeliveries
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [pending, processing, delivered, failed, dead]
+        - name: failure_kind
+          in: query
+          schema:
+            type: string
+            enum: [http, network, signing, safety, unknown]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+      responses:
+        "200":
+          description: Federation delivery attempts across all projects.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FederationDelivery"
+        "400":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
   /.well-known/webfinger:
     get:
       tags: [WebFinger]
@@ -1071,6 +1135,71 @@ components:
         updated_at:
           type: string
           format: date-time
+    FederationRemoteActor:
+      type: object
+      required: [id, ap_id, type, preferred_username, handle, name, summary, inbox_url, outbox_url, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        ap_id:
+          type: string
+          format: uri
+        type:
+          type: string
+        preferred_username:
+          type: string
+        handle:
+          type: string
+        name:
+          type: string
+        summary:
+          type: string
+        inbox_url:
+          type: string
+          format: uri
+        outbox_url:
+          type: string
+          format: uri
+        followers_url:
+          type: string
+          format: uri
+        following_url:
+          type: string
+          format: uri
+        last_fetched_at:
+          type: string
+          format: date-time
+        fetch_error:
+          type: string
+        fetch_error_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    FederationDelivery:
+      allOf:
+        - $ref: "#/components/schemas/Delivery"
+        - type: object
+          required: [activity_type, actor_ap_id, can_retry]
+          properties:
+            activity_type:
+              type: string
+            actor_ap_id:
+              type: string
+              format: uri
+            project_id:
+              type: string
+              format: uuid
+            project_ap_id:
+              type: string
+              format: uri
+            can_retry:
+              type: boolean
     GraphResponse:
       type: object
       required: [nodes, links]
