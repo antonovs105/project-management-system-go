@@ -117,6 +117,25 @@ services:
       backend:
         condition: service_healthy
 
+  prometheus:
+    image: prom/prometheus:v3.11.3
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      backend:
+        condition: service_healthy
+      backend-worker:
+        condition: service_started
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
   postgres_data:
   redis_data:
+  prometheus_data:
