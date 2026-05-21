@@ -12,6 +12,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	testProjectID         = "11111111-1111-4111-8111-111111111111"
+	testDeliveryID        = "22222222-2222-4222-8222-222222222222"
+	testMissingDeliveryID = "33333333-3333-4333-8333-333333333333"
+)
+
 func TestHandlerListsProjectDeliveries(t *testing.T) {
 	repo := &serviceRepo{
 		projectDeliveries: []ProjectDelivery{
@@ -29,12 +35,12 @@ func TestHandlerListsProjectDeliveries(t *testing.T) {
 	}
 	e := newDeliveryHandlerEcho(repo, "user-1")
 
-	req := httptest.NewRequest(http.MethodGet, "/api/projects/project-1/deliveries?state=failed&limit=25", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+testProjectID+"/deliveries?state=failed&limit=25", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "project-1", repo.projectID)
+	assert.Equal(t, testProjectID, repo.projectID)
 	assert.Equal(t, "user-1", repo.userID)
 	assert.Equal(t, StateFailed, repo.listOptions.State)
 	assert.Equal(t, 25, repo.listOptions.Limit)
@@ -52,9 +58,9 @@ func TestHandlerRejectsInvalidProjectDeliveryFilters(t *testing.T) {
 	e := newDeliveryHandlerEcho(&serviceRepo{}, "user-1")
 
 	for _, path := range []string{
-		"/api/projects/project-1/deliveries?state=lost",
-		"/api/projects/project-1/deliveries?limit=0",
-		"/api/projects/project-1/deliveries?limit=nope",
+		"/api/projects/" + testProjectID + "/deliveries?state=lost",
+		"/api/projects/" + testProjectID + "/deliveries?limit=0",
+		"/api/projects/" + testProjectID + "/deliveries?limit=nope",
 	} {
 		t.Run(path, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -80,12 +86,12 @@ func TestHandlerReturnsProjectDeliverySummary(t *testing.T) {
 	}}
 	e := newDeliveryHandlerEcho(repo, "owner-1")
 
-	req := httptest.NewRequest(http.MethodGet, "/api/projects/project-1/deliveries/summary", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+testProjectID+"/deliveries/summary", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "project-1", repo.projectID)
+	assert.Equal(t, testProjectID, repo.projectID)
 	assert.Equal(t, "owner-1", repo.userID)
 	assert.JSONEq(t, `{
 		"total":5,
@@ -103,7 +109,7 @@ func TestHandlerRejectsProjectDeliverySummaryAccessDenied(t *testing.T) {
 	repo := &serviceRepo{err: ErrProjectAccessDenied}
 	e := newDeliveryHandlerEcho(repo, "outsider")
 
-	req := httptest.NewRequest(http.MethodGet, "/api/projects/project-1/deliveries/summary", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+testProjectID+"/deliveries/summary", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -115,7 +121,7 @@ func TestHandlerRejectsProjectDeliveryAccessDenied(t *testing.T) {
 	repo := &serviceRepo{err: ErrProjectAccessDenied}
 	e := newDeliveryHandlerEcho(repo, "outsider")
 
-	req := httptest.NewRequest(http.MethodGet, "/api/projects/project-1/deliveries", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+testProjectID+"/deliveries", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -127,7 +133,7 @@ func TestHandlerHidesProjectDeliveryInternalErrors(t *testing.T) {
 	repo := &serviceRepo{err: errors.New("database failed near private_key_pem")}
 	e := newDeliveryHandlerEcho(repo, "user-1")
 
-	req := httptest.NewRequest(http.MethodGet, "/api/projects/project-1/deliveries", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+testProjectID+"/deliveries", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -139,7 +145,7 @@ func TestHandlerHidesProjectDeliveryInternalErrors(t *testing.T) {
 func TestHandlerRetriesProjectDelivery(t *testing.T) {
 	repo := &serviceRepo{
 		retryDelivery: &Delivery{
-			ID:          "delivery-1",
+			ID:          testDeliveryID,
 			State:       StatePending,
 			Attempts:    0,
 			MaxAttempts: DefaultMaxRetry,
@@ -147,18 +153,18 @@ func TestHandlerRetriesProjectDelivery(t *testing.T) {
 	}
 	e := newDeliveryHandlerEcho(repo, "owner-1")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/projects/project-1/deliveries/delivery-1/retry", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+testProjectID+"/deliveries/"+testDeliveryID+"/retry", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusAccepted, rec.Code)
-	assert.Equal(t, "project-1", repo.projectID)
+	assert.Equal(t, testProjectID, repo.projectID)
 	assert.Equal(t, "owner-1", repo.userID)
-	assert.Equal(t, "delivery-1", repo.retryDeliveryID)
+	assert.Equal(t, testDeliveryID, repo.retryDeliveryID)
 
 	var response Delivery
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
-	assert.Equal(t, "delivery-1", response.ID)
+	assert.Equal(t, testDeliveryID, response.ID)
 	assert.Equal(t, StatePending, response.State)
 }
 
@@ -166,7 +172,7 @@ func TestHandlerRejectsRetryWithoutProjectPermission(t *testing.T) {
 	repo := &serviceRepo{retryErr: ErrDeliveryRetryDenied}
 	e := newDeliveryHandlerEcho(repo, "viewer-1")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/projects/project-1/deliveries/delivery-1/retry", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+testProjectID+"/deliveries/"+testDeliveryID+"/retry", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -178,7 +184,7 @@ func TestHandlerMapsMissingRetryDeliveryToNotFound(t *testing.T) {
 	repo := &serviceRepo{retryErr: ErrDeliveryNotFound}
 	e := newDeliveryHandlerEcho(repo, "owner-1")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/projects/project-1/deliveries/missing/retry", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+testProjectID+"/deliveries/"+testMissingDeliveryID+"/retry", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -190,7 +196,7 @@ func TestHandlerMapsRetryUnavailableToConflict(t *testing.T) {
 	repo := &serviceRepo{retryErr: ErrDeliveryRetryUnavailable}
 	e := newDeliveryHandlerEcho(repo, "owner-1")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/projects/project-1/deliveries/delivery-1/retry", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+testProjectID+"/deliveries/"+testDeliveryID+"/retry", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -202,7 +208,7 @@ func TestHandlerHidesRetryInternalErrors(t *testing.T) {
 	repo := &serviceRepo{retryErr: errors.New("database failed near private_key_pem")}
 	e := newDeliveryHandlerEcho(repo, "owner-1")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/projects/project-1/deliveries/delivery-1/retry", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+testProjectID+"/deliveries/"+testDeliveryID+"/retry", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 

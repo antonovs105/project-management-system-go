@@ -48,6 +48,12 @@ type ProjectMember struct {
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
+// ProjectListOptions contains pagination for project list responses.
+type ProjectListOptions struct {
+	Limit  int
+	Offset int
+}
+
 // UpdateResult carries the ActivityPub side effects produced by a project update.
 type UpdateResult struct {
 	ActivityID       string

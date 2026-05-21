@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 )
 
@@ -105,7 +106,11 @@ func (h *Handler) GetFederationDeliverySummary(c echo.Context) error {
 
 // RetryFederationDelivery requeues a failed federation delivery.
 func (h *Handler) RetryFederationDelivery(c echo.Context) error {
-	retried, err := h.service.RetryFederationDelivery(c.Request().Context(), currentUserID(c), c.Param("deliveryID"))
+	deliveryID := c.Param("deliveryID")
+	if _, err := uuid.Parse(strings.TrimSpace(deliveryID)); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid delivery id"})
+	}
+	retried, err := h.service.RetryFederationDelivery(c.Request().Context(), currentUserID(c), deliveryID)
 	if err != nil {
 		return writeModerationError(c, err)
 	}

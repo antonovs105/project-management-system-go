@@ -65,6 +65,13 @@ type CreateTicketRequest struct {
 // ErrInvalidTicketInput reports malformed ticket-management input.
 var ErrInvalidTicketInput = errors.New("invalid ticket input")
 
+const (
+	// defaultTicketListLimit is the fallback ticket list size.
+	defaultTicketListLimit = 100
+	// maxTicketListLimit is the largest accepted ticket list size.
+	maxTicketListLimit = 500
+)
+
 // ticketRanks defines allowed parent-child ordering for ticket hierarchy.
 var ticketRanks = map[string]int{
 	"epic":    3,
@@ -169,13 +176,15 @@ func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, pro
 }
 
 // ListTicketsInProject returns tickets in a project visible to the user.
-func (s *Service) ListTicketsInProject(ctx context.Context, projectID, userID string) ([]Ticket, error) {
+func (s *Service) ListTicketsInProject(ctx context.Context, projectID, userID string, options TicketListOptions) ([]Ticket, error) {
 	_, err := s.projectService.GetProjectByID(ctx, projectID, userID)
 	if err != nil {
 		return nil, err
 	}
 
-	return s.repo.ListByProjectID(ctx, projectID)
+	options.Limit = normalizeTicketListLimit(options.Limit)
+	options.Offset = normalizeTicketListOffset(options.Offset)
+	return s.repo.ListByProjectID(ctx, projectID, options)
 }
 
 // GetTicketByID returns a single ticket visible to the user.
@@ -305,6 +314,25 @@ func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, tic
 // invalidTicketInput wraps a validation message with the ticket input sentinel.
 func invalidTicketInput(message string) error {
 	return fmt.Errorf("%w: %s", ErrInvalidTicketInput, message)
+}
+
+// normalizeTicketListLimit bounds ticket list sizes.
+func normalizeTicketListLimit(limit int) int {
+	if limit <= 0 {
+		return defaultTicketListLimit
+	}
+	if limit > maxTicketListLimit {
+		return maxTicketListLimit
+	}
+	return limit
+}
+
+// normalizeTicketListOffset clamps negative ticket list offsets.
+func normalizeTicketListOffset(offset int) int {
+	if offset < 0 {
+		return 0
+	}
+	return offset
 }
 
 // DeleteTicket removes a ticket and tombstones its ActivityPub objects.
@@ -490,7 +518,7 @@ func (s *Service) GetTicketGraph(ctx context.Context, projectID, userID string) 
 		return nil, err
 	}
 
-	tickets, err := s.repo.ListByProjectID(ctx, projectID)
+	tickets, err := s.repo.ListByProjectID(ctx, projectID, TicketListOptions{Limit: maxTicketListLimit})
 	if err != nil {
 		return nil, err
 	}

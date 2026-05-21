@@ -305,6 +305,16 @@ func TestService_Login(t *testing.T) {
 		mockRepo.AssertExpectations(t)
 	})
 
+	t.Run("NormalizesEmail", func(t *testing.T) {
+		mockRepo.On("GetUserByEmail", ctx, email).Return(existingUser, nil).Once()
+
+		token, err := service.Login(ctx, " Test@Example.COM ", password)
+
+		assert.NoError(t, err)
+		assert.NotEmpty(t, token)
+		mockRepo.AssertExpectations(t)
+	})
+
 	// User not found
 	t.Run("UserNotFound", func(t *testing.T) {
 		mockRepo.On("GetUserByEmail", ctx, email).Return(nil, errors.New("user not found")).Once()

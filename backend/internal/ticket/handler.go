@@ -3,8 +3,10 @@ package ticket
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 )
 
@@ -42,11 +44,17 @@ type createTicketRequest struct {
 
 // Create creates a ticket in a project.
 func (h *Handler) Create(c echo.Context) error {
-	projectID := c.Param("projectID")
+	projectID, ok := uuidParam(c, "projectID", "project id")
+	if !ok {
+		return nil
+	}
 
 	var req createTicketRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	if err := validateCreateTicketIDs(req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
 	userID := c.Get("userID").(string)
@@ -70,11 +78,18 @@ func (h *Handler) Create(c echo.Context) error {
 
 // List returns tickets for a project.
 func (h *Handler) List(c echo.Context) error {
-	projectID := c.Param("projectID")
+	projectID, ok := uuidParam(c, "projectID", "project id")
+	if !ok {
+		return nil
+	}
 
 	userID := c.Get("userID").(string)
+	options, err := ticketListOptions(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
 
-	tickets, err := h.service.ListTicketsInProject(c.Request().Context(), projectID, userID)
+	tickets, err := h.service.ListTicketsInProject(c.Request().Context(), projectID, userID, options)
 	if err != nil {
 		return writeTicketError(c, err)
 	}
@@ -95,7 +110,10 @@ type updateTicketRequest struct {
 
 // Get returns a ticket by ID.
 func (h *Handler) Get(c echo.Context) error {
-	ticketID := c.Param("id")
+	ticketID, ok := uuidParam(c, "id", "ticket id")
+	if !ok {
+		return nil
+	}
 	userID := c.Get("userID").(string)
 
 	ticket, err := h.service.GetTicketByID(c.Request().Context(), ticketID, userID)
@@ -107,12 +125,18 @@ func (h *Handler) Get(c echo.Context) error {
 
 // Update changes ticket fields.
 func (h *Handler) Update(c echo.Context) error {
-	ticketID := c.Param("id")
+	ticketID, ok := uuidParam(c, "id", "ticket id")
+	if !ok {
+		return nil
+	}
 	userID := c.Get("userID").(string)
 
 	var req updateTicketRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	if err := validateUpdateTicketIDs(req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
 	serviceReq := UpdateTicketRequest{
@@ -133,7 +157,10 @@ func (h *Handler) Update(c echo.Context) error {
 
 // Delete removes a ticket.
 func (h *Handler) Delete(c echo.Context) error {
-	ticketID := c.Param("id")
+	ticketID, ok := uuidParam(c, "id", "ticket id")
+	if !ok {
+		return nil
+	}
 	userID := c.Get("userID").(string)
 
 	if err := h.service.DeleteTicket(c.Request().Context(), ticketID, userID); err != nil {
@@ -150,11 +177,17 @@ type addLinkRequest struct {
 
 // AddLink creates a directed link from one ticket to another.
 func (h *Handler) AddLink(c echo.Context) error {
-	sourceID := c.Param("id")
+	sourceID, ok := uuidParam(c, "id", "ticket id")
+	if !ok {
+		return nil
+	}
 
 	var req addLinkRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	if !validUUID(req.TargetID) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid target id"})
 	}
 
 	userID := c.Get("userID").(string)
@@ -174,7 +207,10 @@ func (h *Handler) AddLink(c echo.Context) error {
 
 // RemoveLink removes a ticket link.
 func (h *Handler) RemoveLink(c echo.Context) error {
-	linkID := c.Param("linkID")
+	linkID, ok := uuidParam(c, "linkID", "link id")
+	if !ok {
+		return nil
+	}
 	userID := c.Get("userID").(string)
 
 	err := h.service.RemoveTicketLink(c.Request().Context(), linkID, "", userID)
@@ -187,7 +223,10 @@ func (h *Handler) RemoveLink(c echo.Context) error {
 
 // GetGraph returns ticket graph data for a project.
 func (h *Handler) GetGraph(c echo.Context) error {
-	projectID := c.Param("projectID")
+	projectID, ok := uuidParam(c, "projectID", "project id")
+	if !ok {
+		return nil
+	}
 	userID := c.Get("userID").(string)
 
 	graph, err := h.service.GetTicketGraph(c.Request().Context(), projectID, userID)
@@ -196,6 +235,83 @@ func (h *Handler) GetGraph(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, graph)
+}
+
+// ticketListOptions parses bounded ticket list pagination.
+func ticketListOptions(c echo.Context) (TicketListOptions, error) {
+	limit, err := parseOptionalPositiveInt(c.QueryParam("limit"))
+	if err != nil {
+		return TicketListOptions{}, ErrInvalidTicketInput
+	}
+	offset, err := parseOptionalNonNegativeInt(c.QueryParam("offset"))
+	if err != nil {
+		return TicketListOptions{}, ErrInvalidTicketInput
+	}
+	return TicketListOptions{Limit: limit, Offset: offset}, nil
+}
+
+// validateCreateTicketIDs validates optional UUID references in create requests.
+func validateCreateTicketIDs(req createTicketRequest) error {
+	if req.ParentID != nil && !validUUID(*req.ParentID) {
+		return ErrInvalidTicketInput
+	}
+	if req.AssigneeID != nil && !validUUID(*req.AssigneeID) {
+		return ErrInvalidTicketInput
+	}
+	return nil
+}
+
+// validateUpdateTicketIDs validates optional UUID references in update requests.
+func validateUpdateTicketIDs(req updateTicketRequest) error {
+	if req.ParentID != nil && *req.ParentID != nil && !validUUID(**req.ParentID) {
+		return ErrInvalidTicketInput
+	}
+	if req.AssigneeID != nil && *req.AssigneeID != nil && !validUUID(**req.AssigneeID) {
+		return ErrInvalidTicketInput
+	}
+	return nil
+}
+
+// parseOptionalPositiveInt parses an optional positive pagination value.
+func parseOptionalPositiveInt(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 0, ErrInvalidTicketInput
+	}
+	return value, nil
+}
+
+// parseOptionalNonNegativeInt parses an optional non-negative pagination value.
+func parseOptionalNonNegativeInt(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 0 {
+		return 0, ErrInvalidTicketInput
+	}
+	return value, nil
+}
+
+// uuidParam extracts and validates a UUID path parameter.
+func uuidParam(c echo.Context, name string, label string) (string, bool) {
+	value := c.Param(name)
+	if !validUUID(value) {
+		_ = c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid " + label})
+		return "", false
+	}
+	return value, true
+}
+
+// validUUID reports whether value is a valid UUID.
+func validUUID(value string) bool {
+	_, err := uuid.Parse(strings.TrimSpace(value))
+	return err == nil
 }
 
 // writeTicketError maps ticket service errors to HTTP responses.

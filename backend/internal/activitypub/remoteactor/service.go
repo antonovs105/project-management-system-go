@@ -36,9 +36,11 @@ type HTTPClient interface {
 type Service struct {
 	repo            Repository
 	client          HTTPClient
+	customClient    bool
 	webFingerScheme string
 	userAgent       string
 	maxResponseSize int64
+	requireHTTPS    bool
 }
 
 // Option configures a remote actor service.
@@ -56,6 +58,9 @@ func NewService(repo Repository, opts ...Option) *Service {
 	for _, opt := range opts {
 		opt(service)
 	}
+	if service.requireHTTPS && !service.customClient {
+		service.client = netguard.NewHTTPClientWithPolicy(10*time.Second, netguard.RequireHTTPS())
+	}
 	return service
 }
 
@@ -64,6 +69,7 @@ func WithHTTPClient(client HTTPClient) Option {
 	return func(s *Service) {
 		if client != nil {
 			s.client = client
+			s.customClient = true
 		}
 	}
 }
@@ -84,6 +90,13 @@ func WithMaxResponseSize(size int64) Option {
 		if size > 0 {
 			s.maxResponseSize = size
 		}
+	}
+}
+
+// WithRequireHTTPS rejects plain HTTP actor, key, endpoint, and redirect URLs.
+func WithRequireHTTPS(require bool) Option {
+	return func(s *Service) {
+		s.requireHTTPS = require
 	}
 }
 
@@ -136,7 +149,7 @@ func (s *Service) RefreshKey(ctx context.Context, keyID, expectedActorAPID strin
 
 // fetchAndCacheKey refreshes the actor document that owns a signing key.
 func (s *Service) fetchAndCacheKey(ctx context.Context, keyID, expectedActorAPID string) error {
-	actorURL, err := actorURLFromKeyID(keyID)
+	actorURL, err := actorURLFromKeyID(keyID, s.requireHTTPS)
 	if err != nil {
 		return err
 	}
@@ -198,6 +211,9 @@ func (s *Service) resolveWebFinger(ctx context.Context, domain, resource string)
 		Path:     "/.well-known/webfinger",
 		RawQuery: values.Encode(),
 	}
+	if s.requireHTTPS && endpoint.Scheme != "https" {
+		return "", fmt.Errorf("%w: webfinger https required", ErrInvalidWebFinger)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
 	if err != nil {
@@ -228,7 +244,7 @@ func (s *Service) resolveWebFinger(ctx context.Context, domain, resource string)
 // fetchActor loads and validates a remote actor ActivityPub document.
 func (s *Service) fetchActor(ctx context.Context, actorURL, fallbackUsername, domain string) (*Actor, error) {
 	actorURL = strings.TrimSpace(actorURL)
-	if _, err := parseHTTPURL(actorURL); err != nil {
+	if _, err := parseHTTPURL(actorURL, s.requireHTTPS); err != nil {
 		return nil, fmt.Errorf("%w: actor url", ErrInvalidActorDocument)
 	}
 
@@ -259,24 +275,24 @@ func (s *Service) fetchActor(ctx context.Context, actorURL, fallbackUsername, do
 	if doc.Inbox == "" || doc.Outbox == "" {
 		return nil, fmt.Errorf("%w: actor inbox/outbox required", ErrInvalidActorDocument)
 	}
-	if _, err := parseHTTPURL(doc.Inbox); err != nil {
+	if _, err := parseHTTPURL(doc.Inbox, s.requireHTTPS); err != nil {
 		return nil, fmt.Errorf("%w: actor inbox url", ErrInvalidActorDocument)
 	}
-	if _, err := parseHTTPURL(doc.Outbox); err != nil {
+	if _, err := parseHTTPURL(doc.Outbox, s.requireHTTPS); err != nil {
 		return nil, fmt.Errorf("%w: actor outbox url", ErrInvalidActorDocument)
 	}
 	if doc.Followers != "" {
-		if _, err := parseHTTPURL(doc.Followers); err != nil {
+		if _, err := parseHTTPURL(doc.Followers, s.requireHTTPS); err != nil {
 			return nil, fmt.Errorf("%w: actor followers url", ErrInvalidActorDocument)
 		}
 	}
 	if doc.Following != "" {
-		if _, err := parseHTTPURL(doc.Following); err != nil {
+		if _, err := parseHTTPURL(doc.Following, s.requireHTTPS); err != nil {
 			return nil, fmt.Errorf("%w: actor following url", ErrInvalidActorDocument)
 		}
 	}
 
-	keyID, publicKeyPEM, err := parsePublicKey(doc.PublicKey, doc.ID)
+	keyID, publicKeyPEM, err := parsePublicKey(doc.PublicKey, doc.ID, s.requireHTTPS)
 	if err != nil {
 		return nil, err
 	}
@@ -368,8 +384,8 @@ func normalizeAcctResource(resource string) (username string, domain string, nor
 }
 
 // actorURLFromKeyID derives the actor document URL from a public key fragment URL.
-func actorURLFromKeyID(keyID string) (string, error) {
-	parsed, err := parseHTTPURL(keyID)
+func actorURLFromKeyID(keyID string, requireHTTPS bool) (string, error) {
+	parsed, err := parseHTTPURL(keyID, requireHTTPS)
 	if err != nil {
 		return "", ErrInvalidActorDocument
 	}
@@ -382,7 +398,7 @@ func actorURLFromKeyID(keyID string) (string, error) {
 
 // fallbackIdentity derives a best-effort username and domain from an actor URL.
 func fallbackIdentity(actorURL string) (username string, domain string, err error) {
-	parsed, err := parseHTTPURL(actorURL)
+	parsed, err := parseHTTPURL(actorURL, false)
 	if err != nil {
 		return "", "", ErrInvalidActorDocument
 	}
@@ -431,7 +447,7 @@ func isSupportedActorType(value string) bool {
 }
 
 // parsePublicKey validates the embedded ActivityPub publicKey object.
-func parsePublicKey(raw json.RawMessage, actorID string) (keyID string, publicKeyPEM string, err error) {
+func parsePublicKey(raw json.RawMessage, actorID string, requireHTTPS bool) (keyID string, publicKeyPEM string, err error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return "", "", fmt.Errorf("%w: publicKey required", ErrInvalidActorDocument)
 	}
@@ -443,7 +459,7 @@ func parsePublicKey(raw json.RawMessage, actorID string) (keyID string, publicKe
 	if key.ID == "" || key.PublicKeyPEM == "" {
 		return "", "", fmt.Errorf("%w: publicKey id and pem required", ErrInvalidActorDocument)
 	}
-	if _, err := parseHTTPURL(key.ID); err != nil {
+	if _, err := parseHTTPURL(key.ID, requireHTTPS); err != nil {
 		return "", "", fmt.Errorf("%w: publicKey id url", ErrInvalidActorDocument)
 	}
 	if key.Owner != "" && key.Owner != actorID {
@@ -456,13 +472,16 @@ func parsePublicKey(raw json.RawMessage, actorID string) (keyID string, publicKe
 }
 
 // parseHTTPURL parses an absolute HTTP(S) URL with a path.
-func parseHTTPURL(value string) (*url.URL, error) {
+func parseHTTPURL(value string, requireHTTPS bool) (*url.URL, error) {
 	parsed, err := url.Parse(strings.TrimSpace(value))
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return nil, ErrInvalidActorDocument
 	}
 	scheme := strings.ToLower(parsed.Scheme)
 	if scheme != "http" && scheme != "https" {
+		return nil, ErrInvalidActorDocument
+	}
+	if requireHTTPS && scheme != "https" {
 		return nil, ErrInvalidActorDocument
 	}
 	if parsed.Path == "" {

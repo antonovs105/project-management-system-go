@@ -30,6 +30,7 @@ import (
 	authMiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
 	"github.com/antonovs105/project-management-system-go/internal/observability"
 	"github.com/antonovs105/project-management-system-go/internal/project"
+	"github.com/antonovs105/project-management-system-go/internal/secrets"
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
 	"github.com/antonovs105/project-management-system-go/internal/user"
 	"github.com/antonovs105/project-management-system-go/internal/webfinger"
@@ -66,6 +67,14 @@ const (
 	inboxRateLimitBurst = 100
 	// metricsReadHeaderTimeout bounds standalone metrics server header reads.
 	metricsReadHeaderTimeout = 5 * time.Second
+	// apiReadHeaderTimeout bounds time spent reading request headers.
+	apiReadHeaderTimeout = 5 * time.Second
+	// apiReadTimeout bounds time spent reading complete requests.
+	apiReadTimeout = 15 * time.Second
+	// apiWriteTimeout bounds time spent writing responses.
+	apiWriteTimeout = 30 * time.Second
+	// apiIdleTimeout bounds idle keep-alive connections.
+	apiIdleTimeout = 60 * time.Second
 )
 
 const (
@@ -195,7 +204,7 @@ func (r appRole) runsWorker() bool {
 }
 
 // validateRuntimeConfig rejects unsafe deployment configuration before the server starts.
-func validateRuntimeConfig(production bool, jwtSecret, publicBaseURL, localDomain, adminBootstrapToken, metricsToken string) error {
+func validateRuntimeConfig(production bool, jwtSecret, publicBaseURL, localDomain, adminBootstrapToken, metricsToken, actorPrivateKeyEncryptionKey string) error {
 	parsedBaseURL, err := url.Parse(strings.TrimSpace(publicBaseURL))
 	if err != nil || parsedBaseURL.Scheme == "" || parsedBaseURL.Host == "" {
 		return fmt.Errorf("PUBLIC_BASE_URL must be an absolute HTTP URL")
@@ -225,7 +234,26 @@ func validateRuntimeConfig(production bool, jwtSecret, publicBaseURL, localDomai
 	if len(metricsToken) < 32 {
 		return fmt.Errorf("METRICS_TOKEN must be at least 32 characters in production")
 	}
+	if len(actorPrivateKeyEncryptionKey) < 32 {
+		return fmt.Errorf("ACTOR_PRIVATE_KEY_ENCRYPTION_KEY must be at least 32 characters in production")
+	}
 	return nil
+}
+
+// optionalBoolEnv parses a boolean environment variable when it is set.
+func optionalBoolEnv(name string) (bool, bool, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return false, false, nil
+	}
+	switch strings.ToLower(raw) {
+	case "true", "1", "yes":
+		return true, true, nil
+	case "false", "0", "no":
+		return false, true, nil
+	default:
+		return false, true, fmt.Errorf("%s must be a boolean", name)
+	}
 }
 
 // validateCORSConfig rejects browser origins that are unsafe for production.
@@ -329,10 +357,25 @@ func main() {
 	metricsAddr := strings.TrimSpace(os.Getenv("METRICS_ADDR"))
 	metricsToken := strings.TrimSpace(os.Getenv("METRICS_TOKEN"))
 	adminBootstrapToken := strings.TrimSpace(os.Getenv("ADMIN_BOOTSTRAP_TOKEN"))
-	if err := validateRuntimeConfig(production, jwtSecret, publicBaseURL, localDomain, adminBootstrapToken, metricsToken); err != nil {
+	actorPrivateKeyEncryptionKey := strings.TrimSpace(os.Getenv("ACTOR_PRIVATE_KEY_ENCRYPTION_KEY"))
+	allowInsecureFederationHTTP := !production
+	if value, ok, err := optionalBoolEnv("FEDERATION_ALLOW_INSECURE_HTTP"); err != nil {
+		log.Fatal(err)
+	} else if ok {
+		allowInsecureFederationHTTP = value
+	}
+	if production && allowInsecureFederationHTTP {
+		log.Fatal("FEDERATION_ALLOW_INSECURE_HTTP cannot be enabled in production")
+	}
+	requireHTTPSFederation := !allowInsecureFederationHTTP
+	if err := validateRuntimeConfig(production, jwtSecret, publicBaseURL, localDomain, adminBootstrapToken, metricsToken, actorPrivateKeyEncryptionKey); err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("backend_runtime_start app_env=%s role=%s public_base_url=%s local_domain=%s redis_configured=%t metrics_addr=%s", appEnv, role, publicBaseURL, localDomain, redisAddr != "", metricsAddr)
+	privateKeyCodec, err := secrets.NewPrivateKeyCodec(actorPrivateKeyEncryptionKey)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("backend_runtime_start app_env=%s role=%s public_base_url=%s local_domain=%s redis_configured=%t metrics_addr=%s federation_https_required=%t", appEnv, role, publicBaseURL, localDomain, redisAddr != "", metricsAddr, requireHTTPSFederation)
 	apConfig := activitypub.NewConfig(publicBaseURL, localDomain)
 	metrics := observability.NewMetrics()
 	metricsServer := startMetricsServer(metrics, metricsAddr, metricsToken)
@@ -346,11 +389,11 @@ func main() {
 
 	log.Println("DB connection successful")
 
-	userRepo := user.NewRepository(db, apConfig)
+	userRepo := user.NewRepository(db, apConfig, privateKeyCodec)
 	userService := user.NewService(userRepo, []byte(jwtSecret), apConfig)
 	userHandler := user.NewHandler(userService, adminBootstrapToken)
 
-	projectRepo := project.NewRepository(db, apConfig)
+	projectRepo := project.NewRepository(db, apConfig, privateKeyCodec)
 	projectService := project.NewService(projectRepo, apConfig)
 	projectHandler := project.NewHandler(projectService)
 
@@ -366,8 +409,8 @@ func main() {
 
 	// Remote ActivityPub signing/discovery dependencies
 	remoteActorRepo := remoteactor.NewRepository(db)
-	remoteActorService := remoteactor.NewService(remoteActorRepo)
-	sigRepo := httpsig.NewRepository(db)
+	remoteActorService := remoteactor.NewService(remoteActorRepo, remoteactor.WithRequireHTTPS(requireHTTPSFederation))
+	sigRepo := httpsig.NewRepository(db, privateKeyCodec)
 	sigService := httpsig.NewService(
 		sigRepo,
 		httpsig.WithMissingKeyResolver(remoteActorService.ResolveKey),
@@ -394,6 +437,7 @@ func main() {
 				nil,
 				delivery.WithRemoteActorRefresher(remoteActorService),
 				delivery.WithMetrics(metrics),
+				delivery.WithRequireHTTPS(requireHTTPSFederation),
 			)
 			deliveryServer := delivery.NewAsynqServer(redisOpt)
 			if err := deliveryServer.Start(delivery.NewServeMux(deliveryWorker)); err != nil {
@@ -511,7 +555,15 @@ func runHTTPServer(e *echo.Echo, addr string, timeout time.Duration) error {
 	serverErrors := make(chan error, 1)
 	go func() {
 		log.Printf("HTTP server listening on %s", addr)
-		if err := e.Start(addr); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		server := &http.Server{
+			Addr:              addr,
+			Handler:           e,
+			ReadHeaderTimeout: apiReadHeaderTimeout,
+			ReadTimeout:       apiReadTimeout,
+			WriteTimeout:      apiWriteTimeout,
+			IdleTimeout:       apiIdleTimeout,
+		}
+		if err := e.StartServer(server); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErrors <- err
 		}
 		close(serverErrors)

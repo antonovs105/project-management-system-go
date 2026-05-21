@@ -29,6 +29,12 @@ type TicketLink struct {
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
+// TicketListOptions contains pagination for ticket list responses.
+type TicketListOptions struct {
+	Limit  int
+	Offset int
+}
+
 // DeleteResult carries the ActivityPub side effects produced by ticket deletion.
 type DeleteResult struct {
 	ActivityIDs      []string

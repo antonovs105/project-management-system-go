@@ -45,6 +45,13 @@ func TestValidateRemoteURLAllowsPublicHTTPHosts(t *testing.T) {
 	}
 }
 
+func TestValidateRemoteURLRejectsHTTPWhenHTTPSRequired(t *testing.T) {
+	_, err := ValidateRemoteURL("http://93.184.216.34/users/alice", RequireHTTPS())
+
+	require.ErrorIs(t, err, ErrUnsafeURL)
+	require.Contains(t, err.Error(), "https required")
+}
+
 func TestHTTPClientRejectsUnsafeRedirect(t *testing.T) {
 	client := NewHTTPClient(time.Second)
 	err := client.CheckRedirect(
@@ -53,6 +60,17 @@ func TestHTTPClientRejectsUnsafeRedirect(t *testing.T) {
 	)
 
 	require.ErrorIs(t, err, ErrUnsafeURL)
+}
+
+func TestHTTPClientRejectsHTTPRedirectWhenHTTPSRequired(t *testing.T) {
+	client := NewHTTPClientWithPolicy(time.Second, RequireHTTPS())
+	err := client.CheckRedirect(
+		mustRequest(t, "http://93.184.216.34/users/alice"),
+		[]*http.Request{mustRequest(t, "https://remote.example/start")},
+	)
+
+	require.ErrorIs(t, err, ErrUnsafeURL)
+	require.Contains(t, err.Error(), "https required")
 }
 
 func TestHTTPClientRejectsTooManyRedirects(t *testing.T) {

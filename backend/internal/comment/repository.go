@@ -15,7 +15,7 @@ import (
 type Repository interface {
 	Create(ctx context.Context, comment *Comment) (string, error)
 	GetByID(ctx context.Context, commentID string) (*Comment, error)
-	ListByTicketID(ctx context.Context, ticketID string) ([]Comment, error)
+	ListByTicketID(ctx context.Context, ticketID string, options CommentListOptions) ([]Comment, error)
 	Delete(ctx context.Context, commentID string, actorID string) (*DeleteResult, error)
 }
 
@@ -118,14 +118,15 @@ func (r *PgRepository) Create(ctx context.Context, comment *Comment) (string, er
 }
 
 // ListByTicketID returns comments ordered by creation time for a ticket.
-func (r *PgRepository) ListByTicketID(ctx context.Context, ticketID string) ([]Comment, error) {
+func (r *PgRepository) ListByTicketID(ctx context.Context, ticketID string, options CommentListOptions) ([]Comment, error) {
 	var comments []Comment
 	if err := r.db.SelectContext(ctx, &comments, `
 		SELECT id::text, ap_id, ticket_id::text, author_id::text, content, created_at, updated_at
 		FROM comments
 		WHERE ticket_id = $1
 		ORDER BY created_at ASC
-	`, ticketID); err != nil {
+		LIMIT $2 OFFSET $3
+	`, ticketID, options.Limit, options.Offset); err != nil {
 		return nil, err
 	}
 	return comments, nil

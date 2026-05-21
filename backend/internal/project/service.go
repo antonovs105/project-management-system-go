@@ -14,6 +14,13 @@ import (
 // ErrInvalidProjectInput reports malformed project-management input.
 var ErrInvalidProjectInput = errors.New("invalid project input")
 
+const (
+	// defaultProjectListLimit is the fallback project list size.
+	defaultProjectListLimit = 100
+	// maxProjectListLimit is the largest accepted project list size.
+	maxProjectListLimit = 500
+)
+
 // Service contains project board, membership, and invite workflows.
 type Service struct {
 	repo     Repository
@@ -92,8 +99,10 @@ func (s *Service) GetProjectRole(ctx context.Context, projectID, userID string) 
 }
 
 // ListUserProjects returns projects where the user is a member.
-func (s *Service) ListUserProjects(ctx context.Context, userID string) ([]Project, error) {
-	return s.repo.ListByOwnerID(ctx, userID)
+func (s *Service) ListUserProjects(ctx context.Context, userID string, options ProjectListOptions) ([]Project, error) {
+	options.Limit = normalizeProjectListLimit(options.Limit)
+	options.Offset = normalizeProjectListOffset(options.Offset)
+	return s.repo.ListByOwnerID(ctx, userID, options)
 }
 
 // UpdateProjectRequest contains partial project metadata updates.
@@ -274,6 +283,25 @@ func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUser
 // invalidProjectInput wraps a validation message with the project input sentinel.
 func invalidProjectInput(message string) error {
 	return fmt.Errorf("%w: %s", ErrInvalidProjectInput, message)
+}
+
+// normalizeProjectListLimit bounds project list sizes.
+func normalizeProjectListLimit(limit int) int {
+	if limit <= 0 {
+		return defaultProjectListLimit
+	}
+	if limit > maxProjectListLimit {
+		return maxProjectListLimit
+	}
+	return limit
+}
+
+// normalizeProjectListOffset clamps negative project list offsets.
+func normalizeProjectListOffset(offset int) int {
+	if offset < 0 {
+		return 0
+	}
+	return offset
 }
 
 // AcceptInvite accepts a pending project invite for the current user.

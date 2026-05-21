@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 )
 
@@ -28,7 +29,10 @@ func (h *Handler) RegisterRoutes(api *echo.Group) {
 
 // ListProjectDeliveries returns delivery attempts for a project.
 func (h *Handler) ListProjectDeliveries(c echo.Context) error {
-	projectID := c.Param("projectID")
+	projectID, ok := uuidParam(c, "projectID", "project id")
+	if !ok {
+		return nil
+	}
 	userID := c.Get("userID").(string)
 	options, err := projectDeliveryListOptions(c)
 	if err != nil {
@@ -51,7 +55,10 @@ func (h *Handler) ListProjectDeliveries(c echo.Context) error {
 
 // GetProjectDeliverySummary returns aggregate delivery state counts for a project.
 func (h *Handler) GetProjectDeliverySummary(c echo.Context) error {
-	projectID := c.Param("projectID")
+	projectID, ok := uuidParam(c, "projectID", "project id")
+	if !ok {
+		return nil
+	}
 	userID := c.Get("userID").(string)
 
 	summary, err := h.service.GetProjectDeliverySummary(c.Request().Context(), projectID, userID)
@@ -67,8 +74,14 @@ func (h *Handler) GetProjectDeliverySummary(c echo.Context) error {
 
 // RetryProjectDelivery manually requeues a failed project delivery.
 func (h *Handler) RetryProjectDelivery(c echo.Context) error {
-	projectID := c.Param("projectID")
-	deliveryID := c.Param("deliveryID")
+	projectID, ok := uuidParam(c, "projectID", "project id")
+	if !ok {
+		return nil
+	}
+	deliveryID, ok := uuidParam(c, "deliveryID", "delivery id")
+	if !ok {
+		return nil
+	}
 	userID := c.Get("userID").(string)
 
 	delivery, err := h.service.RetryProjectDelivery(c.Request().Context(), projectID, userID, deliveryID)
@@ -86,6 +99,16 @@ func (h *Handler) RetryProjectDelivery(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusAccepted, delivery)
+}
+
+// uuidParam extracts and validates a UUID path parameter.
+func uuidParam(c echo.Context, name string, label string) (string, bool) {
+	value := c.Param(name)
+	if _, err := uuid.Parse(strings.TrimSpace(value)); err != nil {
+		_ = c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid " + label})
+		return "", false
+	}
+	return value, true
 }
 
 // projectDeliveryListOptions parses project delivery inspection query parameters.

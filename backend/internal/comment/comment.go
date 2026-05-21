@@ -13,6 +13,12 @@ type Comment struct {
 	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 }
 
+// CommentListOptions contains pagination for comment list responses.
+type CommentListOptions struct {
+	Limit  int
+	Offset int
+}
+
 // DeleteResult carries the ActivityPub side effects produced by comment deletion.
 type DeleteResult struct {
 	ActivityID       string

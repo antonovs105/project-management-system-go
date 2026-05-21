@@ -35,7 +35,10 @@
    ```
 
 2. **Set up environment variables**:
-   Copy `.env.example` to `.env` if you want to override ports, credentials, or public URLs. The backend is intended to run as a Linux container.
+   Copy `.env.example` to `.env` before starting Compose. Replace the sample secrets before using the stack on a shared machine or in production.
+   ```bash
+   cp .env.example .env
+   ```
 
 3. **Run the application**:
    ```bash
@@ -47,6 +50,8 @@
 4. **Access the application**:
    - Frontend: [http://localhost:5173](http://localhost:5173)
    - Backend API: [http://localhost:8080](http://localhost:8080)
+
+   Compose binds PostgreSQL, Redis, Prometheus, and worker metrics to `127.0.0.1` by default. Production deployments must set `APP_ENV=production`, HTTPS `PUBLIC_BASE_URL`, strong secrets, and leave `FEDERATION_ALLOW_INSECURE_HTTP` unset or `false`.
 
 ### Local Development Without Containers
 
@@ -75,10 +80,10 @@ With Docker running:
 ```bash
 docker compose up -d db migrations
 cd backend
-TEST_DB_SOURCE=postgres://postgres:postgres@localhost:5432/pms?sslmode=disable go test -tags=integration ./internal/integration
+TEST_DB_SOURCE=postgres://postgres:change-me-postgres-password-32-bytes@localhost:5432/pms?sslmode=disable go test -tags=integration ./internal/integration
 ```
 
-If you changed `POSTGRES_PORT`, use that port in `TEST_DB_SOURCE`.
+If you changed `POSTGRES_PASSWORD` or `POSTGRES_PORT`, use those values in `TEST_DB_SOURCE`.
 
 ## 📂 Project Structure
 

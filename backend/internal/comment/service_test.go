@@ -64,7 +64,7 @@ func TestServiceListCommentsRequiresTicketAccess(t *testing.T) {
 	tickets := &fakeTicketChecker{ticketErr: errors.New("ticket not found")}
 	service := NewService(repo, tickets, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
 
-	comments, err := service.ListComments(ctx, "ticket-1", "user-1")
+	comments, err := service.ListComments(ctx, "ticket-1", "user-1", CommentListOptions{})
 
 	require.Error(t, err)
 	require.Nil(t, comments)
@@ -164,7 +164,7 @@ func (f *fakeCommentRepository) GetByID(ctx context.Context, commentID string) (
 	return &copied, nil
 }
 
-func (f *fakeCommentRepository) ListByTicketID(ctx context.Context, ticketID string) ([]Comment, error) {
+func (f *fakeCommentRepository) ListByTicketID(ctx context.Context, ticketID string, options CommentListOptions) ([]Comment, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}

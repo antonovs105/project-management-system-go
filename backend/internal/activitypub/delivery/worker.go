@@ -77,6 +77,7 @@ type Worker struct {
 	client                   HTTPClient
 	remoteActorRefresher     RemoteActorRefresher
 	targetActorRefreshMaxAge time.Duration
+	requireHTTPS             bool
 	metrics                  WorkerMetrics
 }
 
@@ -85,9 +86,6 @@ type WorkerOption func(*Worker)
 
 // NewWorker creates a delivery worker with safe HTTP defaults.
 func NewWorker(repo Repository, signer Signer, client HTTPClient, opts ...WorkerOption) *Worker {
-	if client == nil {
-		client = netguard.NewHTTPClient(20 * time.Second)
-	}
 	worker := &Worker{
 		repo:                     repo,
 		signer:                   signer,
@@ -96,6 +94,13 @@ func NewWorker(repo Repository, signer Signer, client HTTPClient, opts ...Worker
 	}
 	for _, opt := range opts {
 		opt(worker)
+	}
+	if worker.client == nil {
+		var policy []netguard.URLPolicyOption
+		if worker.requireHTTPS {
+			policy = append(policy, netguard.RequireHTTPS())
+		}
+		worker.client = netguard.NewHTTPClientWithPolicy(20*time.Second, policy...)
 	}
 	return worker
 }
@@ -120,6 +125,13 @@ func WithTargetActorRefreshMaxAge(maxAge time.Duration) WorkerOption {
 func WithMetrics(metrics WorkerMetrics) WorkerOption {
 	return func(w *Worker) {
 		w.metrics = metrics
+	}
+}
+
+// WithRequireHTTPS rejects plain HTTP inbox URLs and HTTP redirects.
+func WithRequireHTTPS(require bool) WorkerOption {
+	return func(w *Worker) {
+		w.requireHTTPS = require
 	}
 }
 
@@ -245,7 +257,7 @@ func (w *Worker) observeDeliveryAttempt(outcome, failureKind string, statusCode 
 
 // deliver signs and POSTs one stored ActivityPub activity to a remote inbox.
 func (w *Worker) deliver(ctx context.Context, delivery *Delivery) error {
-	if err := validateTargetInboxURL(delivery.TargetInboxURL); err != nil {
+	if err := validateTargetInboxURL(delivery.TargetInboxURL, w.requireHTTPS); err != nil {
 		return err
 	}
 	w.refreshTargetActor(ctx, delivery.TargetInboxURL)
@@ -377,8 +389,12 @@ func statusCodeLogValue(statusCode *int) string {
 }
 
 // validateTargetInboxURL rejects unsafe target inbox URLs before delivery.
-func validateTargetInboxURL(raw string) error {
-	if _, err := netguard.ValidateRemoteURL(raw); err != nil {
+func validateTargetInboxURL(raw string, requireHTTPS bool) error {
+	var policy []netguard.URLPolicyOption
+	if requireHTTPS {
+		policy = append(policy, netguard.RequireHTTPS())
+	}
+	if _, err := netguard.ValidateRemoteURL(raw, policy...); err != nil {
 		return permanentError{err: err}
 	}
 	return nil

@@ -265,7 +265,7 @@ func TestService_GetTicketGraph(t *testing.T) {
 			{ID: "ticket-1", Title: "Epic", Type: "epic", CreatedAt: time.Now()},
 			{ID: "ticket-2", Title: "Task", Type: "task", ParentID: stringPtr("ticket-1"), CreatedAt: time.Now()},
 		}
-		mockRepo.On("ListByProjectID", ctx, projectID).Return(tickets, nil).Once()
+		mockRepo.On("ListByProjectID", ctx, projectID, TicketListOptions{Limit: maxTicketListLimit}).Return(tickets, nil).Once()
 		mockRepo.On("GetLinksByProjectID", ctx, projectID).Return([]TicketLink{}, nil).Once()
 
 		graph, err := service.GetTicketGraph(ctx, projectID, userID)

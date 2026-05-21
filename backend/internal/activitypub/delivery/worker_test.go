@@ -384,6 +384,27 @@ func TestWorkerSkipsRetryForUnsafeInboxHost(t *testing.T) {
 	assert.Nil(t, repo.nextAttempt)
 }
 
+func TestWorkerSkipsRetryForHTTPInboxWhenHTTPSRequired(t *testing.T) {
+	delivery := testDelivery(1, 5)
+	delivery.TargetInboxURL = "http://93.184.216.34/inbox"
+	repo := &workerRepo{delivery: delivery}
+	signerCalled := false
+	worker := NewWorker(repo, signerFunc(func(ctx context.Context, actorID string, req *http.Request, body []byte) error {
+		signerCalled = true
+		return nil
+	}), nil, WithRequireHTTPS(true))
+
+	err := worker.HandleDeliveryTask(context.Background(), taskForDelivery(t, "delivery-1"))
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, asynq.SkipRetry))
+	assert.False(t, signerCalled)
+	assert.Equal(t, "delivery-1", repo.failedID)
+	assert.Contains(t, repo.failedMsg, "https required")
+	assert.Equal(t, FailureKindSafety, repo.failedDetails.Kind)
+	assert.Nil(t, repo.nextAttempt)
+}
+
 func TestWorkerStoresBoundedSingleLineResponseSnippet(t *testing.T) {
 	repo := &workerRepo{delivery: testDelivery(1, 5)}
 	worker := NewWorker(repo, signerFunc(func(ctx context.Context, actorID string, req *http.Request, body []byte) error {

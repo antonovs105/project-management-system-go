@@ -4,8 +4,10 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 )
 
@@ -58,7 +60,10 @@ func (h *Handler) Create(c echo.Context) error {
 
 // Get returns a project visible to the current user.
 func (h *Handler) Get(c echo.Context) error {
-	projectID := c.Param("id")
+	projectID, ok := uuidParam(c, "id", "project id")
+	if !ok {
+		return nil
+	}
 
 	userID := c.Get("userID").(string)
 
@@ -73,8 +78,12 @@ func (h *Handler) Get(c echo.Context) error {
 // List returns projects where the current user is a member.
 func (h *Handler) List(c echo.Context) error {
 	userID := c.Get("userID").(string)
+	options, err := projectListOptions(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
 
-	projects, err := h.service.ListUserProjects(c.Request().Context(), userID)
+	projects, err := h.service.ListUserProjects(c.Request().Context(), userID, options)
 	if err != nil {
 		log.Printf("Error listing user projects: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to retrieve projects"})
@@ -85,7 +94,10 @@ func (h *Handler) List(c echo.Context) error {
 
 // Update changes project metadata.
 func (h *Handler) Update(c echo.Context) error {
-	projectID := c.Param("id")
+	projectID, ok := uuidParam(c, "id", "project id")
+	if !ok {
+		return nil
+	}
 
 	var req UpdateProjectRequest
 	if err := c.Bind(&req); err != nil {
@@ -103,7 +115,10 @@ func (h *Handler) Update(c echo.Context) error {
 
 // Delete removes a project.
 func (h *Handler) Delete(c echo.Context) error {
-	projectID := c.Param("id")
+	projectID, ok := uuidParam(c, "id", "project id")
+	if !ok {
+		return nil
+	}
 
 	userID := c.Get("userID").(string)
 
@@ -122,13 +137,19 @@ type addMemberRequest struct {
 
 // AddMember creates an invite for a new project member.
 func (h *Handler) AddMember(c echo.Context) error {
-	projectID := c.Param("id")
+	projectID, ok := uuidParam(c, "id", "project id")
+	if !ok {
+		return nil
+	}
 
 	currentUserID := c.Get("userID").(string)
 
 	var req addMemberRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	if !validUUID(req.UserID) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid user id"})
 	}
 
 	invite, err := h.service.AddMemberToProject(c.Request().Context(), projectID, currentUserID, req.UserID, req.Role)
@@ -141,8 +162,14 @@ func (h *Handler) AddMember(c echo.Context) error {
 
 // RemoveMember removes a user from a project.
 func (h *Handler) RemoveMember(c echo.Context) error {
-	projectID := c.Param("id")
-	targetUserID := c.Param("userID")
+	projectID, ok := uuidParam(c, "id", "project id")
+	if !ok {
+		return nil
+	}
+	targetUserID, ok := uuidParam(c, "userID", "user id")
+	if !ok {
+		return nil
+	}
 	currentUserID := c.Get("userID").(string)
 
 	if err := h.service.RemoveMemberFromProject(c.Request().Context(), projectID, currentUserID, targetUserID); err != nil {
@@ -154,7 +181,10 @@ func (h *Handler) RemoveMember(c echo.Context) error {
 
 // AcceptInvite accepts a pending invite for the current user.
 func (h *Handler) AcceptInvite(c echo.Context) error {
-	inviteID := c.Param("id")
+	inviteID, ok := uuidParam(c, "id", "invite id")
+	if !ok {
+		return nil
+	}
 	userID := c.Get("userID").(string)
 
 	if err := h.service.AcceptInvite(c.Request().Context(), inviteID, userID); err != nil {
@@ -166,7 +196,10 @@ func (h *Handler) AcceptInvite(c echo.Context) error {
 
 // RejectInvite rejects a pending invite for the current user.
 func (h *Handler) RejectInvite(c echo.Context) error {
-	inviteID := c.Param("id")
+	inviteID, ok := uuidParam(c, "id", "invite id")
+	if !ok {
+		return nil
+	}
 	userID := c.Get("userID").(string)
 
 	if err := h.service.RejectInvite(c.Request().Context(), inviteID, userID); err != nil {
@@ -178,7 +211,10 @@ func (h *Handler) RejectInvite(c echo.Context) error {
 
 // RevokeInvite revokes a pending invite.
 func (h *Handler) RevokeInvite(c echo.Context) error {
-	inviteID := c.Param("id")
+	inviteID, ok := uuidParam(c, "id", "invite id")
+	if !ok {
+		return nil
+	}
 	userID := c.Get("userID").(string)
 
 	if err := h.service.RevokeInvite(c.Request().Context(), inviteID, userID); err != nil {
@@ -186,6 +222,61 @@ func (h *Handler) RevokeInvite(c echo.Context) error {
 	}
 
 	return c.NoContent(http.StatusNoContent)
+}
+
+// projectListOptions parses bounded project list pagination.
+func projectListOptions(c echo.Context) (ProjectListOptions, error) {
+	limit, err := parseOptionalPositiveInt(c.QueryParam("limit"))
+	if err != nil {
+		return ProjectListOptions{}, ErrInvalidProjectInput
+	}
+	offset, err := parseOptionalNonNegativeInt(c.QueryParam("offset"))
+	if err != nil {
+		return ProjectListOptions{}, ErrInvalidProjectInput
+	}
+	return ProjectListOptions{Limit: limit, Offset: offset}, nil
+}
+
+// parseOptionalPositiveInt parses an optional positive pagination value.
+func parseOptionalPositiveInt(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 0, ErrInvalidProjectInput
+	}
+	return value, nil
+}
+
+// parseOptionalNonNegativeInt parses an optional non-negative pagination value.
+func parseOptionalNonNegativeInt(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 0 {
+		return 0, ErrInvalidProjectInput
+	}
+	return value, nil
+}
+
+// uuidParam extracts and validates a UUID path parameter.
+func uuidParam(c echo.Context, name string, label string) (string, bool) {
+	value := c.Param(name)
+	if !validUUID(value) {
+		_ = c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid " + label})
+		return "", false
+	}
+	return value, true
+}
+
+// validUUID reports whether value is a valid UUID.
+func validUUID(value string) bool {
+	_, err := uuid.Parse(strings.TrimSpace(value))
+	return err == nil
 }
 
 // writeProjectError maps project service errors to HTTP responses.

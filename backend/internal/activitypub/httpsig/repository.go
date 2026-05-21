@@ -3,6 +3,7 @@ package httpsig
 import (
 	"context"
 
+	"github.com/antonovs105/project-management-system-go/internal/secrets"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -14,12 +15,17 @@ type Repository interface {
 
 // PgRepository implements Repository using PostgreSQL.
 type PgRepository struct {
-	db *sqlx.DB
+	db              *sqlx.DB
+	privateKeyCodec secrets.PrivateKeyCodec
 }
 
 // NewRepository creates a PostgreSQL-backed HTTP signature repository.
-func NewRepository(db *sqlx.DB) Repository {
-	return &PgRepository{db: db}
+func NewRepository(db *sqlx.DB, codecs ...secrets.PrivateKeyCodec) Repository {
+	var privateKeyCodec secrets.PrivateKeyCodec = secrets.NoopPrivateKeyCodec{}
+	if len(codecs) > 0 && codecs[0] != nil {
+		privateKeyCodec = codecs[0]
+	}
+	return &PgRepository{db: db, privateKeyCodec: privateKeyCodec}
 }
 
 // ActivePrivateKey returns the active local private key for an actor.
@@ -41,6 +47,26 @@ func (r *PgRepository) ActivePrivateKey(ctx context.Context, actorID string) (*A
 	`, actorID); err != nil {
 		return nil, err
 	}
+	privateKey, err := r.privateKeyCodec.DecryptPrivateKey(key.PrivateKeyPEM)
+	if err != nil {
+		return nil, err
+	}
+	if !secrets.IsEncryptedPrivateKey(key.PrivateKeyPEM) {
+		storedPrivateKey, err := r.privateKeyCodec.EncryptPrivateKey(privateKey)
+		if err != nil {
+			return nil, err
+		}
+		if storedPrivateKey != key.PrivateKeyPEM {
+			if _, err := r.db.ExecContext(ctx, `
+				UPDATE actor_keys
+				SET private_key_pem = $1
+				WHERE actor_id = $2 AND key_id = $3 AND private_key_pem = $4
+			`, storedPrivateKey, key.ActorID, key.KeyID, key.PrivateKeyPEM); err != nil {
+				return nil, err
+			}
+		}
+	}
+	key.PrivateKeyPEM = privateKey
 	return &key, nil
 }
 

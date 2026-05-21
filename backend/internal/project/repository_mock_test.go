@@ -24,8 +24,8 @@ func (m *MockRepository) GetByID(ctx context.Context, id string) (*Project, erro
 	return args.Get(0).(*Project), args.Error(1)
 }
 
-func (m *MockRepository) ListByOwnerID(ctx context.Context, ownerID string) ([]Project, error) {
-	args := m.Called(ctx, ownerID)
+func (m *MockRepository) ListByOwnerID(ctx context.Context, ownerID string, options ProjectListOptions) ([]Project, error) {
+	args := m.Called(ctx, ownerID, options)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

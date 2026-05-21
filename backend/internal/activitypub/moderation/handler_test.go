@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testFederationDeliveryID = "44444444-4444-4444-8444-444444444444"
+
 func TestHandlerListsDomainBlocks(t *testing.T) {
 	creator := "admin-1"
 	repo := &fakeRepository{
@@ -190,22 +192,22 @@ func TestHandlerGetsFederationDeliverySummary(t *testing.T) {
 func TestHandlerRetriesFederationDelivery(t *testing.T) {
 	repo := &fakeRepository{role: RoleAdmin}
 	e := newModerationHandlerEcho(repo, "admin-1")
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/federation/deliveries/delivery-1/retry", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/federation/deliveries/"+testFederationDeliveryID+"/retry", nil)
 	rec := httptest.NewRecorder()
 
 	e.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusAccepted, rec.Code)
-	assert.Equal(t, "delivery-1", repo.retryDeliveryID)
+	assert.Equal(t, testFederationDeliveryID, repo.retryDeliveryID)
 	var response delivery.Delivery
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
-	assert.Equal(t, "delivery-1", response.ID)
+	assert.Equal(t, testFederationDeliveryID, response.ID)
 	assert.Equal(t, delivery.StatePending, response.State)
 }
 
 func TestHandlerMapsFederationDeliveryRetryErrors(t *testing.T) {
 	e := newModerationHandlerEcho(&fakeRepository{role: RoleAdmin, retryErr: delivery.ErrDeliveryRetryUnavailable}, "admin-1")
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/federation/deliveries/delivery-1/retry", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/federation/deliveries/"+testFederationDeliveryID+"/retry", nil)
 	rec := httptest.NewRecorder()
 
 	e.ServeHTTP(rec, req)

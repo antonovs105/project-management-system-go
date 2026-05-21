@@ -332,7 +332,7 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	requireOutboxItem(t, db, owner.ID, "Delete", createdComment.APID)
 	requireDeliveryForObject(t, db, "Delete", createdComment.APID, remoteInbox)
 
-	comments, err := commentService.ListComments(ctx, createdTicket.ID, owner.ID)
+	comments, err := commentService.ListComments(ctx, createdTicket.ID, owner.ID, comment.CommentListOptions{})
 	require.NoError(t, err)
 	require.Empty(t, comments)
 
@@ -1074,7 +1074,7 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 
 		commentService := comment.NewService(comment.NewRepository(db, cfg), ticketService, cfg)
 		commentService.SetDelivery(deliveryService)
-		comments, err := commentService.ListComments(ctx, localTicket.ID, owner.ID)
+		comments, err := commentService.ListComments(ctx, localTicket.ID, owner.ID, comment.CommentListOptions{})
 		require.NoError(t, err)
 		require.Len(t, comments, 1)
 		assert.Equal(t, noteAPID, comments[0].APID)
@@ -1102,7 +1102,7 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		require.True(t, duplicateRemoteTicket.Duplicate)
 		requireDeliveryCountForObject(t, db, "Create", remoteTicketAPID, fanoutPeer.InboxURL, 1)
 
-		tickets, err := ticketService.ListTicketsInProject(ctx, project.ID, owner.ID)
+		tickets, err := ticketService.ListTicketsInProject(ctx, project.ID, owner.ID, ticket.TicketListOptions{})
 		require.NoError(t, err)
 		createdRemoteTicket := findTicketByAPID(tickets, remoteTicketAPID)
 		require.NotNil(t, createdRemoteTicket)
@@ -1127,7 +1127,7 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		requireDeliveryForObject(t, db, "Update", remoteTicketAPID, fanoutPeer.InboxURL)
 		requireNoDeliveryForObject(t, db, "Update", remoteTicketAPID, remoteActor.InboxURL)
 
-		tickets, err = ticketService.ListTicketsInProject(ctx, project.ID, owner.ID)
+		tickets, err = ticketService.ListTicketsInProject(ctx, project.ID, owner.ID, ticket.TicketListOptions{})
 		require.NoError(t, err)
 		updatedRemoteTicket := findTicketByAPID(tickets, remoteTicketAPID)
 		require.NotNil(t, updatedRemoteTicket)
@@ -1161,7 +1161,7 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		requireTicketAssignee(t, db, remoteTicketAPID, assignee.ID)
 		requireTicketObjectAssignedTo(t, db, remoteTicketAPID, assignee.APID)
 
-		tickets, err = ticketService.ListTicketsInProject(ctx, project.ID, owner.ID)
+		tickets, err = ticketService.ListTicketsInProject(ctx, project.ID, owner.ID, ticket.TicketListOptions{})
 		require.NoError(t, err)
 		assignedRemoteTicket := findTicketByAPID(tickets, remoteTicketAPID)
 		require.NotNil(t, assignedRemoteTicket)
@@ -1184,7 +1184,7 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		requireNoTicketAssignee(t, db, remoteTicketAPID, assignee.ID)
 		requireTicketObjectNotAssignedTo(t, db, remoteTicketAPID, assignee.APID)
 
-		tickets, err = ticketService.ListTicketsInProject(ctx, project.ID, owner.ID)
+		tickets, err = ticketService.ListTicketsInProject(ctx, project.ID, owner.ID, ticket.TicketListOptions{})
 		require.NoError(t, err)
 		unassignedRemoteTicket := findTicketByAPID(tickets, remoteTicketAPID)
 		require.NotNil(t, unassignedRemoteTicket)
@@ -1213,7 +1213,7 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		requireObjectTombstone(t, db, remoteTicketLocalComment.APID, "Note")
 		requireNoTicketByAPID(t, db, remoteTicketAPID)
 
-		tickets, err = ticketService.ListTicketsInProject(ctx, project.ID, owner.ID)
+		tickets, err = ticketService.ListTicketsInProject(ctx, project.ID, owner.ID, ticket.TicketListOptions{})
 		require.NoError(t, err)
 		assert.Nil(t, findTicketByAPID(tickets, remoteTicketAPID))
 

@@ -188,7 +188,7 @@ func (s *Service) ValidateTokenVersion(ctx context.Context, userID string, token
 // newLocalUser validates account input and prepares actor/key data before persistence.
 func (s *Service) newLocalUser(username, email, password, role string) (*User, error) {
 	username = strings.TrimSpace(username)
-	email = strings.TrimSpace(email)
+	email = normalizeEmail(email)
 	if err := validateRegistrationInput(username, email, password); err != nil {
 		return nil, err
 	}
@@ -236,6 +236,11 @@ func validateRegistrationInput(username, email, password string) error {
 		return invalidUserInput("valid email is required")
 	}
 	return validatePassword(password)
+}
+
+// normalizeEmail trims and lowercases an email address for uniqueness and login.
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
 }
 
 // validatePassword enforces the local minimum password policy.
@@ -296,7 +301,7 @@ func invalidUserInput(message string) error {
 
 // Login verifies credentials and returns a JWT bound to the user's token version.
 func (s *Service) Login(ctx context.Context, email, password string) (string, error) {
-	email = strings.TrimSpace(email)
+	email = normalizeEmail(email)
 
 	user, err := s.repo.GetUserByEmail(ctx, email)
 	if err != nil {

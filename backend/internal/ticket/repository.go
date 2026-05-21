@@ -14,7 +14,7 @@ import (
 // Repository defines persistence operations for tickets and ticket links.
 type Repository interface {
 	Create(ctx context.Context, ticket *Ticket) ([]string, error)
-	ListByProjectID(ctx context.Context, projectID string) ([]Ticket, error)
+	ListByProjectID(ctx context.Context, projectID string, options TicketListOptions) ([]Ticket, error)
 	GetByID(ctx context.Context, id string) (*Ticket, error)
 	Update(ctx context.Context, ticket *Ticket, actorID string) ([]string, error)
 	Delete(ctx context.Context, id string, actorID string) (*DeleteResult, error)
@@ -92,13 +92,14 @@ func (r *PgRepository) Create(ctx context.Context, ticket *Ticket) ([]string, er
 }
 
 // ListByProjectID returns tickets for a project.
-func (r *PgRepository) ListByProjectID(ctx context.Context, projectID string) ([]Ticket, error) {
+func (r *PgRepository) ListByProjectID(ctx context.Context, projectID string, options TicketListOptions) ([]Ticket, error) {
 	var tickets []Ticket
 	query := ticketSelectBase() + `
 		WHERE t.project_id = $1
 		ORDER BY t.created_at DESC
+		LIMIT $2 OFFSET $3
 	`
-	if err := r.db.SelectContext(ctx, &tickets, query, projectID); err != nil {
+	if err := r.db.SelectContext(ctx, &tickets, query, projectID, options.Limit, options.Offset); err != nil {
 		return nil, err
 	}
 	return tickets, nil
@@ -276,21 +277,73 @@ func (r *PgRepository) Delete(ctx context.Context, id string, actorID string) (*
 
 // CreateLink stores a directed link between tickets.
 func (r *PgRepository) CreateLink(ctx context.Context, link *TicketLink) error {
-	query := `
-		INSERT INTO ticket_links (source_id, target_id, link_type)
-		VALUES (:source_id, :target_id, :link_type)
-		RETURNING id::text, created_at
-	`
-	rows, err := r.db.NamedQueryContext(ctx, query, link)
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer tx.Rollback()
 
-	if rows.Next() {
-		return rows.Scan(&link.ID, &link.CreatedAt)
+	var sourceProjectID string
+	if err := tx.GetContext(ctx, &sourceProjectID, `
+		SELECT project_id::text
+		FROM tickets
+		WHERE id = $1
+	`, link.SourceID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return invalidTicketInput("source ticket not found")
+		}
+		return err
 	}
-	return errors.New("link creation failed")
+
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, sourceProjectID); err != nil {
+		return err
+	}
+
+	var targetProjectID string
+	if err := tx.GetContext(ctx, &targetProjectID, `
+		SELECT project_id::text
+		FROM tickets
+		WHERE id = $1
+	`, link.TargetID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return invalidTicketInput("target ticket not found")
+		}
+		return err
+	}
+	if targetProjectID != sourceProjectID {
+		return invalidTicketInput("cannot link tickets from different projects")
+	}
+
+	var cycle bool
+	if err := tx.GetContext(ctx, &cycle, `
+		WITH RECURSIVE reachable(id) AS (
+			SELECT CAST($2 AS uuid)
+			UNION
+			SELECT ticket_link.target_id
+			FROM ticket_links ticket_link
+			JOIN reachable ON reachable.id = ticket_link.source_id
+		)
+		SELECT EXISTS(
+			SELECT 1
+			FROM reachable
+			WHERE id = CAST($1 AS uuid)
+		)
+	`, link.SourceID, link.TargetID); err != nil {
+		return err
+	}
+	if cycle {
+		return invalidTicketInput("cycle detected: path already exists from target to source")
+	}
+
+	query := `
+		INSERT INTO ticket_links (source_id, target_id, link_type)
+		VALUES ($1, $2, $3)
+		RETURNING id::text, created_at
+	`
+	if err := tx.QueryRowxContext(ctx, query, link.SourceID, link.TargetID, link.LinkType).Scan(&link.ID, &link.CreatedAt); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // GetLinkByID loads a ticket link by UUID.

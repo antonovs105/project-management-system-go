@@ -16,6 +16,13 @@ import (
 // ErrInvalidCommentInput reports malformed comment input.
 var ErrInvalidCommentInput = errors.New("invalid comment input")
 
+const (
+	// defaultCommentListLimit is the fallback comment list size.
+	defaultCommentListLimit = 100
+	// maxCommentListLimit is the largest accepted comment list size.
+	maxCommentListLimit = 500
+)
+
 // TicketChecker exposes ticket lookups and project roles needed by comments.
 type TicketChecker interface {
 	GetTicketByID(ctx context.Context, ticketID, userID string) (*ticket.Ticket, error)
@@ -89,11 +96,32 @@ func invalidCommentInput(message string) error {
 }
 
 // ListComments returns comments for a ticket visible to the current user.
-func (s *Service) ListComments(ctx context.Context, ticketID, userID string) ([]Comment, error) {
+func (s *Service) ListComments(ctx context.Context, ticketID, userID string, options CommentListOptions) ([]Comment, error) {
 	if _, err := s.tickets.GetTicketByID(ctx, ticketID, userID); err != nil {
 		return nil, err
 	}
-	return s.repo.ListByTicketID(ctx, ticketID)
+	options.Limit = normalizeCommentListLimit(options.Limit)
+	options.Offset = normalizeCommentListOffset(options.Offset)
+	return s.repo.ListByTicketID(ctx, ticketID, options)
+}
+
+// normalizeCommentListLimit bounds comment list sizes.
+func normalizeCommentListLimit(limit int) int {
+	if limit <= 0 {
+		return defaultCommentListLimit
+	}
+	if limit > maxCommentListLimit {
+		return maxCommentListLimit
+	}
+	return limit
+}
+
+// normalizeCommentListOffset clamps negative comment list offsets.
+func normalizeCommentListOffset(offset int) int {
+	if offset < 0 {
+		return 0
+	}
+	return offset
 }
 
 // DeleteComment removes a comment and emits a Delete activity.

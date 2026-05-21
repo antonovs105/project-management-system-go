@@ -22,6 +22,21 @@ var (
 	ErrTooManyRedirects = errors.New("too many remote redirects")
 )
 
+// URLPolicy configures outbound federation URL validation.
+type URLPolicy struct {
+	requireHTTPS bool
+}
+
+// URLPolicyOption changes outbound federation URL validation behavior.
+type URLPolicyOption func(*URLPolicy)
+
+// RequireHTTPS rejects plain HTTP URLs and HTTP redirects.
+func RequireHTTPS() URLPolicyOption {
+	return func(policy *URLPolicy) {
+		policy.requireHTTPS = true
+	}
+}
+
 // blockedPrefixes lists globally routed ranges that are still unsafe federation targets.
 var blockedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("100.64.0.0/10"),
@@ -35,9 +50,15 @@ var blockedPrefixes = []netip.Prefix{
 
 // NewHTTPClient creates an HTTP client that blocks unsafe federation destinations.
 func NewHTTPClient(timeout time.Duration) *http.Client {
+	return NewHTTPClientWithPolicy(timeout)
+}
+
+// NewHTTPClientWithPolicy creates an HTTP client with explicit URL validation policy.
+func NewHTTPClientWithPolicy(timeout time.Duration, opts ...URLPolicyOption) *http.Client {
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
+	policy := urlPolicy(opts...)
 
 	dialer := &net.Dialer{
 		Timeout:   timeout,
@@ -56,25 +77,26 @@ func NewHTTPClient(timeout time.Duration) *http.Client {
 			if len(via) >= maxRedirects {
 				return ErrTooManyRedirects
 			}
-			return ValidateURL(req.URL)
+			return ValidateURL(req.URL, policy.options()...)
 		},
 	}
 }
 
 // ValidateRemoteURL parses and validates an outbound federation URL.
-func ValidateRemoteURL(raw string) (*url.URL, error) {
+func ValidateRemoteURL(raw string, opts ...URLPolicyOption) (*url.URL, error) {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return nil, fmt.Errorf("%w: invalid url", ErrUnsafeURL)
 	}
-	if err := ValidateURL(parsed); err != nil {
+	if err := ValidateURL(parsed, opts...); err != nil {
 		return nil, err
 	}
 	return parsed, nil
 }
 
 // ValidateURL validates an already parsed outbound federation URL.
-func ValidateURL(parsed *url.URL) error {
+func ValidateURL(parsed *url.URL, opts ...URLPolicyOption) error {
+	policy := urlPolicy(opts...)
 	if parsed == nil || parsed.Scheme == "" || parsed.Host == "" {
 		return fmt.Errorf("%w: absolute http url required", ErrUnsafeURL)
 	}
@@ -82,7 +104,29 @@ func ValidateURL(parsed *url.URL) error {
 	if scheme != "http" && scheme != "https" {
 		return fmt.Errorf("%w: unsupported scheme %q", ErrUnsafeURL, parsed.Scheme)
 	}
+	if policy.requireHTTPS && scheme != "https" {
+		return fmt.Errorf("%w: https required", ErrUnsafeURL)
+	}
 	return ValidateHostname(parsed.Hostname())
+}
+
+// urlPolicy applies URL policy options to their default values.
+func urlPolicy(opts ...URLPolicyOption) URLPolicy {
+	var policy URLPolicy
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&policy)
+		}
+	}
+	return policy
+}
+
+// options converts a URL policy back into option functions.
+func (p URLPolicy) options() []URLPolicyOption {
+	if p.requireHTTPS {
+		return []URLPolicyOption{RequireHTTPS()}
+	}
+	return nil
 }
 
 // ValidateHostname rejects hostnames or IP literals unsafe for outbound federation.

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	"github.com/antonovs105/project-management-system-go/internal/secrets"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -14,7 +15,7 @@ import (
 type Repository interface {
 	Create(ctx context.Context, project *Project) error
 	GetByID(ctx context.Context, id string) (*Project, error)
-	ListByOwnerID(ctx context.Context, ownerID string) ([]Project, error)
+	ListByOwnerID(ctx context.Context, ownerID string, options ProjectListOptions) ([]Project, error)
 	GetUserRole(ctx context.Context, userID, projectID string) (string, error)
 	IsProjectMember(ctx context.Context, projectID, userID string) (bool, error)
 	HasPendingInvite(ctx context.Context, projectID, userID string) (bool, error)
@@ -30,13 +31,18 @@ type Repository interface {
 
 // PgRepository implements Repository using PostgreSQL.
 type PgRepository struct {
-	db  *sqlx.DB
-	cfg activitypub.Config
+	db              *sqlx.DB
+	cfg             activitypub.Config
+	privateKeyCodec secrets.PrivateKeyCodec
 }
 
 // NewRepository creates a PostgreSQL-backed project repository.
-func NewRepository(db *sqlx.DB, cfg activitypub.Config) Repository {
-	return &PgRepository{db: db, cfg: cfg}
+func NewRepository(db *sqlx.DB, cfg activitypub.Config, codecs ...secrets.PrivateKeyCodec) Repository {
+	var privateKeyCodec secrets.PrivateKeyCodec = secrets.NoopPrivateKeyCodec{}
+	if len(codecs) > 0 && codecs[0] != nil {
+		privateKeyCodec = codecs[0]
+	}
+	return &PgRepository{db: db, cfg: cfg, privateKeyCodec: privateKeyCodec}
 }
 
 // Create stores a project actor, owner membership, and Create activity.
@@ -85,6 +91,10 @@ func (r *PgRepository) Create(ctx context.Context, project *Project) error {
 		return err
 	}
 
+	storedPrivateKey, err := r.privateKeyCodec.EncryptPrivateKey(project.PrivateKeyPEM)
+	if err != nil {
+		return err
+	}
 	if _, err := tx.NamedExecContext(ctx, `
 		INSERT INTO actor_keys (actor_id, key_id, public_key_pem, private_key_pem)
 		VALUES (:actor_id, :key_id, :public_key_pem, :private_key_pem)
@@ -92,7 +102,7 @@ func (r *PgRepository) Create(ctx context.Context, project *Project) error {
 		"actor_id":        project.ID,
 		"key_id":          activitypub.KeyID(project.APID),
 		"public_key_pem":  project.PublicKeyPEM,
-		"private_key_pem": project.PrivateKeyPEM,
+		"private_key_pem": storedPrivateKey,
 	}); err != nil {
 		return err
 	}
@@ -181,7 +191,7 @@ func (r *PgRepository) GetByID(ctx context.Context, id string) (*Project, error)
 }
 
 // ListByOwnerID returns projects where the user is a member.
-func (r *PgRepository) ListByOwnerID(ctx context.Context, ownerID string) ([]Project, error) {
+func (r *PgRepository) ListByOwnerID(ctx context.Context, ownerID string, options ProjectListOptions) ([]Project, error) {
 	var projects []Project
 	query := `
 		SELECT
@@ -198,8 +208,9 @@ func (r *PgRepository) ListByOwnerID(ctx context.Context, ownerID string) ([]Pro
 		JOIN project_members pm ON pm.project_id = p.id
 		WHERE pm.user_id = $1
 		ORDER BY p.created_at DESC
+		LIMIT $2 OFFSET $3
 	`
-	if err := r.db.SelectContext(ctx, &projects, query, ownerID); err != nil {
+	if err := r.db.SelectContext(ctx, &projects, query, ownerID, options.Limit, options.Offset); err != nil {
 		return nil, err
 	}
 	return projects, nil

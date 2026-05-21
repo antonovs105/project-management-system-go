@@ -7,6 +7,7 @@ import (
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/antonovs105/project-management-system-go/internal/adminaudit"
+	"github.com/antonovs105/project-management-system-go/internal/secrets"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -25,15 +26,21 @@ type Repository interface {
 
 // PgRepository implements Repository using PostgreSQL.
 type PgRepository struct {
-	db  *sqlx.DB
-	cfg activitypub.Config
+	db              *sqlx.DB
+	cfg             activitypub.Config
+	privateKeyCodec secrets.PrivateKeyCodec
 }
 
 // NewRepository creates a PostgreSQL-backed user repository.
-func NewRepository(db *sqlx.DB, cfg activitypub.Config) Repository {
+func NewRepository(db *sqlx.DB, cfg activitypub.Config, codecs ...secrets.PrivateKeyCodec) Repository {
+	var privateKeyCodec secrets.PrivateKeyCodec = secrets.NoopPrivateKeyCodec{}
+	if len(codecs) > 0 && codecs[0] != nil {
+		privateKeyCodec = codecs[0]
+	}
 	return &PgRepository{
-		db:  db,
-		cfg: cfg,
+		db:              db,
+		cfg:             cfg,
+		privateKeyCodec: privateKeyCodec,
 	}
 }
 
@@ -125,11 +132,15 @@ func (r *PgRepository) insertUserGraph(ctx context.Context, tx *sqlx.Tx, user *U
 		INSERT INTO actor_keys (actor_id, key_id, public_key_pem, private_key_pem)
 		VALUES (:actor_id, :key_id, :public_key_pem, :private_key_pem)
 	`
+	storedPrivateKey, err := r.privateKeyCodec.EncryptPrivateKey(user.PrivateKeyPEM)
+	if err != nil {
+		return err
+	}
 	if _, err := tx.NamedExecContext(ctx, keyQuery, map[string]any{
 		"actor_id":        user.ID,
 		"key_id":          activitypub.KeyID(user.APID),
 		"public_key_pem":  user.PublicKeyPEM,
-		"private_key_pem": user.PrivateKeyPEM,
+		"private_key_pem": storedPrivateKey,
 	}); err != nil {
 		return err
 	}
@@ -171,7 +182,7 @@ func (r *PgRepository) GetUserByEmail(ctx context.Context, email string) (*User,
 			u.updated_at
 		FROM users u
 		JOIN actors a ON a.id = u.id
-		WHERE u.email = $1
+		WHERE lower(u.email) = lower($1)
 	`
 
 	err := r.db.GetContext(ctx, &user, query, email)

@@ -20,8 +20,8 @@ func (m *MockRepository) Create(ctx context.Context, ticket *Ticket) ([]string, 
 	return args.Get(0).([]string), args.Error(1)
 }
 
-func (m *MockRepository) ListByProjectID(ctx context.Context, projectID string) ([]Ticket, error) {
-	args := m.Called(ctx, projectID)
+func (m *MockRepository) ListByProjectID(ctx context.Context, projectID string, options TicketListOptions) ([]Ticket, error) {
+	args := m.Called(ctx, projectID, options)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

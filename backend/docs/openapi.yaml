@@ -278,6 +278,18 @@ paths:
       operationId: listProjects
       security:
         - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
       responses:
         "200":
           description: Projects visible to the authenticated user.
@@ -287,6 +299,8 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Project"
+        "400":
+          $ref: "#/components/responses/Error"
     post:
       tags: [Projects]
       operationId: createProject
@@ -422,6 +436,18 @@ paths:
       operationId: listProjectTickets
       security:
         - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
       responses:
         "200":
           description: Tickets in the project.
@@ -431,6 +457,8 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Ticket"
+        "400":
+          $ref: "#/components/responses/Error"
     post:
       tags: [Tickets]
       operationId: createTicket
@@ -537,6 +565,18 @@ paths:
       operationId: listTicketComments
       security:
         - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
       responses:
         "200":
           description: Comments on a ticket.
@@ -546,6 +586,8 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Comment"
+        "400":
+          $ref: "#/components/responses/Error"
     post:
       tags: [Comments]
       operationId: createComment

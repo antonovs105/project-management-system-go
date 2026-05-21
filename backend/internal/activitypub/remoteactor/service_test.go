@@ -3,6 +3,8 @@ package remoteactor
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -271,12 +273,40 @@ func TestFetchRejectsUnsupportedActorScheme(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidActorDocument)
 }
 
+func TestFetchRejectsHTTPWhenHTTPSRequired(t *testing.T) {
+	repo := &memoryRepository{}
+	service := NewService(repo, WithRequireHTTPS(true))
+
+	_, err := service.Fetch(context.Background(), "http://93.184.216.34/users/alice")
+
+	require.ErrorIs(t, err, ErrInvalidActorDocument)
+	assert.Equal(t, "http://93.184.216.34/users/alice", repo.fetchFailureAPID)
+}
+
 func TestFetchRejectsUnsafeActorHost(t *testing.T) {
 	service := NewService(&memoryRepository{})
 
 	_, err := service.Fetch(context.Background(), "http://127.0.0.1/users/alice")
 
 	require.ErrorIs(t, err, netguard.ErrUnsafeURL)
+}
+
+func TestFetchRejectsHTTPEndpointsWhenHTTPSRequired(t *testing.T) {
+	publicKey, _, err := activitypub.GenerateRSAKeyPair()
+	require.NoError(t, err)
+
+	repo := &memoryRepository{}
+	service := NewService(repo, WithRequireHTTPS(true), WithHTTPClient(httpClientFunc(func(req *http.Request) (*http.Response, error) {
+		doc := actorDocumentMap("https://remote.example", "Person", publicKey)
+		doc["inbox"] = "http://93.184.216.34/inbox"
+		return jsonResponse(t, http.StatusOK, doc), nil
+	})))
+
+	_, err = service.Fetch(context.Background(), "https://remote.example/users/alice")
+
+	require.ErrorIs(t, err, ErrInvalidActorDocument)
+	assert.Nil(t, repo.actor)
+	assert.Contains(t, repo.fetchError, "actor inbox url")
 }
 
 func TestRefreshIfStaleSkipsFreshRemoteActor(t *testing.T) {
@@ -359,6 +389,14 @@ func TestDiscoverRejectsWebFingerWithoutSelfLink(t *testing.T) {
 	service := NewService(&memoryRepository{}, WithHTTPClient(server.Client()), WithWebFingerScheme("http"))
 
 	_, err := service.Discover(context.Background(), "acct:alice@"+serverHost(server))
+
+	require.ErrorIs(t, err, ErrInvalidWebFinger)
+}
+
+func TestDiscoverRejectsHTTPWebFingerWhenHTTPSRequired(t *testing.T) {
+	service := NewService(&memoryRepository{}, WithWebFingerScheme("http"), WithRequireHTTPS(true))
+
+	_, err := service.Discover(context.Background(), "acct:alice@example.test")
 
 	require.ErrorIs(t, err, ErrInvalidWebFinger)
 }
@@ -508,6 +546,18 @@ func writeJSON(t *testing.T, w http.ResponseWriter, value any) {
 
 	w.Header().Set("Content-Type", "application/json")
 	require.NoError(t, json.NewEncoder(w).Encode(value))
+}
+
+func jsonResponse(t *testing.T, statusCode int, value any) *http.Response {
+	t.Helper()
+
+	raw, err := json.Marshal(value)
+	require.NoError(t, err)
+	return &http.Response{
+		StatusCode: statusCode,
+		Status:     fmt.Sprintf("%d %s", statusCode, http.StatusText(statusCode)),
+		Body:       io.NopCloser(strings.NewReader(string(raw))),
+	}
 }
 
 func mustJSON(t *testing.T, value any) string {
