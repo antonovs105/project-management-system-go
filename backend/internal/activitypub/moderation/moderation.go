@@ -5,15 +5,21 @@ import (
 	"time"
 )
 
+// RoleAdmin is the global role required for federation moderation.
 const RoleAdmin = "admin"
 
 var (
-	ErrAdminRequired       = errors.New("admin permissions required")
-	ErrInvalidDomainBlock  = errors.New("invalid federation domain block")
+	// ErrAdminRequired reports a non-admin moderation request.
+	ErrAdminRequired = errors.New("admin permissions required")
+	// ErrInvalidDomainBlock reports malformed domain block input.
+	ErrInvalidDomainBlock = errors.New("invalid federation domain block")
+	// ErrDomainBlockNotFound reports that a requested domain block does not exist.
 	ErrDomainBlockNotFound = errors.New("federation domain block not found")
-	ErrInvalidFilter       = errors.New("invalid federation moderation filter")
+	// ErrInvalidFilter reports malformed federation moderation filters.
+	ErrInvalidFilter = errors.New("invalid federation moderation filter")
 )
 
+// DomainBlock is an admin-managed domain excluded from federation inbox handling.
 type DomainBlock struct {
 	ID        string    `db:"id" json:"id"`
 	Domain    string    `db:"domain" json:"domain"`
@@ -23,6 +29,7 @@ type DomainBlock struct {
 	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 }
 
+// RemoteActorInspection is the admin view of a cached remote actor.
 type RemoteActorInspection struct {
 	ID                string     `db:"id" json:"id"`
 	APID              string     `db:"ap_id" json:"ap_id"`
@@ -42,11 +49,13 @@ type RemoteActorInspection struct {
 	UpdatedAt         time.Time  `db:"updated_at" json:"updated_at"`
 }
 
+// RemoteActorListOptions filters cached remote actor inspection results.
 type RemoteActorListOptions struct {
 	FetchErrorOnly bool
 	Limit          int
 }
 
+// FederationDeliveryInspection is the admin view of an outbound delivery.
 type FederationDeliveryInspection struct {
 	ID              string     `db:"id" json:"id"`
 	ActivityAPID    string     `db:"activity_ap_id" json:"activity_ap_id"`
@@ -71,6 +80,7 @@ type FederationDeliveryInspection struct {
 	UpdatedAt       time.Time  `db:"updated_at" json:"updated_at"`
 }
 
+// FederationDeliveryListOptions filters outbound delivery inspection results.
 type FederationDeliveryListOptions struct {
 	State       string
 	FailureKind string

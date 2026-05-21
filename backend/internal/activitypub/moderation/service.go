@@ -15,11 +15,13 @@ const (
 	maxInspectionLimit     = 500
 )
 
+// Service enforces admin access for federation moderation workflows.
 type Service struct {
 	repo  Repository
 	queue delivery.Queue
 }
 
+// NewService creates a federation moderation service.
 func NewService(repo Repository, queues ...delivery.Queue) *Service {
 	var queue delivery.Queue = delivery.NoopQueue{}
 	if len(queues) > 0 && queues[0] != nil {
@@ -28,6 +30,7 @@ func NewService(repo Repository, queues ...delivery.Queue) *Service {
 	return &Service{repo: repo, queue: queue}
 }
 
+// ListDomainBlocks returns configured domain blocks for an admin.
 func (s *Service) ListDomainBlocks(ctx context.Context, userID string) ([]DomainBlock, error) {
 	if err := s.requireAdmin(ctx, userID); err != nil {
 		return nil, err
@@ -35,6 +38,7 @@ func (s *Service) ListDomainBlocks(ctx context.Context, userID string) ([]Domain
 	return s.repo.ListDomainBlocks(ctx)
 }
 
+// BlockDomain creates or updates a federation domain block.
 func (s *Service) BlockDomain(ctx context.Context, userID, domain, reason string) (*DomainBlock, error) {
 	if err := s.requireAdmin(ctx, userID); err != nil {
 		return nil, err
@@ -46,6 +50,7 @@ func (s *Service) BlockDomain(ctx context.Context, userID, domain, reason string
 	return s.repo.UpsertDomainBlock(ctx, normalized, strings.TrimSpace(reason), userID)
 }
 
+// UnblockDomain removes a federation domain block.
 func (s *Service) UnblockDomain(ctx context.Context, userID, domain string) error {
 	if err := s.requireAdmin(ctx, userID); err != nil {
 		return err
@@ -63,6 +68,7 @@ func (s *Service) UnblockDomain(ctx context.Context, userID, domain string) erro
 	return nil
 }
 
+// ListRemoteActors returns cached remote actors for admin inspection.
 func (s *Service) ListRemoteActors(ctx context.Context, userID string, options RemoteActorListOptions) ([]RemoteActorInspection, error) {
 	if err := s.requireAdmin(ctx, userID); err != nil {
 		return nil, err
@@ -71,6 +77,7 @@ func (s *Service) ListRemoteActors(ctx context.Context, userID string, options R
 	return s.repo.ListRemoteActors(ctx, options)
 }
 
+// ListFederationDeliveries returns outbound deliveries for admin inspection.
 func (s *Service) ListFederationDeliveries(ctx context.Context, userID string, options FederationDeliveryListOptions) ([]FederationDeliveryInspection, error) {
 	if err := s.requireAdmin(ctx, userID); err != nil {
 		return nil, err
@@ -85,6 +92,7 @@ func (s *Service) ListFederationDeliveries(ctx context.Context, userID string, o
 	return s.repo.ListFederationDeliveries(ctx, options)
 }
 
+// RetryFederationDelivery resets and requeues an outbound delivery.
 func (s *Service) RetryFederationDelivery(ctx context.Context, userID string, deliveryID string) (*delivery.Delivery, error) {
 	if err := s.requireAdmin(ctx, userID); err != nil {
 		return nil, err

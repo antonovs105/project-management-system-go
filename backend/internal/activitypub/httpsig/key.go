@@ -10,15 +10,19 @@ import (
 )
 
 const (
+	// AlgorithmRSAV15SHA256 is the supported HTTP Message Signatures algorithm.
 	AlgorithmRSAV15SHA256 = "rsa-v1_5-sha256"
 	legacyRSAAlgorithm    = "rsa-sha256"
 )
 
 var (
+	// ErrInvalidPrivateKey reports malformed RSA private key PEM.
 	ErrInvalidPrivateKey = errors.New("invalid rsa private key")
-	ErrInvalidPublicKey  = errors.New("invalid rsa public key")
+	// ErrInvalidPublicKey reports malformed RSA public key PEM.
+	ErrInvalidPublicKey = errors.New("invalid rsa public key")
 )
 
+// ActorKey is an actor signing or verification key loaded from storage.
 type ActorKey struct {
 	ActorID       string `db:"actor_id"`
 	ActorAPID     string `db:"actor_ap_id"`
@@ -28,6 +32,7 @@ type ActorKey struct {
 	PrivateKeyPEM string `db:"private_key_pem"`
 }
 
+// SignatureAlgorithm returns the normalized signing algorithm for the key.
 func (k ActorKey) SignatureAlgorithm() (string, error) {
 	switch strings.ToLower(strings.TrimSpace(k.Algorithm)) {
 	case "", AlgorithmRSAV15SHA256, legacyRSAAlgorithm:
@@ -37,6 +42,7 @@ func (k ActorKey) SignatureAlgorithm() (string, error) {
 	}
 }
 
+// ParseRSAPrivateKeyPEM parses PKCS#1 or PKCS#8 RSA private key PEM.
 func ParseRSAPrivateKeyPEM(raw string) (*rsa.PrivateKey, error) {
 	block, _ := pem.Decode([]byte(raw))
 	if block == nil {
@@ -58,6 +64,7 @@ func ParseRSAPrivateKeyPEM(raw string) (*rsa.PrivateKey, error) {
 	return key, nil
 }
 
+// ParseRSAPublicKeyPEM parses PKIX or PKCS#1 RSA public key PEM.
 func ParseRSAPublicKeyPEM(raw string) (*rsa.PublicKey, error) {
 	block, _ := pem.Decode([]byte(raw))
 	if block == nil {

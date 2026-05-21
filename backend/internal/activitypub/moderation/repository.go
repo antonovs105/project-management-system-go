@@ -9,6 +9,7 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+// Repository defines persistence operations for federation moderation.
 type Repository interface {
 	UserRole(ctx context.Context, userID string) (string, error)
 	ListDomainBlocks(ctx context.Context) ([]DomainBlock, error)
@@ -19,20 +20,24 @@ type Repository interface {
 	RetryFederationDelivery(ctx context.Context, deliveryID, userID string) (*delivery.Delivery, error)
 }
 
+// PgRepository implements Repository using PostgreSQL.
 type PgRepository struct {
 	db *sqlx.DB
 }
 
+// NewRepository creates a PostgreSQL-backed federation moderation repository.
 func NewRepository(db *sqlx.DB) Repository {
 	return &PgRepository{db: db}
 }
 
+// UserRole returns a user's global role.
 func (r *PgRepository) UserRole(ctx context.Context, userID string) (string, error) {
 	var role string
 	err := r.db.GetContext(ctx, &role, `SELECT role FROM users WHERE id = $1`, userID)
 	return role, err
 }
 
+// ListDomainBlocks returns all configured federation domain blocks.
 func (r *PgRepository) ListDomainBlocks(ctx context.Context) ([]DomainBlock, error) {
 	var blocks []DomainBlock
 	if err := r.db.SelectContext(ctx, &blocks, `
@@ -45,6 +50,7 @@ func (r *PgRepository) ListDomainBlocks(ctx context.Context) ([]DomainBlock, err
 	return blocks, nil
 }
 
+// UpsertDomainBlock creates or updates a domain block and records an audit event.
 func (r *PgRepository) UpsertDomainBlock(ctx context.Context, domain, reason, userID string) (*DomainBlock, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -82,6 +88,7 @@ func (r *PgRepository) UpsertDomainBlock(ctx context.Context, domain, reason, us
 	return &block, nil
 }
 
+// DeleteDomainBlock removes a domain block and records an audit event.
 func (r *PgRepository) DeleteDomainBlock(ctx context.Context, domain, userID string) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -117,6 +124,7 @@ func (r *PgRepository) DeleteDomainBlock(ctx context.Context, domain, userID str
 	return tx.Commit()
 }
 
+// ListRemoteActors returns cached remote actors for admin inspection.
 func (r *PgRepository) ListRemoteActors(ctx context.Context, options RemoteActorListOptions) ([]RemoteActorInspection, error) {
 	var actors []RemoteActorInspection
 	if err := r.db.SelectContext(ctx, &actors, `
@@ -148,6 +156,7 @@ func (r *PgRepository) ListRemoteActors(ctx context.Context, options RemoteActor
 	return actors, nil
 }
 
+// ListFederationDeliveries returns outbound deliveries for admin inspection.
 func (r *PgRepository) ListFederationDeliveries(ctx context.Context, options FederationDeliveryListOptions) ([]FederationDeliveryInspection, error) {
 	var deliveries []FederationDeliveryInspection
 	if err := r.db.SelectContext(ctx, &deliveries, `
@@ -187,6 +196,7 @@ func (r *PgRepository) ListFederationDeliveries(ctx context.Context, options Fed
 	return deliveries, nil
 }
 
+// RetryFederationDelivery resets a failed delivery and records an audit event.
 func (r *PgRepository) RetryFederationDelivery(ctx context.Context, deliveryID, userID string) (*delivery.Delivery, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {

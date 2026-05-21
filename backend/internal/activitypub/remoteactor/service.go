@@ -24,10 +24,12 @@ const (
 	defaultMaxResponseSize = int64(2 << 20)
 )
 
+// HTTPClient sends remote actor discovery and fetch requests.
 type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
+// Service discovers, fetches, validates, and caches remote ActivityPub actors.
 type Service struct {
 	repo            Repository
 	client          HTTPClient
@@ -36,8 +38,10 @@ type Service struct {
 	maxResponseSize int64
 }
 
+// Option configures a remote actor service.
 type Option func(*Service)
 
+// NewService creates a remote actor discovery service.
 func NewService(repo Repository, opts ...Option) *Service {
 	service := &Service{
 		repo:            repo,
@@ -52,6 +56,7 @@ func NewService(repo Repository, opts ...Option) *Service {
 	return service
 }
 
+// WithHTTPClient overrides the safe default HTTP client.
 func WithHTTPClient(client HTTPClient) Option {
 	return func(s *Service) {
 		if client != nil {
@@ -60,6 +65,7 @@ func WithHTTPClient(client HTTPClient) Option {
 	}
 }
 
+// WithWebFingerScheme sets the scheme used for WebFinger discovery.
 func WithWebFingerScheme(scheme string) Option {
 	return func(s *Service) {
 		scheme = strings.ToLower(strings.TrimSpace(scheme))
@@ -69,6 +75,7 @@ func WithWebFingerScheme(scheme string) Option {
 	}
 }
 
+// WithMaxResponseSize limits remote WebFinger and actor document response bodies.
 func WithMaxResponseSize(size int64) Option {
 	return func(s *Service) {
 		if size > 0 {
@@ -77,6 +84,7 @@ func WithMaxResponseSize(size int64) Option {
 	}
 }
 
+// Discover resolves an acct: resource through WebFinger and caches the actor.
 func (s *Service) Discover(ctx context.Context, resource string) (*Actor, error) {
 	username, domain, normalizedResource, err := normalizeAcctResource(resource)
 	if err != nil {
@@ -91,6 +99,7 @@ func (s *Service) Discover(ctx context.Context, resource string) (*Actor, error)
 	return s.fetchAndCacheActor(ctx, actorURL, username, domain)
 }
 
+// Fetch retrieves and caches a remote actor document by URL.
 func (s *Service) Fetch(ctx context.Context, actorURL string) (*Actor, error) {
 	fallbackUsername, domain, err := fallbackIdentity(actorURL)
 	if err != nil {
@@ -99,6 +108,7 @@ func (s *Service) Fetch(ctx context.Context, actorURL string) (*Actor, error) {
 	return s.fetchAndCacheActor(ctx, actorURL, fallbackUsername, domain)
 }
 
+// RefreshIfStale refreshes a cached remote actor when its cache age exceeds maxAge.
 func (s *Service) RefreshIfStale(ctx context.Context, actorAPID string, maxAge time.Duration) error {
 	actor, err := s.repo.RemoteActorByAPID(ctx, actorAPID)
 	if err != nil {
@@ -111,10 +121,12 @@ func (s *Service) RefreshIfStale(ctx context.Context, actorAPID string, maxAge t
 	return err
 }
 
+// ResolveKey fetches the actor document that owns a missing key ID.
 func (s *Service) ResolveKey(ctx context.Context, keyID string) error {
 	return s.fetchAndCacheKey(ctx, keyID, "")
 }
 
+// RefreshKey refreshes a known actor key and verifies the expected actor ID.
 func (s *Service) RefreshKey(ctx context.Context, keyID, expectedActorAPID string) error {
 	return s.fetchAndCacheKey(ctx, keyID, expectedActorAPID)
 }

@@ -9,20 +9,24 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+// Repository stores and loads cached remote ActivityPub actors.
 type Repository interface {
 	RemoteActorByAPID(ctx context.Context, apID string) (*Actor, error)
 	UpsertRemoteActor(ctx context.Context, actor *Actor) error
 	RecordRemoteActorFetchFailure(ctx context.Context, apID string, fetchError string) error
 }
 
+// PgRepository implements Repository using PostgreSQL.
 type PgRepository struct {
 	db *sqlx.DB
 }
 
+// NewRepository creates a PostgreSQL-backed remote actor repository.
 func NewRepository(db *sqlx.DB) Repository {
 	return &PgRepository{db: db}
 }
 
+// RemoteActorByAPID returns a cached remote actor by ActivityPub ID.
 func (r *PgRepository) RemoteActorByAPID(ctx context.Context, apID string) (*Actor, error) {
 	var actor Actor
 	err := r.db.GetContext(ctx, &actor, `
@@ -60,6 +64,7 @@ func (r *PgRepository) RemoteActorByAPID(ctx context.Context, apID string) (*Act
 	return &actor, nil
 }
 
+// UpsertRemoteActor inserts or refreshes a cached remote actor and public key.
 func (r *PgRepository) UpsertRemoteActor(ctx context.Context, actor *Actor) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -163,6 +168,7 @@ func (r *PgRepository) UpsertRemoteActor(ctx context.Context, actor *Actor) erro
 	return tx.Commit()
 }
 
+// RecordRemoteActorFetchFailure stores the latest fetch failure for a cached actor.
 func (r *PgRepository) RecordRemoteActorFetchFailure(ctx context.Context, apID string, fetchError string) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE actors

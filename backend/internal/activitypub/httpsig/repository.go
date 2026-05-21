@@ -6,19 +6,23 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+// Repository loads signing and verification keys for ActivityPub actors.
 type Repository interface {
 	ActivePrivateKey(ctx context.Context, actorID string) (*ActorKey, error)
 	PublicKeyByKeyID(ctx context.Context, keyID string) (*ActorKey, error)
 }
 
+// PgRepository implements Repository using PostgreSQL.
 type PgRepository struct {
 	db *sqlx.DB
 }
 
+// NewRepository creates a PostgreSQL-backed HTTP signature repository.
 func NewRepository(db *sqlx.DB) Repository {
 	return &PgRepository{db: db}
 }
 
+// ActivePrivateKey returns the active local private key for an actor.
 func (r *PgRepository) ActivePrivateKey(ctx context.Context, actorID string) (*ActorKey, error) {
 	var key ActorKey
 	if err := r.db.GetContext(ctx, &key, `
@@ -40,6 +44,7 @@ func (r *PgRepository) ActivePrivateKey(ctx context.Context, actorID string) (*A
 	return &key, nil
 }
 
+// PublicKeyByKeyID returns the active public key for a key ID.
 func (r *PgRepository) PublicKeyByKeyID(ctx context.Context, keyID string) (*ActorKey, error) {
 	var key ActorKey
 	if err := r.db.GetContext(ctx, &key, `

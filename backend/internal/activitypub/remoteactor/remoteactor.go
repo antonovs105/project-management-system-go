@@ -7,13 +7,19 @@ import (
 )
 
 var (
-	ErrInvalidResource      = errors.New("invalid remote actor resource")
-	ErrNotFound             = errors.New("remote actor not found")
-	ErrInvalidWebFinger     = errors.New("invalid webfinger response")
+	// ErrInvalidResource reports a malformed remote actor resource or URL.
+	ErrInvalidResource = errors.New("invalid remote actor resource")
+	// ErrNotFound reports that a remote actor is not present in local cache.
+	ErrNotFound = errors.New("remote actor not found")
+	// ErrInvalidWebFinger reports a malformed or unusable WebFinger response.
+	ErrInvalidWebFinger = errors.New("invalid webfinger response")
+	// ErrInvalidActorDocument reports a malformed ActivityPub actor document.
 	ErrInvalidActorDocument = errors.New("invalid actor document")
-	ErrLocalActorConflict   = errors.New("remote actor conflicts with local actor")
+	// ErrLocalActorConflict reports that remote actor data collides with a local actor.
+	ErrLocalActorConflict = errors.New("remote actor conflicts with local actor")
 )
 
+// Actor is a cached remote ActivityPub actor and its active public key.
 type Actor struct {
 	ID                string          `db:"id" json:"id"`
 	APID              string          `db:"ap_id" json:"ap_id"`

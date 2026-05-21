@@ -15,7 +15,9 @@ import (
 const maxRedirects = 5
 
 var (
-	ErrUnsafeURL        = errors.New("unsafe remote url")
+	// ErrUnsafeURL reports a remote URL that could target private or unsafe network ranges.
+	ErrUnsafeURL = errors.New("unsafe remote url")
+	// ErrTooManyRedirects reports that a remote fetch exceeded the redirect limit.
 	ErrTooManyRedirects = errors.New("too many remote redirects")
 )
 
@@ -29,6 +31,7 @@ var blockedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("2001:db8::/32"),
 }
 
+// NewHTTPClient creates an HTTP client that blocks unsafe federation destinations.
 func NewHTTPClient(timeout time.Duration) *http.Client {
 	if timeout <= 0 {
 		timeout = 10 * time.Second
@@ -56,6 +59,7 @@ func NewHTTPClient(timeout time.Duration) *http.Client {
 	}
 }
 
+// ValidateRemoteURL parses and validates an outbound federation URL.
 func ValidateRemoteURL(raw string) (*url.URL, error) {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
@@ -67,6 +71,7 @@ func ValidateRemoteURL(raw string) (*url.URL, error) {
 	return parsed, nil
 }
 
+// ValidateURL validates an already parsed outbound federation URL.
 func ValidateURL(parsed *url.URL) error {
 	if parsed == nil || parsed.Scheme == "" || parsed.Host == "" {
 		return fmt.Errorf("%w: absolute http url required", ErrUnsafeURL)
@@ -78,6 +83,7 @@ func ValidateURL(parsed *url.URL) error {
 	return ValidateHostname(parsed.Hostname())
 }
 
+// ValidateHostname rejects hostnames or IP literals unsafe for outbound federation.
 func ValidateHostname(hostname string) error {
 	hostname = strings.TrimSpace(hostname)
 	if hostname == "" {

@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// Handler exposes federation moderation HTTP endpoints.
 type Handler struct {
 	service *Service
 }
@@ -19,10 +20,12 @@ type blockDomainRequest struct {
 	Reason string `json:"reason"`
 }
 
+// NewHandler creates a federation moderation HTTP handler.
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
+// RegisterRoutes registers authenticated admin federation moderation routes.
 func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.GET("/admin/federation/domain-blocks", h.ListDomainBlocks)
 	api.POST("/admin/federation/domain-blocks", h.BlockDomain)
@@ -32,6 +35,7 @@ func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.POST("/admin/federation/deliveries/:deliveryID/retry", h.RetryFederationDelivery)
 }
 
+// ListDomainBlocks returns configured blocked federation domains.
 func (h *Handler) ListDomainBlocks(c echo.Context) error {
 	blocks, err := h.service.ListDomainBlocks(c.Request().Context(), currentUserID(c))
 	if err != nil {
@@ -40,6 +44,7 @@ func (h *Handler) ListDomainBlocks(c echo.Context) error {
 	return c.JSON(http.StatusOK, blocks)
 }
 
+// BlockDomain creates or updates a federation domain block.
 func (h *Handler) BlockDomain(c echo.Context) error {
 	var req blockDomainRequest
 	if err := c.Bind(&req); err != nil {
@@ -52,6 +57,7 @@ func (h *Handler) BlockDomain(c echo.Context) error {
 	return c.JSON(http.StatusCreated, block)
 }
 
+// UnblockDomain removes a federation domain block.
 func (h *Handler) UnblockDomain(c echo.Context) error {
 	err := h.service.UnblockDomain(c.Request().Context(), currentUserID(c), c.Param("domain"))
 	if err != nil {
@@ -60,6 +66,7 @@ func (h *Handler) UnblockDomain(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// ListRemoteActors returns cached remote actors for admin inspection.
 func (h *Handler) ListRemoteActors(c echo.Context) error {
 	options, err := remoteActorListOptions(c)
 	if err != nil {
@@ -72,6 +79,7 @@ func (h *Handler) ListRemoteActors(c echo.Context) error {
 	return c.JSON(http.StatusOK, actors)
 }
 
+// ListFederationDeliveries returns federation deliveries for admin inspection.
 func (h *Handler) ListFederationDeliveries(c echo.Context) error {
 	options, err := federationDeliveryListOptions(c)
 	if err != nil {
@@ -84,6 +92,7 @@ func (h *Handler) ListFederationDeliveries(c echo.Context) error {
 	return c.JSON(http.StatusOK, deliveries)
 }
 
+// RetryFederationDelivery requeues a failed federation delivery.
 func (h *Handler) RetryFederationDelivery(c echo.Context) error {
 	retried, err := h.service.RetryFederationDelivery(c.Request().Context(), currentUserID(c), c.Param("deliveryID"))
 	if err != nil {

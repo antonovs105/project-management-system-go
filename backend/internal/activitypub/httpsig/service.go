@@ -33,17 +33,27 @@ const (
 )
 
 var (
-	ErrMissingSignature       = errors.New("missing http signature")
-	ErrInvalidSignatureInput  = errors.New("invalid signature input")
-	ErrUnsupportedAlgorithm   = errors.New("unsupported http signature algorithm")
-	ErrInvalidSignature       = errors.New("invalid http signature")
-	ErrInvalidDigest          = errors.New("invalid content digest")
-	ErrInvalidDate            = errors.New("invalid http date")
-	ErrMissingCoveredContent  = errors.New("missing signed content")
-	ErrExpiredSignature       = errors.New("expired http signature")
+	// ErrMissingSignature reports that signature headers are absent or unmatched.
+	ErrMissingSignature = errors.New("missing http signature")
+	// ErrInvalidSignatureInput reports malformed Signature-Input metadata.
+	ErrInvalidSignatureInput = errors.New("invalid signature input")
+	// ErrUnsupportedAlgorithm reports a signature algorithm this server will not use.
+	ErrUnsupportedAlgorithm = errors.New("unsupported http signature algorithm")
+	// ErrInvalidSignature reports a cryptographic verification failure.
+	ErrInvalidSignature = errors.New("invalid http signature")
+	// ErrInvalidDigest reports a request body digest mismatch.
+	ErrInvalidDigest = errors.New("invalid content digest")
+	// ErrInvalidDate reports an invalid signed Date header.
+	ErrInvalidDate = errors.New("invalid http date")
+	// ErrMissingCoveredContent reports a missing required covered request component.
+	ErrMissingCoveredContent = errors.New("missing signed content")
+	// ErrExpiredSignature reports a signature outside the allowed clock window.
+	ErrExpiredSignature = errors.New("expired http signature")
+	// ErrMissingCoveredMetadata reports missing signature metadata such as keyid or created.
 	ErrMissingCoveredMetadata = errors.New("missing signed metadata")
 )
 
+// Service signs outbound requests and verifies inbound HTTP Message Signatures.
 type Service struct {
 	repo               Repository
 	clock              func() time.Time
@@ -52,8 +62,10 @@ type Service struct {
 	keyRefreshResolver func(context.Context, string, string) error
 }
 
+// Option configures an HTTP signature service.
 type Option func(*Service)
 
+// VerifiedRequest describes the actor authenticated by an HTTP signature.
 type VerifiedRequest struct {
 	ActorID    string
 	ActorAPID  string
@@ -63,6 +75,7 @@ type VerifiedRequest struct {
 	Components []string
 }
 
+// NewService creates an HTTP signature service.
 func NewService(repo Repository, opts ...Option) *Service {
 	service := &Service{
 		repo:   repo,
@@ -75,6 +88,7 @@ func NewService(repo Repository, opts ...Option) *Service {
 	return service
 }
 
+// WithClock overrides time source for signature creation and verification.
 func WithClock(clock func() time.Time) Option {
 	return func(s *Service) {
 		if clock != nil {
@@ -83,24 +97,28 @@ func WithClock(clock func() time.Time) Option {
 	}
 }
 
+// WithMaxAge sets the accepted signature clock skew window.
 func WithMaxAge(maxAge time.Duration) Option {
 	return func(s *Service) {
 		s.maxAge = maxAge
 	}
 }
 
+// WithMissingKeyResolver configures a callback to fetch unknown remote keys.
 func WithMissingKeyResolver(resolver func(context.Context, string) error) Option {
 	return func(s *Service) {
 		s.missingKeyResolver = resolver
 	}
 }
 
+// WithKeyRefreshResolver configures a callback to refresh stale remote keys.
 func WithKeyRefreshResolver(resolver func(context.Context, string, string) error) Option {
 	return func(s *Service) {
 		s.keyRefreshResolver = resolver
 	}
 }
 
+// SignRequest signs an outbound request as the given local actor.
 func (s *Service) SignRequest(ctx context.Context, actorID string, req *http.Request, body []byte) error {
 	key, err := s.repo.ActivePrivateKey(ctx, actorID)
 	if err != nil {
@@ -145,6 +163,7 @@ func (s *Service) SignRequest(ctx context.Context, actorID string, req *http.Req
 	return nil
 }
 
+// VerifyRequest verifies an inbound signed request and returns the authenticated actor.
 func (s *Service) VerifyRequest(ctx context.Context, req *http.Request, body []byte) (*VerifiedRequest, error) {
 	inputs, err := parseSignatureInputs(req.Header.Get(headerSignatureIn))
 	if err != nil {

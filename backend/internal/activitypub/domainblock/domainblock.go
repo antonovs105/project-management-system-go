@@ -7,8 +7,10 @@ import (
 	"strings"
 )
 
+// ErrInvalidActorID reports an ActivityPub actor ID without a parseable host.
 var ErrInvalidActorID = errors.New("invalid actor id")
 
+// Normalize canonicalizes a domain, host:port, or URL for block matching.
 func Normalize(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	if value == "" {
@@ -27,6 +29,7 @@ func Normalize(value string) string {
 	return value
 }
 
+// FromActorID extracts and normalizes the host from an ActivityPub actor ID.
 func FromActorID(value string) (string, error) {
 	parsed, err := url.Parse(value)
 	if err != nil || parsed.Hostname() == "" {
@@ -35,6 +38,7 @@ func FromActorID(value string) (string, error) {
 	return Normalize(parsed.Hostname()), nil
 }
 
+// Candidates returns the domain and parent domains that could match a block.
 func Candidates(domain string) []string {
 	domain = Normalize(domain)
 	if domain == "" {
@@ -51,6 +55,7 @@ func Candidates(domain string) []string {
 	}
 }
 
+// Contains reports whether domain or one of its parents is blocked.
 func Contains(blocked map[string]struct{}, domain string) bool {
 	if len(blocked) == 0 {
 		return false
