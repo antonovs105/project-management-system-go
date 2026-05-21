@@ -255,8 +255,7 @@ func main() {
 		activitypub.NewAccessAuthorizer(db, []byte(jwtSecret), signatureActorVerifier{service: sigService}, userService),
 	)
 
-	// ActivityPub delivery dependencies. The worker runs in-process for now; the slice can be
-	// moved to a separate worker container later without changing delivery internals.
+	// ActivityPub delivery dependencies. API roles enqueue deliveries, while worker roles process them from Redis.
 	deliveryRepo := delivery.NewRecipientRepository(db)
 	var deliveryQueue delivery.Queue = delivery.NoopQueue{}
 	redisAddr := os.Getenv("REDIS_ADDR")

@@ -30,8 +30,7 @@ USER app
 # Expose port
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget -q --spider http://127.0.0.1:8080/ready || exit 1
+# API and worker roles share this image, so health checks belong to each service definition.
 
 # Command to run the application
 CMD ["./main"]
