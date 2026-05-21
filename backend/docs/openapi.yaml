@@ -140,6 +140,26 @@ paths:
       operationId: listAdminUsers
       security:
         - bearerAuth: []
+      parameters:
+        - name: role
+          in: query
+          schema:
+            $ref: "#/components/schemas/UserRole"
+        - name: q
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
       responses:
         "200":
           description: Local users visible to administrators.
@@ -202,6 +222,11 @@ paths:
             type: integer
             minimum: 1
             maximum: 500
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
       responses:
         "200":
           description: Admin audit events ordered newest first.

@@ -55,6 +55,7 @@ func TestServiceListEventsValidatesFilters(t *testing.T) {
 		TargetType:  TargetTypeFederationDomain,
 		ActorUserID: "11111111-1111-4111-8111-111111111111",
 		Limit:       1000,
+		Offset:      -10,
 	})
 
 	require.NoError(t, err)
@@ -63,6 +64,7 @@ func TestServiceListEventsValidatesFilters(t *testing.T) {
 	assert.Equal(t, TargetTypeFederationDomain, repo.options.TargetType)
 	assert.Equal(t, "11111111-1111-4111-8111-111111111111", repo.options.ActorUserID)
 	assert.Equal(t, maxAuditLimit, repo.options.Limit)
+	assert.Zero(t, repo.options.Offset)
 
 	_, err = service.ListEvents(context.Background(), "admin-1", ListOptions{Action: "weird"})
 	require.ErrorIs(t, err, ErrInvalidFilter)

@@ -44,11 +44,16 @@ func listOptions(c echo.Context) (ListOptions, error) {
 	if err != nil {
 		return ListOptions{}, ErrInvalidFilter
 	}
+	offset, err := parseOptionalOffset(c.QueryParam("offset"))
+	if err != nil {
+		return ListOptions{}, ErrInvalidFilter
+	}
 	return ListOptions{
 		Action:      strings.TrimSpace(c.QueryParam("action")),
 		ActorUserID: strings.TrimSpace(c.QueryParam("actor_user_id")),
 		TargetType:  strings.TrimSpace(c.QueryParam("target_type")),
 		Limit:       limit,
+		Offset:      offset,
 	}, nil
 }
 
@@ -62,6 +67,18 @@ func parseOptionalLimit(raw string) (int, error) {
 		return 0, ErrInvalidFilter
 	}
 	return limit, nil
+}
+
+func parseOptionalOffset(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	offset, err := strconv.Atoi(raw)
+	if err != nil || offset < 0 {
+		return 0, ErrInvalidFilter
+	}
+	return offset, nil
 }
 
 func writeAuditError(c echo.Context, err error) error {

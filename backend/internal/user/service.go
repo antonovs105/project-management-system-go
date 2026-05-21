@@ -25,6 +25,9 @@ var ErrCannotDemoteLastAdmin = errors.New("cannot demote the last admin")
 const (
 	RoleAdmin  = "admin"
 	RoleWorker = "worker"
+
+	defaultAdminListLimit = 100
+	maxAdminListLimit     = 500
 )
 
 // Service incapsulates business logic for working with users
@@ -78,11 +81,18 @@ func (s *Service) BootstrapAdmin(ctx context.Context, username, email, password 
 	return newUser, nil
 }
 
-func (s *Service) ListUsers(ctx context.Context, adminUserID string) ([]User, error) {
+func (s *Service) ListUsers(ctx context.Context, adminUserID string, options ListUsersOptions) ([]User, error) {
 	if err := s.requireAdmin(ctx, adminUserID); err != nil {
 		return nil, err
 	}
-	return s.repo.ListUsers(ctx)
+	options.Role = strings.ToLower(strings.TrimSpace(options.Role))
+	if options.Role != "" && !IsValidRole(options.Role) {
+		return nil, invalidUserInput("invalid user role")
+	}
+	options.Query = strings.TrimSpace(options.Query)
+	options.Limit = normalizeListLimit(options.Limit)
+	options.Offset = normalizeOffset(options.Offset)
+	return s.repo.ListUsers(ctx, options)
 }
 
 func (s *Service) UpdateUserRole(ctx context.Context, adminUserID, targetUserID, role string) (*User, error) {
@@ -158,6 +168,23 @@ func validateRegistrationInput(username, email, password string) error {
 
 func IsValidRole(role string) bool {
 	return role == RoleAdmin || role == RoleWorker
+}
+
+func normalizeListLimit(limit int) int {
+	if limit <= 0 {
+		return defaultAdminListLimit
+	}
+	if limit > maxAdminListLimit {
+		return maxAdminListLimit
+	}
+	return limit
+}
+
+func normalizeOffset(offset int) int {
+	if offset < 0 {
+		return 0
+	}
+	return offset
 }
 
 func (s *Service) requireAdmin(ctx context.Context, userID string) error {

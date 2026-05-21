@@ -67,10 +67,15 @@ func TestHandler_AdminUserRoutes(t *testing.T) {
 		repo := new(MockRepository)
 		users := []User{{ID: adminID, Role: RoleAdmin}, {ID: targetID, Role: RoleWorker}}
 		repo.On("UserRole", mock.Anything, adminID).Return(RoleAdmin, nil).Once()
-		repo.On("ListUsers", mock.Anything).Return(users, nil).Once()
+		repo.On("ListUsers", mock.Anything, ListUsersOptions{
+			Role:   RoleWorker,
+			Query:  "work",
+			Limit:  10,
+			Offset: 20,
+		}).Return(users, nil).Once()
 		e := newAdminUserEcho(repo, adminID)
 
-		rec := doAdminUserRequest(e, http.MethodGet, "/api/admin/users", "")
+		rec := doAdminUserRequest(e, http.MethodGet, "/api/admin/users?role=worker&q=work&limit=10&offset=20", "")
 
 		require.Equal(t, http.StatusOK, rec.Code)
 		var body []User

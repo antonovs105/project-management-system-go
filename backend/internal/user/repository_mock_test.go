@@ -34,8 +34,8 @@ func (m *MockRepository) UserRole(ctx context.Context, userID string) (string, e
 	return args.String(0), args.Error(1)
 }
 
-func (m *MockRepository) ListUsers(ctx context.Context) ([]User, error) {
-	args := m.Called(ctx)
+func (m *MockRepository) ListUsers(ctx context.Context, options ListUsersOptions) ([]User, error) {
+	args := m.Called(ctx, options)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

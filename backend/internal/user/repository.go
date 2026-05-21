@@ -17,7 +17,7 @@ type Repository interface {
 	CreateAdminIfNoAdmin(ctx context.Context, user *User) error
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
 	UserRole(ctx context.Context, userID string) (string, error)
-	ListUsers(ctx context.Context) ([]User, error)
+	ListUsers(ctx context.Context, options ListUsersOptions) ([]User, error)
 	UpdateUserRole(ctx context.Context, adminUserID, userID, role string) (*User, error)
 }
 
@@ -182,11 +182,20 @@ func (r *PgRepository) UserRole(ctx context.Context, userID string) (string, err
 	return role, err
 }
 
-func (r *PgRepository) ListUsers(ctx context.Context) ([]User, error) {
+func (r *PgRepository) ListUsers(ctx context.Context, options ListUsersOptions) ([]User, error) {
 	var users []User
 	if err := r.db.SelectContext(ctx, &users, userSelectQuery()+`
+		WHERE ($1 = '' OR u.role = $1)
+			AND (
+				$2 = ''
+				OR u.username ILIKE '%' || $2 || '%'
+				OR u.email ILIKE '%' || $2 || '%'
+				OR a.handle ILIKE '%' || $2 || '%'
+				OR a.name ILIKE '%' || $2 || '%'
+			)
 		ORDER BY u.created_at DESC, lower(u.username) ASC
-	`); err != nil {
+		LIMIT $3 OFFSET $4
+	`, options.Role, options.Query, options.Limit, options.Offset); err != nil {
 		return nil, err
 	}
 	return users, nil

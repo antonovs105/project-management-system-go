@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -88,7 +89,11 @@ func (h *Handler) BootstrapAdmin(c echo.Context) error {
 }
 
 func (h *Handler) ListUsers(c echo.Context) error {
-	users, err := h.service.ListUsers(c.Request().Context(), currentUserID(c))
+	options, err := listUsersOptions(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	users, err := h.service.ListUsers(c.Request().Context(), currentUserID(c), options)
 	if err != nil {
 		return writeAdminUserError(c, err)
 	}
@@ -117,6 +122,47 @@ func sameSecret(expected, actual string) bool {
 func currentUserID(c echo.Context) string {
 	userID, _ := c.Get("userID").(string)
 	return userID
+}
+
+func listUsersOptions(c echo.Context) (ListUsersOptions, error) {
+	limit, err := parseOptionalLimit(c.QueryParam("limit"))
+	if err != nil {
+		return ListUsersOptions{}, ErrInvalidUserInput
+	}
+	offset, err := parseOptionalOffset(c.QueryParam("offset"))
+	if err != nil {
+		return ListUsersOptions{}, ErrInvalidUserInput
+	}
+	return ListUsersOptions{
+		Role:   strings.TrimSpace(c.QueryParam("role")),
+		Query:  strings.TrimSpace(c.QueryParam("q")),
+		Limit:  limit,
+		Offset: offset,
+	}, nil
+}
+
+func parseOptionalLimit(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 0, ErrInvalidUserInput
+	}
+	return value, nil
+}
+
+func parseOptionalOffset(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 0 {
+		return 0, ErrInvalidUserInput
+	}
+	return value, nil
 }
 
 func writeAdminUserError(c echo.Context, err error) error {

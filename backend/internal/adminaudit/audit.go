@@ -47,6 +47,7 @@ type ListOptions struct {
 	ActorUserID string
 	TargetType  string
 	Limit       int
+	Offset      int
 }
 
 func IsAction(value string) bool {

@@ -73,12 +73,13 @@ func TestAdminUserManagement(t *testing.T) {
 	worker, err := userService.RegisterUser(ctx, "worker", "worker@example.test", "password123")
 	require.NoError(t, err)
 
-	_, err = userService.ListUsers(ctx, worker.ID)
+	_, err = userService.ListUsers(ctx, worker.ID, user.ListUsersOptions{})
 	require.ErrorIs(t, err, user.ErrAdminRequired)
 
-	users, err := userService.ListUsers(ctx, admin.ID)
+	users, err := userService.ListUsers(ctx, admin.ID, user.ListUsersOptions{Role: user.RoleWorker, Query: "work", Limit: 1})
 	require.NoError(t, err)
-	require.Len(t, users, 2)
+	require.Len(t, users, 1)
+	assert.Equal(t, worker.ID, users[0].ID)
 
 	promoted, err := userService.UpdateUserRole(ctx, admin.ID, worker.ID, user.RoleAdmin)
 	require.NoError(t, err)
@@ -92,9 +93,9 @@ func TestAdminUserManagement(t *testing.T) {
 	require.ErrorIs(t, err, user.ErrCannotDemoteLastAdmin)
 
 	auditService := adminaudit.NewService(adminaudit.NewRepository(db))
-	events, err := auditService.ListEvents(ctx, worker.ID, adminaudit.ListOptions{Action: adminaudit.ActionUserRoleUpdated})
+	events, err := auditService.ListEvents(ctx, worker.ID, adminaudit.ListOptions{Action: adminaudit.ActionUserRoleUpdated, Limit: 1, Offset: 1})
 	require.NoError(t, err)
-	require.Len(t, events, 2)
+	require.Len(t, events, 1)
 	assert.Equal(t, adminaudit.TargetTypeUser, events[0].TargetType)
 	assert.NotNil(t, events[0].ActorUserID)
 }

@@ -25,7 +25,7 @@ func TestHandlerListsAuditEvents(t *testing.T) {
 		},
 	}
 	e := newHandlerEcho(repo, "admin-1")
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/audit-events?action=user.role_updated&target_type=user&limit=10", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/audit-events?action=user.role_updated&target_type=user&limit=10&offset=20", nil)
 	rec := httptest.NewRecorder()
 
 	e.ServeHTTP(rec, req)
@@ -34,6 +34,7 @@ func TestHandlerListsAuditEvents(t *testing.T) {
 	assert.Equal(t, ActionUserRoleUpdated, repo.options.Action)
 	assert.Equal(t, TargetTypeUser, repo.options.TargetType)
 	assert.Equal(t, 10, repo.options.Limit)
+	assert.Equal(t, 20, repo.options.Offset)
 
 	var response []Event
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))

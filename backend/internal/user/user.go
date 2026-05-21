@@ -17,3 +17,10 @@ type User struct {
 	CreatedAt     time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt     time.Time `db:"updated_at" json:"updated_at"`
 }
+
+type ListUsersOptions struct {
+	Role   string
+	Query  string
+	Limit  int
+	Offset int
+}

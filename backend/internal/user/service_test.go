@@ -112,9 +112,19 @@ func TestService_AdminUserManagement(t *testing.T) {
 		service := NewService(mockRepo, []byte("secret"), cfg)
 		users := []User{{ID: adminID, Role: RoleAdmin}, {ID: targetID, Role: RoleWorker}}
 		mockRepo.On("UserRole", ctx, adminID).Return(RoleAdmin, nil).Once()
-		mockRepo.On("ListUsers", ctx).Return(users, nil).Once()
+		mockRepo.On("ListUsers", ctx, ListUsersOptions{
+			Role:   RoleAdmin,
+			Query:  "adm",
+			Limit:  maxAdminListLimit,
+			Offset: 25,
+		}).Return(users, nil).Once()
 
-		got, err := service.ListUsers(ctx, adminID)
+		got, err := service.ListUsers(ctx, adminID, ListUsersOptions{
+			Role:   " ADMIN ",
+			Query:  " adm ",
+			Limit:  1000,
+			Offset: 25,
+		})
 
 		assert.NoError(t, err)
 		assert.Equal(t, users, got)
@@ -126,9 +136,22 @@ func TestService_AdminUserManagement(t *testing.T) {
 		service := NewService(mockRepo, []byte("secret"), cfg)
 		mockRepo.On("UserRole", ctx, targetID).Return(RoleWorker, nil).Once()
 
-		got, err := service.ListUsers(ctx, targetID)
+		got, err := service.ListUsers(ctx, targetID, ListUsersOptions{})
 
 		assert.ErrorIs(t, err, ErrAdminRequired)
+		assert.Nil(t, got)
+		mockRepo.AssertNotCalled(t, "ListUsers")
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("RejectsInvalidListFilter", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, []byte("secret"), cfg)
+		mockRepo.On("UserRole", ctx, adminID).Return(RoleAdmin, nil).Once()
+
+		got, err := service.ListUsers(ctx, adminID, ListUsersOptions{Role: "owner"})
+
+		assert.ErrorIs(t, err, ErrInvalidUserInput)
 		assert.Nil(t, got)
 		mockRepo.AssertNotCalled(t, "ListUsers")
 		mockRepo.AssertExpectations(t)

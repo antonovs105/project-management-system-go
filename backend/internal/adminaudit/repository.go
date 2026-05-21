@@ -39,8 +39,8 @@ func (r *PgRepository) ListEvents(ctx context.Context, options ListOptions) ([]E
 			AND (NULLIF($2, '') IS NULL OR actor_user_id = NULLIF($2, '')::uuid)
 			AND ($3 = '' OR target_type = $3)
 		ORDER BY created_at DESC, id DESC
-		LIMIT $4
-	`, options.Action, options.ActorUserID, options.TargetType, options.Limit); err != nil {
+		LIMIT $4 OFFSET $5
+	`, options.Action, options.ActorUserID, options.TargetType, options.Limit, options.Offset); err != nil {
 		return nil, err
 	}
 	return events, nil

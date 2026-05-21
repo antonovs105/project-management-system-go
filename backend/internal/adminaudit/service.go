@@ -45,6 +45,7 @@ func (s *Service) ListEvents(ctx context.Context, adminUserID string, options Li
 	}
 
 	options.Limit = normalizeLimit(options.Limit)
+	options.Offset = normalizeOffset(options.Offset)
 	return s.repo.ListEvents(ctx, options)
 }
 
@@ -74,4 +75,11 @@ func normalizeLimit(limit int) int {
 		return maxAuditLimit
 	}
 	return limit
+}
+
+func normalizeOffset(offset int) int {
+	if offset < 0 {
+		return 0
+	}
+	return offset
 }
