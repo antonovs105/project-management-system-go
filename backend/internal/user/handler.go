@@ -146,17 +146,20 @@ func (h *Handler) ChangePassword(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// sameSecret compares bootstrap tokens without leaking timing information.
 func sameSecret(expected, actual string) bool {
 	expectedHash := sha256.Sum256([]byte(expected))
 	actualHash := sha256.Sum256([]byte(actual))
 	return subtle.ConstantTimeCompare(expectedHash[:], actualHash[:]) == 1
 }
 
+// currentUserID returns the authenticated user ID stored by JWT middleware.
 func currentUserID(c echo.Context) string {
 	userID, _ := c.Get("userID").(string)
 	return userID
 }
 
+// listUsersOptions parses admin user list filters from query parameters.
 func listUsersOptions(c echo.Context) (ListUsersOptions, error) {
 	limit, err := parseOptionalLimit(c.QueryParam("limit"))
 	if err != nil {
@@ -174,6 +177,7 @@ func listUsersOptions(c echo.Context) (ListUsersOptions, error) {
 	}, nil
 }
 
+// parseOptionalLimit parses an optional positive pagination limit.
 func parseOptionalLimit(raw string) (int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -186,6 +190,7 @@ func parseOptionalLimit(raw string) (int, error) {
 	return value, nil
 }
 
+// parseOptionalOffset parses an optional non-negative pagination offset.
 func parseOptionalOffset(raw string) (int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -198,6 +203,7 @@ func parseOptionalOffset(raw string) (int, error) {
 	return value, nil
 }
 
+// writeAdminUserError maps admin user service errors to stable HTTP responses.
 func writeAdminUserError(c echo.Context, err error) error {
 	switch {
 	case errors.Is(err, ErrAdminRequired):
@@ -213,6 +219,7 @@ func writeAdminUserError(c echo.Context, err error) error {
 	}
 }
 
+// writeAccountError maps account service errors to stable HTTP responses.
 func writeAccountError(c echo.Context, err error) error {
 	switch {
 	case errors.Is(err, ErrInvalidUserInput):

@@ -26,7 +26,6 @@ func JWTMiddleware(secret []byte, validators ...TokenVersionValidator) echo.Midd
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 
 		return func(c echo.Context) error {
-			// taking jwt
 			authHeader := c.Request().Header.Get("Authorization")
 			if authHeader == "" {
 				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "missing authorization header"})
@@ -39,8 +38,6 @@ func JWTMiddleware(secret []byte, validators ...TokenVersionValidator) echo.Midd
 			}
 
 			tokenString := headerParts[1]
-
-			// Verify the signature before trusting claims.
 			token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 					return nil, echo.NewHTTPError(http.StatusUnauthorized, "Unexpected signing method")
@@ -53,7 +50,6 @@ func JWTMiddleware(secret []byte, validators ...TokenVersionValidator) echo.Midd
 				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid token"})
 			}
 
-			// takes data (claims) and adds it to context
 			if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
 
 				userID, ok := claims["sub"].(string)
@@ -73,7 +69,6 @@ func JWTMiddleware(secret []byte, validators ...TokenVersionValidator) echo.Midd
 					c.Set("tokenVersion", tokenVersion)
 				}
 
-				// next handler in pipeline
 				return next(c)
 			}
 
@@ -82,6 +77,7 @@ func JWTMiddleware(secret []byte, validators ...TokenVersionValidator) echo.Midd
 	}
 }
 
+// tokenVersionFromClaims reads the token_version claim without accepting fractional values.
 func tokenVersionFromClaims(claims jwt.MapClaims) (int, bool) {
 	raw, ok := claims["token_version"]
 	if !ok {

@@ -179,6 +179,7 @@ func (s *Service) ValidateTokenVersion(ctx context.Context, userID string, token
 	return nil
 }
 
+// newLocalUser validates account input and prepares actor/key data before persistence.
 func (s *Service) newLocalUser(username, email, password, role string) (*User, error) {
 	username = strings.TrimSpace(username)
 	email = strings.TrimSpace(email)
@@ -217,6 +218,7 @@ func (s *Service) newLocalUser(username, email, password, role string) (*User, e
 	return newUser, nil
 }
 
+// validateRegistrationInput validates public registration and bootstrap account fields.
 func validateRegistrationInput(username, email, password string) error {
 	if username == "" {
 		return invalidUserInput("username is required")
@@ -230,6 +232,7 @@ func validateRegistrationInput(username, email, password string) error {
 	return validatePassword(password)
 }
 
+// validatePassword enforces the local minimum password policy.
 func validatePassword(password string) error {
 	if len(password) < 8 {
 		return invalidUserInput("password must be at least 8 characters")
@@ -242,6 +245,7 @@ func IsValidRole(role string) bool {
 	return role == RoleAdmin || role == RoleWorker
 }
 
+// normalizeListLimit clamps admin user list limits to a bounded default range.
 func normalizeListLimit(limit int) int {
 	if limit <= 0 {
 		return defaultAdminListLimit
@@ -252,6 +256,7 @@ func normalizeListLimit(limit int) int {
 	return limit
 }
 
+// normalizeOffset returns zero for negative pagination offsets.
 func normalizeOffset(offset int) int {
 	if offset < 0 {
 		return 0
@@ -259,6 +264,7 @@ func normalizeOffset(offset int) int {
 	return offset
 }
 
+// requireAdmin verifies that userID belongs to a global admin account.
 func (s *Service) requireAdmin(ctx context.Context, userID string) error {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -277,6 +283,7 @@ func (s *Service) requireAdmin(ctx context.Context, userID string) error {
 	return nil
 }
 
+// invalidUserInput wraps a validation message with the shared user input sentinel.
 func invalidUserInput(message string) error {
 	return fmt.Errorf("%w: %s", ErrInvalidUserInput, message)
 }
@@ -285,14 +292,12 @@ func invalidUserInput(message string) error {
 func (s *Service) Login(ctx context.Context, email, password string) (string, error) {
 	email = strings.TrimSpace(email)
 
-	// searching user in DB
 	user, err := s.repo.GetUserByEmail(ctx, email)
 	if err != nil {
 		log.Printf("[DEBUG] Login failed for email '%s'. Reason: user not found or DB error. Error: %v", email, err)
 		return "", ErrInvalidCredentials
 	}
 
-	// comparing hashes
 	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password))
 	if err != nil {
 		return "", ErrInvalidCredentials

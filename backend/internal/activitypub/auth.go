@@ -93,6 +93,7 @@ func (a *AccessAuthorizer) AuthorizeProject(ctx context.Context, req *http.Reque
 	return nil
 }
 
+// credentialActorID resolves the actor authenticated by a local JWT or remote signature.
 func (a *AccessAuthorizer) credentialActorID(ctx context.Context, req *http.Request) (string, error) {
 	if req == nil {
 		return "", ErrMissingAuthorization
@@ -113,6 +114,7 @@ func (a *AccessAuthorizer) credentialActorID(ctx context.Context, req *http.Requ
 	return "", ErrMissingAuthorization
 }
 
+// actorIDFromJWT extracts and optionally validates a local JWT actor credential.
 func (a *AccessAuthorizer) actorIDFromJWT(ctx context.Context, req *http.Request) (actorID string, ok bool, err error) {
 	if len(a.jwtSecret) == 0 {
 		return "", false, nil
@@ -155,6 +157,7 @@ func (a *AccessAuthorizer) actorIDFromJWT(ctx context.Context, req *http.Request
 	return sub, true, nil
 }
 
+// jwtTokenVersionFromClaims reads the token_version claim without accepting fractional values.
 func jwtTokenVersionFromClaims(claims jwt.MapClaims) (int, bool) {
 	raw, ok := claims["token_version"]
 	if !ok {

@@ -60,6 +60,7 @@ func (r *PgRepository) CreateAdminIfNoAdmin(ctx context.Context, user *User) err
 	})
 }
 
+// createUserInTx runs the optional guard and inserts the full user actor graph atomically.
 func (r *PgRepository) createUserInTx(ctx context.Context, user *User, beforeInsert func(*sqlx.Tx) error) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -79,6 +80,7 @@ func (r *PgRepository) createUserInTx(ctx context.Context, user *User, beforeIns
 	return tx.Commit()
 }
 
+// insertUserGraph writes the actor, user, key, and JSON-LD object rows for a user.
 func (r *PgRepository) insertUserGraph(ctx context.Context, tx *sqlx.Tx, user *User) error {
 	actorQuery := `
 		INSERT INTO actors (
@@ -301,6 +303,7 @@ func (r *PgRepository) UpdateUserRole(ctx context.Context, adminUserID, userID, 
 	return updated, nil
 }
 
+// loadUserByID loads a user using the public admin response projection.
 func loadUserByID(ctx context.Context, q sqlx.QueryerContext, userID string) (*User, error) {
 	var user User
 	if err := sqlx.GetContext(ctx, q, &user, userSelectQuery()+`
@@ -314,6 +317,7 @@ func loadUserByID(ctx context.Context, q sqlx.QueryerContext, userID string) (*U
 	return &user, nil
 }
 
+// userSelectQuery returns the shared SQL projection for user API responses.
 func userSelectQuery() string {
 	return `
 		SELECT
@@ -333,6 +337,7 @@ func userSelectQuery() string {
 	`
 }
 
+// userSelectWithPasswordQuery returns the shared SQL projection used by authentication flows.
 func userSelectWithPasswordQuery() string {
 	return `
 		SELECT

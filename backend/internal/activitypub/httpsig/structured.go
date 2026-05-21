@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// signatureInput is a parsed Signature-Input member for one signature label.
 type signatureInput struct {
 	Label      string
 	RawValue   string
@@ -16,6 +17,7 @@ type signatureInput struct {
 	Algorithm  string
 }
 
+// parseSignatureInputs parses an RFC 9421 Signature-Input header.
 func parseSignatureInputs(header string) ([]signatureInput, error) {
 	if strings.TrimSpace(header) == "" {
 		return nil, ErrMissingSignature
@@ -37,6 +39,7 @@ func parseSignatureInputs(header string) ([]signatureInput, error) {
 	return inputs, nil
 }
 
+// parseSignatureInput parses a single labeled Signature-Input member.
 func parseSignatureInput(label, rawValue string) (signatureInput, error) {
 	if !strings.HasPrefix(rawValue, "(") {
 		return signatureInput{}, ErrInvalidSignatureInput
@@ -87,6 +90,7 @@ func parseSignatureInput(label, rawValue string) (signatureInput, error) {
 	}, nil
 }
 
+// parseSignatures parses the RFC 9421 Signature header into binary signatures.
 func parseSignatures(header string) (map[string][]byte, error) {
 	if strings.TrimSpace(header) == "" {
 		return nil, ErrMissingSignature
@@ -112,6 +116,7 @@ func parseSignatures(header string) (map[string][]byte, error) {
 	return signatures, nil
 }
 
+// matchingSignature finds the first Signature-Input member with a matching Signature value.
 func matchingSignature(inputs []signatureInput, signatures map[string][]byte) (signatureInput, []byte, bool) {
 	for _, input := range inputs {
 		if signature, ok := signatures[input.Label]; ok {
@@ -121,6 +126,7 @@ func matchingSignature(inputs []signatureInput, signatures map[string][]byte) (s
 	return signatureInput{}, nil, false
 }
 
+// parseInnerList parses the covered component list from Signature-Input.
 func parseInnerList(raw string) ([]string, error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, nil
@@ -137,6 +143,7 @@ func parseInnerList(raw string) ([]string, error) {
 	return values, nil
 }
 
+// parseParamValue parses a structured-field token or quoted string parameter.
 func parseParamValue(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -169,6 +176,7 @@ func parseParamValue(raw string) (string, error) {
 	return b.String(), nil
 }
 
+// splitTopLevel splits a structured header while respecting quotes and inner lists.
 func splitTopLevel(raw string, sep rune) []string {
 	var parts []string
 	var current strings.Builder
@@ -209,6 +217,7 @@ func splitTopLevel(raw string, sep rune) []string {
 	return parts
 }
 
+// sfString formats a value as an escaped structured-field string.
 func sfString(value string) string {
 	escaped := strings.ReplaceAll(value, "\\", "\\\\")
 	escaped = strings.ReplaceAll(escaped, "\"", "\\\"")
