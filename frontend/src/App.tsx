@@ -3,6 +3,10 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AppLayout } from "./components/layout/AppLayout";
 import { ProtectedRoute } from "./components/layout/ProtectedRoute";
+import { AccountPage } from "./pages/AccountPage";
+import { AdminAuditPage } from "./pages/AdminAuditPage";
+import { AdminFederationPage } from "./pages/AdminFederationPage";
+import { AdminUsersPage } from "./pages/AdminUsersPage";
 import { AuthPage } from "./pages/AuthPage";
 import { ProjectWorkspace } from "./pages/ProjectWorkspace";
 import { ProjectsPage } from "./pages/ProjectsPage";
@@ -33,6 +37,10 @@ export function App() {
               <Route path="/projects/:projectId/graph" element={<ProjectWorkspace />} />
               <Route path="/projects/:projectId/deliveries" element={<ProjectWorkspace />} />
               <Route path="/projects/:projectId/settings" element={<ProjectWorkspace />} />
+              <Route path="/account" element={<AccountPage />} />
+              <Route path="/admin/users" element={<AdminUsersPage />} />
+              <Route path="/admin/federation" element={<AdminFederationPage />} />
+              <Route path="/admin/audit" element={<AdminAuditPage />} />
             </Route>
           </Route>
 

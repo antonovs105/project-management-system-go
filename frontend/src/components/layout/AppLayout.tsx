@@ -1,5 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
-import { CircleDot, FolderKanban, LayoutDashboard, LogOut, Menu, Shield, X } from "lucide-react";
+import {
+  CircleDot,
+  FolderKanban,
+  KeyRound,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  RadioTower,
+  ScrollText,
+  Shield,
+  Users,
+  X,
+} from "lucide-react";
 import { useState } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { api } from "../../lib/api";
@@ -19,6 +31,7 @@ export function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
+  const canUseAdmin = user?.instanceRole === "owner" || user?.instanceRole === "admin";
 
   const { data: projects = [] } = useQuery({
     queryKey: queryKeys.projects,
@@ -45,7 +58,35 @@ export function AppLayout() {
             <LayoutDashboard size={18} />
             Projects
           </NavLink>
+          <NavLink to="/account" className={({ isActive }) => navClass(isActive)} onClick={() => setSidebarOpen(false)}>
+            <KeyRound size={18} />
+            Account
+          </NavLink>
         </div>
+
+        {canUseAdmin ? (
+          <div>
+            <div className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">Administration</div>
+            <div className="space-y-1">
+              <NavLink to="/admin/users" className={({ isActive }) => navClass(isActive)} onClick={() => setSidebarOpen(false)}>
+                <Users size={18} />
+                Users
+              </NavLink>
+              <NavLink
+                to="/admin/federation"
+                className={({ isActive }) => navClass(isActive)}
+                onClick={() => setSidebarOpen(false)}
+              >
+                <RadioTower size={18} />
+                Federation
+              </NavLink>
+              <NavLink to="/admin/audit" className={({ isActive }) => navClass(isActive)} onClick={() => setSidebarOpen(false)}>
+                <ScrollText size={18} />
+                Audit
+              </NavLink>
+            </div>
+          </div>
+        ) : null}
 
         <div>
           <div className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">Open Projects</div>
