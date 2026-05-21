@@ -585,7 +585,11 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/Delivery"
+                  $ref: "#/components/schemas/ProjectDelivery"
+        "400":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
   /api/projects/{projectID}/deliveries/summary:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
@@ -616,7 +620,11 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Delivery"
+                $ref: "#/components/schemas/ProjectDelivery"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
   /api/admin/federation/domain-blocks:
@@ -1289,6 +1297,57 @@ components:
           format: date-time
     Delivery:
       type: object
+      required: [id, activity_id, activity_ap_id, actor_id, actor_ap_id, target_inbox_url, state, attempts, max_attempts, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        activity_id:
+          type: string
+          format: uuid
+        activity_ap_id:
+          type: string
+          format: uri
+        actor_id:
+          type: string
+          format: uuid
+        actor_ap_id:
+          type: string
+          format: uri
+        target_inbox_url:
+          type: string
+          format: uri
+        state:
+          type: string
+          enum: [pending, processing, delivered, failed, dead]
+        attempts:
+          type: integer
+        max_attempts:
+          type: integer
+        next_attempt_at:
+          type: string
+          format: date-time
+        last_error:
+          type: string
+        last_attempt_at:
+          type: string
+          format: date-time
+        last_failure_kind:
+          type: string
+          enum: [http, network, signing, safety, unknown]
+        last_status_code:
+          type: integer
+        delivered_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProjectDelivery:
+      type: object
       required: [id, activity_ap_id, activity_type, target_inbox_url, state, attempts, max_attempts, can_retry, created_at, updated_at]
       properties:
         id:
@@ -1433,7 +1492,7 @@ components:
           format: date-time
     FederationDelivery:
       allOf:
-        - $ref: "#/components/schemas/Delivery"
+        - $ref: "#/components/schemas/ProjectDelivery"
         - type: object
           required: [activity_type, actor_ap_id, can_retry]
           properties:

@@ -17,11 +17,7 @@ type openAPIDocument struct {
 }
 
 func TestOpenAPIContractDocumentsRegisteredRoutes(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "openapi.yaml"))
-	require.NoError(t, err)
-
-	var doc openAPIDocument
-	require.NoError(t, yaml.Unmarshal(raw, &doc))
+	doc := loadOpenAPI(t)
 	require.Equal(t, "3.1.0", doc.OpenAPI)
 	require.NotEmpty(t, doc.Components["securitySchemes"]["bearerAuth"])
 
@@ -93,4 +89,90 @@ func TestOpenAPIContractDocumentsRegisteredRoutes(t *testing.T) {
 			require.True(t, ok, "missing OpenAPI operation %s %s", route.method, route.path)
 		})
 	}
+}
+
+func TestOpenAPIContractDocumentsDeliveryResponseShapes(t *testing.T) {
+	doc := loadOpenAPI(t)
+
+	require.Equal(t, "#/components/schemas/ProjectDelivery", responseItemsRef(t, doc, "get", "/api/projects/{projectID}/deliveries", "200", "application/json"))
+	require.Equal(t, "#/components/schemas/ProjectDelivery", responseRef(t, doc, "post", "/api/projects/{projectID}/deliveries/{deliveryID}/retry", "202", "application/json"))
+	require.Equal(t, "#/components/schemas/FederationDelivery", responseItemsRef(t, doc, "get", "/api/admin/federation/deliveries", "200", "application/json"))
+	require.Equal(t, "#/components/schemas/Delivery", responseRef(t, doc, "post", "/api/admin/federation/deliveries/{deliveryID}/retry", "202", "application/json"))
+
+	rawDeliveryProps := schemaProperties(t, doc, "Delivery")
+	require.Contains(t, rawDeliveryProps, "activity_id")
+	require.Contains(t, rawDeliveryProps, "actor_id")
+	require.Contains(t, rawDeliveryProps, "actor_ap_id")
+	require.NotContains(t, rawDeliveryProps, "activity_type")
+	require.NotContains(t, rawDeliveryProps, "can_retry")
+
+	projectDeliveryProps := schemaProperties(t, doc, "ProjectDelivery")
+	require.Contains(t, projectDeliveryProps, "activity_type")
+	require.Contains(t, projectDeliveryProps, "can_retry")
+	require.NotContains(t, projectDeliveryProps, "activity_id")
+	require.NotContains(t, projectDeliveryProps, "actor_id")
+}
+
+func loadOpenAPI(t *testing.T) openAPIDocument {
+	t.Helper()
+
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "openapi.yaml"))
+	require.NoError(t, err)
+
+	var doc openAPIDocument
+	require.NoError(t, yaml.Unmarshal(raw, &doc))
+	return doc
+}
+
+func responseRef(t *testing.T, doc openAPIDocument, method string, path string, status string, mediaType string) string {
+	t.Helper()
+
+	operation := operation(t, doc, method, path)
+	responses := requireMap(t, operation["responses"])
+	response := requireMap(t, responses[status])
+	content := requireMap(t, response["content"])
+	media := requireMap(t, content[mediaType])
+	schema := requireMap(t, media["schema"])
+	ref, ok := schema["$ref"].(string)
+	require.True(t, ok, "missing schema ref for %s %s %s", method, path, status)
+	return ref
+}
+
+func responseItemsRef(t *testing.T, doc openAPIDocument, method string, path string, status string, mediaType string) string {
+	t.Helper()
+
+	operation := operation(t, doc, method, path)
+	responses := requireMap(t, operation["responses"])
+	response := requireMap(t, responses[status])
+	content := requireMap(t, response["content"])
+	media := requireMap(t, content[mediaType])
+	schema := requireMap(t, media["schema"])
+	items := requireMap(t, schema["items"])
+	ref, ok := items["$ref"].(string)
+	require.True(t, ok, "missing items schema ref for %s %s %s", method, path, status)
+	return ref
+}
+
+func operation(t *testing.T, doc openAPIDocument, method string, path string) map[string]any {
+	t.Helper()
+
+	operations, ok := doc.Paths[path]
+	require.True(t, ok, "missing OpenAPI path %s", path)
+	return requireMap(t, operations[strings.ToLower(method)])
+}
+
+func schemaProperties(t *testing.T, doc openAPIDocument, name string) map[string]any {
+	t.Helper()
+
+	schemas := doc.Components["schemas"]
+	schema := requireMap(t, schemas[name])
+	return requireMap(t, schema["properties"])
+}
+
+func requireMap(t *testing.T, value any) map[string]any {
+	t.Helper()
+
+	m, ok := value.(map[string]any)
+	require.True(t, ok, "expected map, got %T", value)
+	return m
 }
