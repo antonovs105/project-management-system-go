@@ -23,14 +23,17 @@ const (
 	maxResponseSnippetBytes = int64(1024)
 )
 
+// Signer signs outbound ActivityPub HTTP requests for a local actor.
 type Signer interface {
 	SignRequest(ctx context.Context, actorID string, req *http.Request, body []byte) error
 }
 
+// HTTPClient sends outbound HTTP requests.
 type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
+// RemoteActorRefresher refreshes cached remote actor metadata before delivery.
 type RemoteActorRefresher interface {
 	RefreshIfStale(ctx context.Context, actorAPID string, maxAge time.Duration) error
 }
@@ -39,6 +42,7 @@ type remoteActorInboxResolver interface {
 	RemoteActorAPIDByInboxURL(ctx context.Context, inboxURL string) (string, error)
 }
 
+// Worker executes outbound federation delivery tasks.
 type Worker struct {
 	repo                     Repository
 	signer                   Signer
@@ -47,8 +51,10 @@ type Worker struct {
 	targetActorRefreshMaxAge time.Duration
 }
 
+// WorkerOption configures a delivery worker.
 type WorkerOption func(*Worker)
 
+// NewWorker creates a delivery worker with safe HTTP defaults.
 func NewWorker(repo Repository, signer Signer, client HTTPClient, opts ...WorkerOption) *Worker {
 	if client == nil {
 		client = netguard.NewHTTPClient(20 * time.Second)
@@ -65,12 +71,14 @@ func NewWorker(repo Repository, signer Signer, client HTTPClient, opts ...Worker
 	return worker
 }
 
+// WithRemoteActorRefresher refreshes target actors before sending deliveries.
 func WithRemoteActorRefresher(refresher RemoteActorRefresher) WorkerOption {
 	return func(w *Worker) {
 		w.remoteActorRefresher = refresher
 	}
 }
 
+// WithTargetActorRefreshMaxAge sets the maximum age before a target actor refresh.
 func WithTargetActorRefreshMaxAge(maxAge time.Duration) WorkerOption {
 	return func(w *Worker) {
 		if maxAge >= 0 {
@@ -79,6 +87,7 @@ func WithTargetActorRefreshMaxAge(maxAge time.Duration) WorkerOption {
 	}
 }
 
+// NewAsynqServer creates the federation Asynq worker server.
 func NewAsynqServer(redis asynq.RedisConnOpt) *asynq.Server {
 	return asynq.NewServer(redis, asynq.Config{
 		Concurrency:    5,
@@ -87,12 +96,14 @@ func NewAsynqServer(redis asynq.RedisConnOpt) *asynq.Server {
 	})
 }
 
+// NewServeMux routes federation delivery tasks to a worker.
 func NewServeMux(worker *Worker) *asynq.ServeMux {
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(TaskDeliver, worker.HandleDeliveryTask)
 	return mux
 }
 
+// HandleDeliveryTask processes one outbound delivery task.
 func (w *Worker) HandleDeliveryTask(ctx context.Context, task *asynq.Task) error {
 	var payload TaskPayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
@@ -222,10 +233,12 @@ func responseMessage(resp *http.Response) string {
 	return fmt.Sprintf("delivery failed: %s: %s", resp.Status, snippet)
 }
 
+// RetryDelay maps Asynq retry count to the delivery exponential backoff delay.
 func RetryDelay(n int, err error, task *asynq.Task) time.Duration {
 	return BackoffDelay(n + 1)
 }
 
+// BackoffDelay returns capped exponential backoff for a one-based attempt number.
 func BackoffDelay(attempt int) time.Duration {
 	if attempt < 1 {
 		attempt = 1
@@ -299,10 +312,12 @@ type permanentError struct {
 	err error
 }
 
+// Error returns the wrapped permanent error message.
 func (e permanentError) Error() string {
 	return e.err.Error()
 }
 
+// Unwrap returns the underlying permanent error.
 func (e permanentError) Unwrap() error {
 	return e.err
 }
@@ -312,10 +327,12 @@ type httpStatusError struct {
 	err        error
 }
 
+// Error returns the HTTP status failure message.
 func (e httpStatusError) Error() string {
 	return e.err.Error()
 }
 
+// Unwrap returns the underlying HTTP status error.
 func (e httpStatusError) Unwrap() error {
 	return e.err
 }

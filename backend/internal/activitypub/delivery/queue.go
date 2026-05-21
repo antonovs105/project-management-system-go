@@ -9,19 +9,23 @@ import (
 	"github.com/hibiken/asynq"
 )
 
+// Queue enqueues outbound ActivityPub delivery jobs.
 type Queue interface {
 	Enqueue(ctx context.Context, deliveryID string, maxAttempts int) error
 	Close() error
 }
 
+// AsynqQueue implements Queue using Redis-backed Asynq tasks.
 type AsynqQueue struct {
 	client *asynq.Client
 }
 
+// NewAsynqQueue creates an Asynq-backed federation delivery queue.
 func NewAsynqQueue(redis asynq.RedisConnOpt) *AsynqQueue {
 	return &AsynqQueue{client: asynq.NewClient(redis)}
 }
 
+// Enqueue adds one delivery task unless an equivalent unique task already exists.
 func (q *AsynqQueue) Enqueue(ctx context.Context, deliveryID string, maxAttempts int) error {
 	payload, err := json.Marshal(TaskPayload{DeliveryID: deliveryID})
 	if err != nil {
@@ -46,16 +50,20 @@ func (q *AsynqQueue) Enqueue(ctx context.Context, deliveryID string, maxAttempts
 	return err
 }
 
+// Close releases the underlying Asynq client.
 func (q *AsynqQueue) Close() error {
 	return q.client.Close()
 }
 
+// NoopQueue implements Queue without enqueueing work.
 type NoopQueue struct{}
 
+// Enqueue accepts a delivery task without doing anything.
 func (NoopQueue) Enqueue(ctx context.Context, deliveryID string, maxAttempts int) error {
 	return nil
 }
 
+// Close is a no-op for NoopQueue.
 func (NoopQueue) Close() error {
 	return nil
 }

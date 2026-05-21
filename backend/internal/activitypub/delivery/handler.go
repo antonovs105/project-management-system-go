@@ -9,20 +9,24 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// Handler exposes project-scoped federation delivery inspection endpoints.
 type Handler struct {
 	service *Service
 }
 
+// NewHandler creates a federation delivery HTTP handler.
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
+// RegisterRoutes registers authenticated delivery inspection routes.
 func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.GET("/projects/:projectID/deliveries", h.ListProjectDeliveries)
 	api.GET("/projects/:projectID/deliveries/summary", h.GetProjectDeliverySummary)
 	api.POST("/projects/:projectID/deliveries/:deliveryID/retry", h.RetryProjectDelivery)
 }
 
+// ListProjectDeliveries returns delivery attempts for a project.
 func (h *Handler) ListProjectDeliveries(c echo.Context) error {
 	projectID := c.Param("projectID")
 	userID := c.Get("userID").(string)
@@ -45,6 +49,7 @@ func (h *Handler) ListProjectDeliveries(c echo.Context) error {
 	return c.JSON(http.StatusOK, deliveries)
 }
 
+// GetProjectDeliverySummary returns aggregate delivery state counts for a project.
 func (h *Handler) GetProjectDeliverySummary(c echo.Context) error {
 	projectID := c.Param("projectID")
 	userID := c.Get("userID").(string)
@@ -60,6 +65,7 @@ func (h *Handler) GetProjectDeliverySummary(c echo.Context) error {
 	return c.JSON(http.StatusOK, summary)
 }
 
+// RetryProjectDelivery manually requeues a failed project delivery.
 func (h *Handler) RetryProjectDelivery(c echo.Context) error {
 	projectID := c.Param("projectID")
 	deliveryID := c.Param("deliveryID")

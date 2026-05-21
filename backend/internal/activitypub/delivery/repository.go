@@ -9,6 +9,7 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+// Repository defines persistence operations for outbound delivery attempts.
 type Repository interface {
 	Create(ctx context.Context, activityID string, targetInboxURL string, maxAttempts int) (*Delivery, bool, error)
 	CreateWithActor(ctx context.Context, activityID string, actorID string, targetInboxURL string, maxAttempts int) (*Delivery, bool, error)
@@ -17,6 +18,7 @@ type Repository interface {
 	MarkFailed(ctx context.Context, deliveryID string, message string, details FailureDetails, nextAttemptAt *time.Time) error
 }
 
+// RecipientRepository extends Repository with project-recipient lookup operations.
 type RecipientRepository interface {
 	Repository
 	ProjectDeliveries(ctx context.Context, projectID string, userID string, options ProjectDeliveryListOptions) ([]ProjectDelivery, error)
@@ -26,22 +28,27 @@ type RecipientRepository interface {
 	RemoteProjectTicketRecipientInboxes(ctx context.Context, projectID string, ticketID string) ([]string, error)
 }
 
+// PgRepository implements delivery repositories using PostgreSQL.
 type PgRepository struct {
 	db *sqlx.DB
 }
 
+// NewRepository creates a PostgreSQL-backed delivery repository.
 func NewRepository(db *sqlx.DB) Repository {
 	return &PgRepository{db: db}
 }
 
+// NewRecipientRepository creates a PostgreSQL-backed recipient delivery repository.
 func NewRecipientRepository(db *sqlx.DB) RecipientRepository {
 	return &PgRepository{db: db}
 }
 
+// Create creates or loads a delivery for the activity's stored actor.
 func (r *PgRepository) Create(ctx context.Context, activityID string, targetInboxURL string, maxAttempts int) (*Delivery, bool, error) {
 	return r.create(ctx, activityID, "", targetInboxURL, maxAttempts)
 }
 
+// CreateWithActor creates or loads a delivery using an explicit actor.
 func (r *PgRepository) CreateWithActor(ctx context.Context, activityID string, actorID string, targetInboxURL string, maxAttempts int) (*Delivery, bool, error) {
 	return r.create(ctx, activityID, actorID, targetInboxURL, maxAttempts)
 }
@@ -129,6 +136,7 @@ func (r *PgRepository) create(ctx context.Context, activityID string, actorID st
 	return delivery, created, nil
 }
 
+// StartAttempt marks a delivery as processing and increments its attempt count.
 func (r *PgRepository) StartAttempt(ctx context.Context, deliveryID string) (*Delivery, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -182,6 +190,7 @@ func (r *PgRepository) StartAttempt(ctx context.Context, deliveryID string) (*De
 	return delivery, nil
 }
 
+// MarkDelivered records successful remote delivery.
 func (r *PgRepository) MarkDelivered(ctx context.Context, deliveryID string) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE activity_deliveries
@@ -196,6 +205,7 @@ func (r *PgRepository) MarkDelivered(ctx context.Context, deliveryID string) err
 	return err
 }
 
+// MarkFailed records a failed delivery attempt and optional next retry time.
 func (r *PgRepository) MarkFailed(ctx context.Context, deliveryID string, message string, details FailureDetails, nextAttemptAt *time.Time) error {
 	state := StateFailed
 	if nextAttemptAt == nil {
@@ -217,6 +227,7 @@ func (r *PgRepository) MarkFailed(ctx context.Context, deliveryID string, messag
 	return err
 }
 
+// ProjectDeliveries returns delivery rows visible in a project.
 func (r *PgRepository) ProjectDeliveries(ctx context.Context, projectID string, userID string, options ProjectDeliveryListOptions) ([]ProjectDelivery, error) {
 	options, err := NormalizeProjectDeliveryListOptions(options)
 	if err != nil {
@@ -267,6 +278,7 @@ func (r *PgRepository) ProjectDeliveries(ctx context.Context, projectID string, 
 	return deliveries, err
 }
 
+// ProjectDeliverySummary returns aggregate delivery state counts for a project.
 func (r *PgRepository) ProjectDeliverySummary(ctx context.Context, projectID string, userID string) (*ProjectDeliverySummary, error) {
 	role, err := r.projectDeliveryRole(ctx, r.db, projectID, userID)
 	if err != nil {
@@ -304,6 +316,7 @@ func (r *PgRepository) ProjectDeliverySummary(ctx context.Context, projectID str
 	return &summary, nil
 }
 
+// RetryProjectDelivery resets a failed delivery for another worker attempt.
 func (r *PgRepository) RetryProjectDelivery(ctx context.Context, projectID string, userID string, deliveryID string) (*Delivery, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -372,6 +385,7 @@ func (r *PgRepository) RetryProjectDelivery(ctx context.Context, projectID strin
 	return delivery, nil
 }
 
+// RemoteActorAPIDByInboxURL resolves a remote actor by inbox URL.
 func (r *PgRepository) RemoteActorAPIDByInboxURL(ctx context.Context, inboxURL string) (string, error) {
 	var apID string
 	err := r.db.GetContext(ctx, &apID, `
@@ -385,6 +399,7 @@ func (r *PgRepository) RemoteActorAPIDByInboxURL(ctx context.Context, inboxURL s
 	return apID, err
 }
 
+// RemoteProjectFollowerInboxes returns inbox URLs for accepted remote project followers.
 func (r *PgRepository) RemoteProjectFollowerInboxes(ctx context.Context, projectID string) ([]string, error) {
 	var inboxes []string
 	err := r.db.SelectContext(ctx, &inboxes, `
@@ -400,6 +415,7 @@ func (r *PgRepository) RemoteProjectFollowerInboxes(ctx context.Context, project
 	return inboxes, err
 }
 
+// RemoteProjectTicketRecipientInboxes returns remote inboxes related to a project ticket.
 func (r *PgRepository) RemoteProjectTicketRecipientInboxes(ctx context.Context, projectID string, ticketID string) ([]string, error) {
 	var inboxes []string
 	err := r.db.SelectContext(ctx, &inboxes, `
