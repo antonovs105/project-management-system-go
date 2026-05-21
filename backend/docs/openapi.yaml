@@ -51,6 +51,8 @@ paths:
     get:
       tags: [Health]
       operationId: getMetrics
+      security:
+        - metricsBearerAuth: []
       responses:
         "200":
           description: Prometheus metrics for the backend process.
@@ -1034,6 +1036,10 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    metricsBearerAuth:
+      type: http
+      scheme: bearer
+      description: Optional in development; required when METRICS_TOKEN is configured.
     adminBootstrapToken:
       type: apiKey
       in: header

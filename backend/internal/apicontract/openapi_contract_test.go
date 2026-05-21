@@ -20,6 +20,7 @@ func TestOpenAPIContractDocumentsRegisteredRoutes(t *testing.T) {
 	doc := loadOpenAPI(t)
 	require.Equal(t, "3.1.0", doc.OpenAPI)
 	require.NotEmpty(t, doc.Components["securitySchemes"]["bearerAuth"])
+	require.NotEmpty(t, doc.Components["securitySchemes"]["metricsBearerAuth"])
 
 	for _, route := range []struct {
 		method string
@@ -91,6 +92,17 @@ func TestOpenAPIContractDocumentsRegisteredRoutes(t *testing.T) {
 			require.True(t, ok, "missing OpenAPI operation %s %s", route.method, route.path)
 		})
 	}
+}
+
+func TestOpenAPIContractDocumentsMetricsBearerAuth(t *testing.T) {
+	doc := loadOpenAPI(t)
+	operation := operation(t, doc, "get", "/metrics")
+	security, ok := operation["security"].([]any)
+	require.True(t, ok, "missing /metrics security declaration")
+	raw, err := yaml.Marshal(security)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), "metricsBearerAuth")
+	require.NotContains(t, string(raw), "bearerAuth")
 }
 
 func TestOpenAPIContractDocumentsDeliveryResponseShapes(t *testing.T) {
