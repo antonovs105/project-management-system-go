@@ -93,7 +93,7 @@ func (r *PgRepository) Create(ctx context.Context, ticket *Ticket) ([]string, er
 
 // ListByProjectID returns tickets for a project.
 func (r *PgRepository) ListByProjectID(ctx context.Context, projectID string, options TicketListOptions) ([]Ticket, error) {
-	var tickets []Ticket
+	tickets := make([]Ticket, 0)
 	query := ticketSelectBase() + `
 		WHERE t.project_id = $1
 		ORDER BY t.created_at DESC
@@ -382,7 +382,7 @@ func (r *PgRepository) DeleteLink(ctx context.Context, linkID string) error {
 
 // GetLinksByProjectID returns all links between tickets in a project.
 func (r *PgRepository) GetLinksByProjectID(ctx context.Context, projectID string) ([]TicketLink, error) {
-	var links []TicketLink
+	links := make([]TicketLink, 0)
 	query := `
 		SELECT
 			l.id::text,
@@ -546,7 +546,7 @@ func lookupActorAPID(ctx context.Context, q sqlx.QueryerContext, actorID string)
 
 // lookupAssigneeAPIDs returns ActivityPub IDs assigned to a ticket.
 func lookupAssigneeAPIDs(ctx context.Context, q sqlx.QueryerContext, ticketID string) ([]string, error) {
-	var apIDs []string
+	apIDs := make([]string, 0)
 	err := sqlx.SelectContext(ctx, q, &apIDs, `
 		SELECT a.ap_id
 		FROM ticket_assignees ta
@@ -559,7 +559,7 @@ func lookupAssigneeAPIDs(ctx context.Context, q sqlx.QueryerContext, ticketID st
 
 // lookupAssigneeActorIDs returns actor UUIDs assigned to a ticket.
 func lookupAssigneeActorIDs(ctx context.Context, q sqlx.QueryerContext, ticketID string) ([]string, error) {
-	var actorIDs []string
+	actorIDs := make([]string, 0)
 	err := sqlx.SelectContext(ctx, q, &actorIDs, `
 		SELECT actor_id::text
 		FROM ticket_assignees
@@ -623,7 +623,7 @@ func tombstoneObject(ctx context.Context, q sqlx.ExecerContext, apID string, for
 
 // tombstoneTicketComments tombstones all comment objects attached to a ticket.
 func tombstoneTicketComments(ctx context.Context, tx *sqlx.Tx, ticketID string) error {
-	var commentAPIDs []string
+	commentAPIDs := make([]string, 0)
 	if err := tx.SelectContext(ctx, &commentAPIDs, `
 		SELECT ap_id
 		FROM comments
@@ -641,7 +641,7 @@ func tombstoneTicketComments(ctx context.Context, tx *sqlx.Tx, ticketID string) 
 
 // remoteTicketRecipientInboxes returns remote inboxes related to a ticket.
 func (r *PgRepository) remoteTicketRecipientInboxes(ctx context.Context, q sqlx.QueryerContext, projectID string, ticketID string) ([]string, error) {
-	var inboxes []string
+	inboxes := make([]string, 0)
 	err := sqlx.SelectContext(ctx, q, &inboxes, `
 		WITH recipients AS (
 			SELECT follower.inbox_url

@@ -40,7 +40,7 @@ func (r *PgRepository) UserRole(ctx context.Context, userID string) (string, err
 
 // ListDomainBlocks returns all configured federation domain blocks.
 func (r *PgRepository) ListDomainBlocks(ctx context.Context) ([]DomainBlock, error) {
-	var blocks []DomainBlock
+	blocks := make([]DomainBlock, 0)
 	if err := r.db.SelectContext(ctx, &blocks, `
 		SELECT id::text, domain, reason, created_by::text, created_at, updated_at
 		FROM federation_domain_blocks
@@ -127,7 +127,7 @@ func (r *PgRepository) DeleteDomainBlock(ctx context.Context, domain, userID str
 
 // ListRemoteActors returns cached remote actors for admin inspection.
 func (r *PgRepository) ListRemoteActors(ctx context.Context, options RemoteActorListOptions) ([]RemoteActorInspection, error) {
-	var actors []RemoteActorInspection
+	actors := make([]RemoteActorInspection, 0)
 	if err := r.db.SelectContext(ctx, &actors, `
 		SELECT
 			id::text,
@@ -159,7 +159,7 @@ func (r *PgRepository) ListRemoteActors(ctx context.Context, options RemoteActor
 
 // ListFederationDeliveries returns outbound deliveries for admin inspection.
 func (r *PgRepository) ListFederationDeliveries(ctx context.Context, options FederationDeliveryListOptions) ([]FederationDeliveryInspection, error) {
-	var deliveries []FederationDeliveryInspection
+	deliveries := make([]FederationDeliveryInspection, 0)
 	if err := r.db.SelectContext(ctx, &deliveries, `
 		SELECT
 			d.id::text,

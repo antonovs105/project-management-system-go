@@ -96,6 +96,10 @@ interface ErrorResponse {
   message?: string;
 }
 
+function asArray<T>(data: T[] | null | undefined): T[] {
+  return Array.isArray(data) ? data : [];
+}
+
 export function errorMessage(error: unknown, fallback: string): string {
   if (axios.isAxiosError<ErrorResponse>(error)) {
     return error.response?.data?.error || error.response?.data?.message || fallback;
@@ -122,10 +126,10 @@ export const api = {
   },
 
   async listProjects(): Promise<Project[]> {
-    const { data } = await http.get<Project[]>(`${apiPrefix}/projects`, {
+    const { data } = await http.get<Project[] | null>(`${apiPrefix}/projects`, {
       params: { limit: 100, offset: 0 },
     });
-    return data;
+    return asArray(data);
   },
 
   async createProject(payload: CreateProjectPayload): Promise<Project> {
@@ -152,10 +156,10 @@ export const api = {
   },
 
   async listTickets(projectId: ID): Promise<Ticket[]> {
-    const { data } = await http.get<Ticket[]>(`${apiPrefix}/projects/${projectId}/tickets`, {
+    const { data } = await http.get<Ticket[] | null>(`${apiPrefix}/projects/${projectId}/tickets`, {
       params: { limit: 500, offset: 0 },
     });
-    return data;
+    return asArray(data);
   },
 
   async createTicket(projectId: ID, payload: CreateTicketPayload): Promise<Ticket> {
@@ -177,10 +181,10 @@ export const api = {
   },
 
   async listComments(ticketId: ID): Promise<Comment[]> {
-    const { data } = await http.get<Comment[]>(`${apiPrefix}/tickets/${ticketId}/comments`, {
+    const { data } = await http.get<Comment[] | null>(`${apiPrefix}/tickets/${ticketId}/comments`, {
       params: { limit: 100, offset: 0 },
     });
-    return data;
+    return asArray(data);
   },
 
   async createComment(ticketId: ID, content: string): Promise<Comment> {

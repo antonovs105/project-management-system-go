@@ -242,7 +242,7 @@ func (r *PgRepository) UserRole(ctx context.Context, userID string) (string, err
 
 // ListUsers returns local users that match admin filters and pagination.
 func (r *PgRepository) ListUsers(ctx context.Context, options ListUsersOptions) ([]User, error) {
-	var users []User
+	users := make([]User, 0)
 	if err := r.db.SelectContext(ctx, &users, userSelectQuery()+`
 		WHERE ($1 = '' OR u.role = $1)
 			AND (

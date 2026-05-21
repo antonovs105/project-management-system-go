@@ -241,7 +241,7 @@ func (r *PgRepository) ProjectDeliveries(ctx context.Context, projectID string, 
 	}
 	canRetry := canRetryProjectDeliveries(role)
 
-	var deliveries []ProjectDelivery
+	deliveries := make([]ProjectDelivery, 0)
 	err = r.db.SelectContext(ctx, &deliveries, `
 		WITH project_scope AS (
 			SELECT actor.id, actor.ap_id
@@ -402,7 +402,7 @@ func (r *PgRepository) RemoteActorAPIDByInboxURL(ctx context.Context, inboxURL s
 
 // RemoteProjectFollowerInboxes returns inbox URLs for accepted remote project followers.
 func (r *PgRepository) RemoteProjectFollowerInboxes(ctx context.Context, projectID string) ([]string, error) {
-	var inboxes []string
+	inboxes := make([]string, 0)
 	err := r.db.SelectContext(ctx, &inboxes, `
 		SELECT DISTINCT follower.inbox_url
 		FROM actor_follows f
@@ -418,7 +418,7 @@ func (r *PgRepository) RemoteProjectFollowerInboxes(ctx context.Context, project
 
 // RemoteProjectTicketRecipientInboxes returns remote inboxes related to a project ticket.
 func (r *PgRepository) RemoteProjectTicketRecipientInboxes(ctx context.Context, projectID string, ticketID string) ([]string, error) {
-	var inboxes []string
+	inboxes := make([]string, 0)
 	err := r.db.SelectContext(ctx, &inboxes, `
 		WITH recipients AS (
 			SELECT follower.inbox_url

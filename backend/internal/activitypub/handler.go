@@ -272,7 +272,7 @@ func (h *Handler) actorActivityCollection(c echo.Context, actorAPID, box string)
 		ORDER BY i.` + orderColumn + ` DESC, i.activity_id DESC
 		LIMIT $2 OFFSET $3
 	`
-	var raws []json.RawMessage
+	raws := make([]json.RawMessage, 0)
 	if err := h.db.SelectContext(c.Request().Context(), &raws, query, actor.ID, page.Limit, page.Offset); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load collection"})
 	}
@@ -330,7 +330,7 @@ func (h *Handler) followersCollection(c echo.Context, actorAPID string) error {
 		))
 	}
 
-	var followerAPIDs []string
+	followerAPIDs := make([]string, 0)
 	if err := h.db.SelectContext(c.Request().Context(), &followerAPIDs, `
 		SELECT follower.ap_id
 		FROM actor_follows f
@@ -392,7 +392,7 @@ func (h *Handler) projectTicketsCollection(c echo.Context, projectAPID string) e
 		))
 	}
 
-	var ticketAPIDs []string
+	ticketAPIDs := make([]string, 0)
 	if err := h.db.SelectContext(c.Request().Context(), &ticketAPIDs, `
 		SELECT ap_id
 		FROM tickets

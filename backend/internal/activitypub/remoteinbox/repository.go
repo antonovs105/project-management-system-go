@@ -90,7 +90,7 @@ func (r *PgRepository) IsProjectActor(ctx context.Context, actorID string) (bool
 
 // RemoteProjectFollowerInboxesExceptActor lists remote follower inboxes excluding the sender.
 func (r *PgRepository) RemoteProjectFollowerInboxesExceptActor(ctx context.Context, projectID string, actorID string) ([]string, error) {
-	var inboxes []string
+	inboxes := make([]string, 0)
 	err := r.db.SelectContext(ctx, &inboxes, `
 		WITH sender AS (
 			SELECT inbox_url
@@ -961,7 +961,7 @@ func (r *PgRepository) deleteRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, ta
 
 // tombstoneTicketCommentsTx tombstones all comment objects under a deleted ticket.
 func tombstoneTicketCommentsTx(ctx context.Context, tx *sqlx.Tx, ticketID string) error {
-	var commentAPIDs []string
+	commentAPIDs := make([]string, 0)
 	if err := tx.SelectContext(ctx, &commentAPIDs, `
 		SELECT ap_id
 		FROM comments
@@ -1015,7 +1015,7 @@ func updateTicketAssignedToDocumentTx(ctx context.Context, tx *sqlx.Tx, ticketID
 		return err
 	}
 
-	var assigneeAPIDs []string
+	assigneeAPIDs := make([]string, 0)
 	if err := tx.SelectContext(ctx, &assigneeAPIDs, `
 		SELECT actor.ap_id
 		FROM ticket_assignees assignee

@@ -192,7 +192,7 @@ func (r *PgRepository) GetByID(ctx context.Context, id string) (*Project, error)
 
 // ListByOwnerID returns projects where the user is a member.
 func (r *PgRepository) ListByOwnerID(ctx context.Context, ownerID string, options ProjectListOptions) ([]Project, error) {
-	var projects []Project
+	projects := make([]Project, 0)
 	query := `
 		SELECT
 			p.id::text,
@@ -385,7 +385,7 @@ func (r *PgRepository) Delete(ctx context.Context, id string, actorID string) (*
 
 // remoteProjectFollowerInboxes returns remote inboxes for accepted project followers.
 func remoteProjectFollowerInboxes(ctx context.Context, q sqlx.QueryerContext, projectID string) ([]string, error) {
-	var inboxes []string
+	inboxes := make([]string, 0)
 	err := sqlx.SelectContext(ctx, q, &inboxes, `
 		SELECT DISTINCT follower.inbox_url
 		FROM actor_follows follow
@@ -401,7 +401,7 @@ func remoteProjectFollowerInboxes(ctx context.Context, q sqlx.QueryerContext, pr
 
 // remoteActorInboxes returns inbox URLs for a known remote actor.
 func remoteActorInboxes(ctx context.Context, q sqlx.QueryerContext, actorID string) ([]string, error) {
-	var inboxes []string
+	inboxes := make([]string, 0)
 	err := sqlx.SelectContext(ctx, q, &inboxes, `
 		SELECT inbox_url
 		FROM actors
@@ -416,7 +416,7 @@ func remoteActorInboxes(ctx context.Context, q sqlx.QueryerContext, actorID stri
 // mergeInboxes merges inbox URL groups while preserving first-seen order.
 func mergeInboxes(groups ...[]string) []string {
 	seen := make(map[string]struct{})
-	var merged []string
+	merged := make([]string, 0)
 	for _, group := range groups {
 		for _, inbox := range group {
 			if inbox == "" {
@@ -472,7 +472,7 @@ func (r *PgRepository) writeProjectUpdateActivity(ctx context.Context, tx *sqlx.
 
 // tombstoneProjectTree tombstones a project actor and all contained ticket objects.
 func tombstoneProjectTree(ctx context.Context, tx *sqlx.Tx, projectID, projectAPID string) error {
-	var commentAPIDs []string
+	commentAPIDs := make([]string, 0)
 	if err := tx.SelectContext(ctx, &commentAPIDs, `
 		SELECT comment.ap_id
 		FROM comments comment
@@ -488,7 +488,7 @@ func tombstoneProjectTree(ctx context.Context, tx *sqlx.Tx, projectID, projectAP
 		}
 	}
 
-	var ticketAPIDs []string
+	ticketAPIDs := make([]string, 0)
 	if err := tx.SelectContext(ctx, &ticketAPIDs, `
 		SELECT ap_id
 		FROM tickets
@@ -1132,7 +1132,7 @@ type affectedTicketAssignment struct {
 
 // removeTicketAssigneeForProjectMember clears assignments for a removed member.
 func removeTicketAssigneeForProjectMember(ctx context.Context, tx *sqlx.Tx, projectID, actorID string) ([]affectedTicketAssignment, error) {
-	var affected []affectedTicketAssignment
+	affected := make([]affectedTicketAssignment, 0)
 	if err := tx.SelectContext(ctx, &affected, `
 		SELECT ticket.id::text, ticket.ap_id
 		FROM tickets ticket
@@ -1172,7 +1172,7 @@ func updateTicketAssignedToDocument(ctx context.Context, tx *sqlx.Tx, ticketID, 
 		return err
 	}
 
-	var assigneeAPIDs []string
+	assigneeAPIDs := make([]string, 0)
 	if err := tx.SelectContext(ctx, &assigneeAPIDs, `
 		SELECT actor.ap_id
 		FROM ticket_assignees assignee

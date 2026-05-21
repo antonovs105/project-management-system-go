@@ -119,7 +119,7 @@ func (r *PgRepository) Create(ctx context.Context, comment *Comment) (string, er
 
 // ListByTicketID returns comments ordered by creation time for a ticket.
 func (r *PgRepository) ListByTicketID(ctx context.Context, ticketID string, options CommentListOptions) ([]Comment, error) {
-	var comments []Comment
+	comments := make([]Comment, 0)
 	if err := r.db.SelectContext(ctx, &comments, `
 		SELECT id::text, ap_id, ticket_id::text, author_id::text, content, created_at, updated_at
 		FROM comments
@@ -270,7 +270,7 @@ func tombstoneObject(ctx context.Context, q sqlx.ExecerContext, apID string, for
 
 // remoteTicketRecipientInboxes returns remote inboxes related to a ticket.
 func remoteTicketRecipientInboxes(ctx context.Context, q sqlx.QueryerContext, projectID string, ticketID string) ([]string, error) {
-	var inboxes []string
+	inboxes := make([]string, 0)
 	err := sqlx.SelectContext(ctx, q, &inboxes, `
 		WITH recipients AS (
 			SELECT follower.inbox_url

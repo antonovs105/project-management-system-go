@@ -37,7 +37,7 @@ func (r *PgRepository) UserRole(ctx context.Context, userID string) (string, err
 
 // ListEvents loads audit events matching the given filters.
 func (r *PgRepository) ListEvents(ctx context.Context, options ListOptions) ([]Event, error) {
-	var events []Event
+	events := make([]Event, 0)
 	if err := r.db.SelectContext(ctx, &events, `
 		SELECT id::text, actor_user_id::text, action, target_type, target_id, metadata, created_at
 		FROM admin_audit_events
