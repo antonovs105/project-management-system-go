@@ -1,3 +1,4 @@
+// Package main boots the HTTP API server and wires backend vertical slices together.
 package main
 
 import (
@@ -53,6 +54,7 @@ type ApiServer struct {
 	wfHandler         *webfinger.Handler
 }
 
+// signatureActorVerifier adapts HTTP signature verification to ActivityPub authorization.
 type signatureActorVerifier struct {
 	service *httpsig.Service
 }
@@ -66,6 +68,7 @@ func (v signatureActorVerifier) VerifyActorID(ctx context.Context, req *http.Req
 	return verified.ActorID, nil
 }
 
+// normalizedEnv returns a lowercase environment value or fallback when the value is empty.
 func normalizedEnv(name, fallback string) string {
 	value := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
 	if value == "" {
@@ -74,6 +77,7 @@ func normalizedEnv(name, fallback string) string {
 	return value
 }
 
+// splitCSVEnv parses a comma-separated environment variable into trimmed values.
 func splitCSVEnv(name string) []string {
 	raw := strings.TrimSpace(os.Getenv(name))
 	if raw == "" {
@@ -90,6 +94,7 @@ func splitCSVEnv(name string) []string {
 	return values
 }
 
+// validateRuntimeConfig rejects unsafe deployment configuration before the server starts.
 func validateRuntimeConfig(production bool, jwtSecret, publicBaseURL, localDomain, adminBootstrapToken string) error {
 	parsedBaseURL, err := url.Parse(strings.TrimSpace(publicBaseURL))
 	if err != nil || parsedBaseURL.Scheme == "" || parsedBaseURL.Host == "" {
@@ -120,6 +125,7 @@ func validateRuntimeConfig(production bool, jwtSecret, publicBaseURL, localDomai
 	return nil
 }
 
+// isLocalHost reports whether host points to the loopback development host.
 func isLocalHost(host string) bool {
 	host = strings.TrimSpace(host)
 	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
@@ -129,8 +135,8 @@ func isLocalHost(host string) bool {
 	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
+// main builds all backend services, registers routes, and starts the API server.
 func main() {
-	// Load config
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found")
 	}
@@ -158,7 +164,6 @@ func main() {
 	}
 	apConfig := activitypub.NewConfig(publicBaseURL, localDomain)
 
-	// Connecting DB
 	db, err := sqlx.Connect("postgres", dbSource)
 	if err != nil {
 		log.Fatalf("Can't connect to DB: %v", err)
@@ -167,27 +172,22 @@ func main() {
 
 	log.Println("DB connection successful")
 
-	// User dependencies
 	userRepo := user.NewRepository(db, apConfig)
 	userService := user.NewService(userRepo, []byte(jwtSecret), apConfig)
 	userHandler := user.NewHandler(userService, adminBootstrapToken)
 
-	// project dependencies
 	projectRepo := project.NewRepository(db, apConfig)
 	projectService := project.NewService(projectRepo, apConfig)
 	projectHandler := project.NewHandler(projectService)
 
-	// Ticket dependencies
 	ticketRepo := ticket.NewRepository(db, apConfig)
 	ticketService := ticket.NewService(ticketRepo, projectService, apConfig)
 	ticketHandler := ticket.NewHandler(ticketService)
 
-	// Comment dependencies
 	commentRepo := comment.NewRepository(db, apConfig)
 	commentService := comment.NewService(commentRepo, ticketService, apConfig)
 	commentHandler := comment.NewHandler(commentService)
 
-	// ActivityPub JSON-LD read dependencies
 	c2sHandler := c2s.NewHandler(db, apConfig, ticketService, commentService)
 
 	// Remote ActivityPub signing/discovery dependencies
@@ -257,7 +257,6 @@ func main() {
 	wfService := webfinger.NewService(wfRepo, apConfig)
 	wfHandler := webfinger.NewHandler(wfService)
 
-	// Dependency injection
 	server := &ApiServer{
 		db:                db,
 		redisAddr:         redisAddr,
@@ -275,12 +274,10 @@ func main() {
 		wfHandler:         wfHandler,
 	}
 
-	// New Echo
 	e := echo.New()
 
 	registerGlobalMiddleware(e, os.Stdout)
 
-	// CORS
 	corsOrigins := splitCSVEnv("CORS_ALLOWED_ORIGINS")
 	if len(corsOrigins) == 0 {
 		if production {
@@ -293,7 +290,6 @@ func main() {
 		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization, user.AdminBootstrapTokenHeader},
 	}))
 
-	// Routes
 	e.GET("/health", server.healthCheck)
 	e.GET("/ready", server.readinessCheck)
 
@@ -305,13 +301,11 @@ func main() {
 	server.c2sHandler.RegisterRoutes(e, authMiddleware.JWTMiddleware([]byte(jwtSecret), userService))
 	server.inboxHandler.RegisterRoutes(e)
 
-	// protected routes
 	api := e.Group("/api")
 
 	api.Use(authMiddleware.JWTMiddleware([]byte(jwtSecret), userService))
 
-	// routes that require auth
-	api.GET("/me", server.getProfile) // for test
+	api.GET("/me", server.getProfile)
 	server.userHandler.RegisterAccountRoutes(api)
 	server.userHandler.RegisterAdminRoutes(api)
 	server.projectHandler.RegisterRoutes(api)
@@ -324,12 +318,14 @@ func main() {
 	e.Logger.Fatal(e.Start(":8080"))
 }
 
+// registerGlobalMiddleware adds request logging, request IDs, and panic recovery.
 func registerGlobalMiddleware(e *echo.Echo, logOutput io.Writer) {
 	e.Use(middleware.RequestID())
 	e.Use(middleware.LoggerWithConfig(requestLoggerConfig(logOutput)))
 	e.Use(middleware.Recover())
 }
 
+// requestLoggerConfig builds the structured JSON request logger configuration.
 func requestLoggerConfig(output io.Writer) middleware.LoggerConfig {
 	if output == nil {
 		output = os.Stdout
@@ -343,25 +339,23 @@ func requestLoggerConfig(output io.Writer) middleware.LoggerConfig {
 	}
 }
 
-// Handler
+// healthCheck reports whether the API process can still reach PostgreSQL.
 func (s *ApiServer) healthCheck(c echo.Context) error {
-	// Check DB
 	if err := s.db.Ping(); err != nil {
 		log.Printf("Health check failed: database ping error: %v", err)
 
-		// Returns error status if DB is unreacheble
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"status": "error",
 			"system": "database unreacheble",
 		})
 	}
-	// Returns JSON
 	return c.JSON(http.StatusOK, map[string]string{
 		"status": "ok",
 		"system": "working",
 	})
 }
 
+// readinessCheck reports dependency readiness for load balancers and containers.
 func (s *ApiServer) readinessCheck(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 2*time.Second)
 	defer cancel()
@@ -400,11 +394,10 @@ func (s *ApiServer) readinessCheck(c echo.Context) error {
 	})
 }
 
+// getProfile returns the authenticated user's basic session profile.
 func (s *ApiServer) getProfile(c echo.Context) error {
-	// taking userID
 	userID := c.Get("userID").(string)
 
-	// Return ID
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"message": "Welcome!",
 		"user_id": userID,
