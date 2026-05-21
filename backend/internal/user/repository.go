@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
@@ -14,6 +15,9 @@ type Repository interface {
 	CreateUser(ctx context.Context, user *User) error
 	CreateAdminIfNoAdmin(ctx context.Context, user *User) error
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
+	UserRole(ctx context.Context, userID string) (string, error)
+	ListUsers(ctx context.Context) ([]User, error)
+	UpdateUserRole(ctx context.Context, userID, role string) (*User, error)
 }
 
 // PgRepository implements Repository using PostgreSQL
@@ -169,4 +173,90 @@ func (r *PgRepository) GetUserByEmail(ctx context.Context, email string) (*User,
 	}
 
 	return &user, nil
+}
+
+func (r *PgRepository) UserRole(ctx context.Context, userID string) (string, error) {
+	var role string
+	err := r.db.GetContext(ctx, &role, `SELECT role FROM users WHERE id = $1`, userID)
+	return role, err
+}
+
+func (r *PgRepository) ListUsers(ctx context.Context) ([]User, error) {
+	var users []User
+	if err := r.db.SelectContext(ctx, &users, userSelectQuery()+`
+		ORDER BY u.created_at DESC, lower(u.username) ASC
+	`); err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
+func (r *PgRepository) UpdateUserRole(ctx context.Context, userID, role string) (*User, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var currentRole string
+	if err := tx.GetContext(ctx, &currentRole, `SELECT role FROM users WHERE id = $1 FOR UPDATE`, userID); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrUserNotFound
+		}
+		return nil, err
+	}
+
+	if currentRole == RoleAdmin && role != RoleAdmin {
+		var adminCount int
+		if err := tx.GetContext(ctx, &adminCount, `SELECT count(*) FROM users WHERE role = $1`, RoleAdmin); err != nil {
+			return nil, err
+		}
+		if adminCount <= 1 {
+			return nil, ErrCannotDemoteLastAdmin
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET role = $2 WHERE id = $1`, userID, role); err != nil {
+		return nil, err
+	}
+
+	updated, err := loadUserByID(ctx, tx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
+func loadUserByID(ctx context.Context, q sqlx.QueryerContext, userID string) (*User, error) {
+	var user User
+	if err := sqlx.GetContext(ctx, q, &user, userSelectQuery()+`
+		WHERE u.id = $1
+	`, userID); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrUserNotFound
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
+func userSelectQuery() string {
+	return `
+		SELECT
+			u.id::text,
+			a.ap_id,
+			u.username,
+			u.email,
+			u.role,
+			a.handle,
+			a.name,
+			a.summary,
+			u.created_at,
+			u.updated_at
+		FROM users u
+		JOIN actors a ON a.id = u.id
+	`
 }

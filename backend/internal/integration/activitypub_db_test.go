@@ -59,6 +59,38 @@ func TestAdminBootstrapCreatesOnlyOneAdmin(t *testing.T) {
 	requireRowCount(t, db, "users", 1)
 }
 
+func TestAdminUserManagement(t *testing.T) {
+	db := openIntegrationDB(t)
+	resetIntegrationDB(t, db)
+
+	ctx := context.Background()
+	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+	userService := user.NewService(user.NewRepository(db, cfg), []byte("integration-secret"), cfg)
+
+	admin, err := userService.BootstrapAdmin(ctx, "admin", "admin@example.test", "password123")
+	require.NoError(t, err)
+	worker, err := userService.RegisterUser(ctx, "worker", "worker@example.test", "password123")
+	require.NoError(t, err)
+
+	_, err = userService.ListUsers(ctx, worker.ID)
+	require.ErrorIs(t, err, user.ErrAdminRequired)
+
+	users, err := userService.ListUsers(ctx, admin.ID)
+	require.NoError(t, err)
+	require.Len(t, users, 2)
+
+	promoted, err := userService.UpdateUserRole(ctx, admin.ID, worker.ID, user.RoleAdmin)
+	require.NoError(t, err)
+	assert.Equal(t, user.RoleAdmin, promoted.Role)
+
+	demoted, err := userService.UpdateUserRole(ctx, worker.ID, admin.ID, user.RoleWorker)
+	require.NoError(t, err)
+	assert.Equal(t, user.RoleWorker, demoted.Role)
+
+	_, err = userService.UpdateUserRole(ctx, worker.ID, worker.ID, user.RoleWorker)
+	require.ErrorIs(t, err, user.ErrCannotDemoteLastAdmin)
+}
+
 func TestActivityPubFoundationFlow(t *testing.T) {
 	db := openIntegrationDB(t)
 	resetIntegrationDB(t, db)

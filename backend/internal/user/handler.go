@@ -37,6 +37,11 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/login", h.Login)
 }
 
+func (h *Handler) RegisterAdminRoutes(api *echo.Group) {
+	api.GET("/admin/users", h.ListUsers)
+	api.PATCH("/admin/users/:userID/role", h.UpdateUserRole)
+}
+
 // parsing register request
 type RegisterRequest struct {
 	Username string `json:"username"`
@@ -48,6 +53,10 @@ type BootstrapAdminRequest struct {
 	Username string `json:"username"`
 	Email    string `json:"email"`
 	Password string `json:"password"`
+}
+
+type UpdateUserRoleRequest struct {
+	Role string `json:"role"`
 }
 
 func (h *Handler) BootstrapAdmin(c echo.Context) error {
@@ -78,10 +87,51 @@ func (h *Handler) BootstrapAdmin(c echo.Context) error {
 	return c.JSON(http.StatusCreated, admin)
 }
 
+func (h *Handler) ListUsers(c echo.Context) error {
+	users, err := h.service.ListUsers(c.Request().Context(), currentUserID(c))
+	if err != nil {
+		return writeAdminUserError(c, err)
+	}
+	return c.JSON(http.StatusOK, users)
+}
+
+func (h *Handler) UpdateUserRole(c echo.Context) error {
+	var req UpdateUserRoleRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+
+	updated, err := h.service.UpdateUserRole(c.Request().Context(), currentUserID(c), c.Param("userID"), req.Role)
+	if err != nil {
+		return writeAdminUserError(c, err)
+	}
+	return c.JSON(http.StatusOK, updated)
+}
+
 func sameSecret(expected, actual string) bool {
 	expectedHash := sha256.Sum256([]byte(expected))
 	actualHash := sha256.Sum256([]byte(actual))
 	return subtle.ConstantTimeCompare(expectedHash[:], actualHash[:]) == 1
+}
+
+func currentUserID(c echo.Context) string {
+	userID, _ := c.Get("userID").(string)
+	return userID
+}
+
+func writeAdminUserError(c echo.Context, err error) error {
+	switch {
+	case errors.Is(err, ErrAdminRequired):
+		return c.JSON(http.StatusForbidden, map[string]string{"error": ErrAdminRequired.Error()})
+	case errors.Is(err, ErrInvalidUserInput):
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case errors.Is(err, ErrUserNotFound):
+		return c.JSON(http.StatusNotFound, map[string]string{"error": ErrUserNotFound.Error()})
+	case errors.Is(err, ErrCannotDemoteLastAdmin):
+		return c.JSON(http.StatusConflict, map[string]string{"error": ErrCannotDemoteLastAdmin.Error()})
+	default:
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "admin user operation failed"})
+	}
 }
 
 // Register method for POST /register.

@@ -133,6 +133,48 @@ paths:
                     format: uuid
         "401":
           $ref: "#/components/responses/Error"
+  /api/admin/users:
+    get:
+      tags: [Auth]
+      operationId: listAdminUsers
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Local users visible to administrators.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+        "403":
+          $ref: "#/components/responses/Error"
+  /api/admin/users/{userID}/role:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    patch:
+      tags: [Auth]
+      operationId: updateAdminUserRole
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: "#/components/requestBodies/UpdateUserRole"
+      responses:
+        "200":
+          description: User role updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
   /api/projects:
     get:
       tags: [Projects]
@@ -1038,6 +1080,16 @@ components:
                 type: string
               description:
                 type: string
+    UpdateUserRole:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [role]
+            properties:
+              role:
+                $ref: "#/components/schemas/UserRole"
     UpdateTicket:
       required: true
       content:
@@ -1477,7 +1529,7 @@ components:
           type: string
           format: email
         role:
-          type: string
+          $ref: "#/components/schemas/UserRole"
         handle:
           type: string
         name:
@@ -1490,6 +1542,9 @@ components:
         updated_at:
           type: string
           format: date-time
+    UserRole:
+      type: string
+      enum: [admin, worker]
     WebFingerResource:
       type: object
       required: [subject, links]

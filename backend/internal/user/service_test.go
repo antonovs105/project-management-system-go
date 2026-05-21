@@ -101,6 +101,67 @@ func TestService_BootstrapAdmin(t *testing.T) {
 	})
 }
 
+func TestService_AdminUserManagement(t *testing.T) {
+	ctx := context.Background()
+	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+	adminID := "11111111-1111-4111-8111-111111111111"
+	targetID := "22222222-2222-4222-8222-222222222222"
+
+	t.Run("ListUsers", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, []byte("secret"), cfg)
+		users := []User{{ID: adminID, Role: RoleAdmin}, {ID: targetID, Role: RoleWorker}}
+		mockRepo.On("UserRole", ctx, adminID).Return(RoleAdmin, nil).Once()
+		mockRepo.On("ListUsers", ctx).Return(users, nil).Once()
+
+		got, err := service.ListUsers(ctx, adminID)
+
+		assert.NoError(t, err)
+		assert.Equal(t, users, got)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("RequiresAdmin", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, []byte("secret"), cfg)
+		mockRepo.On("UserRole", ctx, targetID).Return(RoleWorker, nil).Once()
+
+		got, err := service.ListUsers(ctx, targetID)
+
+		assert.ErrorIs(t, err, ErrAdminRequired)
+		assert.Nil(t, got)
+		mockRepo.AssertNotCalled(t, "ListUsers")
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("UpdateRole", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, []byte("secret"), cfg)
+		updated := &User{ID: targetID, Role: RoleAdmin}
+		mockRepo.On("UserRole", ctx, adminID).Return(RoleAdmin, nil).Once()
+		mockRepo.On("UpdateUserRole", ctx, targetID, RoleAdmin).Return(updated, nil).Once()
+
+		got, err := service.UpdateUserRole(ctx, adminID, targetID, " ADMIN ")
+
+		assert.NoError(t, err)
+		assert.Equal(t, updated, got)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("RejectsInvalidInput", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, []byte("secret"), cfg)
+		mockRepo.On("UserRole", ctx, adminID).Return(RoleAdmin, nil).Once()
+
+		got, err := service.UpdateUserRole(ctx, adminID, targetID, "owner")
+
+		assert.ErrorIs(t, err, ErrInvalidUserInput)
+		assert.Nil(t, got)
+		mockRepo.AssertNotCalled(t, "UpdateUserRole")
+		mockRepo.AssertExpectations(t)
+	})
+}
+
 func TestService_Login(t *testing.T) {
 	mockRepo := new(MockRepository)
 	service := NewService(mockRepo, []byte("secret"), activitypub.NewConfig("http://localhost:8080", "localhost:8080"))

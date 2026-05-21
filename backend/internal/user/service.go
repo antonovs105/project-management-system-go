@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -11,11 +12,15 @@ import (
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
 var ErrInvalidUserInput = errors.New("invalid user input")
 var ErrAdminAlreadyExists = errors.New("admin user already exists")
+var ErrAdminRequired = errors.New("admin role required")
+var ErrUserNotFound = errors.New("user not found")
+var ErrCannotDemoteLastAdmin = errors.New("cannot demote the last admin")
 
 const (
 	RoleAdmin  = "admin"
@@ -73,6 +78,28 @@ func (s *Service) BootstrapAdmin(ctx context.Context, username, email, password 
 	return newUser, nil
 }
 
+func (s *Service) ListUsers(ctx context.Context, adminUserID string) ([]User, error) {
+	if err := s.requireAdmin(ctx, adminUserID); err != nil {
+		return nil, err
+	}
+	return s.repo.ListUsers(ctx)
+}
+
+func (s *Service) UpdateUserRole(ctx context.Context, adminUserID, targetUserID, role string) (*User, error) {
+	if err := s.requireAdmin(ctx, adminUserID); err != nil {
+		return nil, err
+	}
+	targetUserID = strings.TrimSpace(targetUserID)
+	if _, err := uuid.Parse(targetUserID); err != nil {
+		return nil, invalidUserInput("valid user id is required")
+	}
+	role = strings.ToLower(strings.TrimSpace(role))
+	if !IsValidRole(role) {
+		return nil, invalidUserInput("invalid user role")
+	}
+	return s.repo.UpdateUserRole(ctx, targetUserID, role)
+}
+
 func (s *Service) newLocalUser(username, email, password, role string) (*User, error) {
 	username = strings.TrimSpace(username)
 	email = strings.TrimSpace(email)
@@ -125,6 +152,28 @@ func validateRegistrationInput(username, email, password string) error {
 	}
 	if len(password) < 8 {
 		return invalidUserInput("password must be at least 8 characters")
+	}
+	return nil
+}
+
+func IsValidRole(role string) bool {
+	return role == RoleAdmin || role == RoleWorker
+}
+
+func (s *Service) requireAdmin(ctx context.Context, userID string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return ErrAdminRequired
+	}
+	role, err := s.repo.UserRole(ctx, userID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return ErrAdminRequired
+		}
+		return err
+	}
+	if role != RoleAdmin {
+		return ErrAdminRequired
 	}
 	return nil
 }
