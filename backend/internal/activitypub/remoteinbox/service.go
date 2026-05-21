@@ -144,7 +144,9 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 		}
 	}
 	if activity.ActorAPID != signatureActorAPID {
-		return nil, ErrForbiddenActor
+		if !isProjectForwardedActivity(signatureActorAPID, activity) {
+			return nil, ErrForbiddenActor
+		}
 	}
 
 	isProjectFollow, err := s.isProjectFollow(ctx, targetActorID, targetAPID, activity)
@@ -463,6 +465,17 @@ func validateInboundTicketIdentity(ticket *InboundTicket, actorAPID, targetAPID 
 		return fmt.Errorf("%w: ticket context must match inbox actor", ErrInvalidActivity)
 	}
 	return nil
+}
+
+// isProjectForwardedActivity allows a project actor to fan out an activity it targets.
+func isProjectForwardedActivity(signatureActorAPID string, activity *InboundActivity) bool {
+	if signatureActorAPID == "" || activity == nil {
+		return false
+	}
+	if activity.TargetAPID != nil && *activity.TargetAPID == signatureActorAPID {
+		return true
+	}
+	return activity.ObjectTicket != nil && activity.ObjectTicket.Context == signatureActorAPID
 }
 
 // isProjectCreateNote validates a remote Create Note activity for a project ticket.

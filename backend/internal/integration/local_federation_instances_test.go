@@ -91,6 +91,81 @@ func TestLocalTwoInstanceFederationSmoke(t *testing.T) {
 	requireInboxItem(t, beta.db, betaProject.ID, "Follow", betaProject.APID)
 }
 
+func TestLocalThreeInstanceProjectFanOut(t *testing.T) {
+	source := os.Getenv("TEST_DB_SOURCE")
+	if source == "" {
+		t.Skip("set TEST_DB_SOURCE to run integration tests against a migrated PostgreSQL database")
+	}
+
+	ctx := context.Background()
+	router := &localFederationRouter{handlers: make(map[string]http.Handler)}
+	alpha := newLocalFederationInstance(t, ctx, source, "alpha_fanout", "alpha.local.test", router)
+	beta := newLocalFederationInstance(t, ctx, source, "beta_fanout", "beta.local.test", router)
+	gamma := newLocalFederationInstance(t, ctx, source, "gamma_fanout", "gamma.local.test", router)
+	router.handlers[alpha.domain] = alpha.echo
+	router.handlers[beta.domain] = beta.echo
+	router.handlers[gamma.domain] = gamma.echo
+
+	alice, err := alpha.userService.RegisterUser(ctx, "alice-fanout", "alice-fanout@alpha.local.test", "password123")
+	require.NoError(t, err)
+	bob, err := beta.userService.RegisterUser(ctx, "bob-fanout", "bob-fanout@beta.local.test", "password123")
+	require.NoError(t, err)
+	gina, err := gamma.userService.RegisterUser(ctx, "gina-fanout", "gina-fanout@gamma.local.test", "password123")
+	require.NoError(t, err)
+	betaProject, err := beta.projectService.CreateProject(ctx, "Beta Fan-Out Project", "Project on the beta instance", bob.ID)
+	require.NoError(t, err)
+
+	sendLocalFollow(t, ctx, router, alpha, alice.ID, alice.APID, betaProject.APID)
+	sendLocalFollow(t, ctx, router, gamma, gina.ID, gina.APID, betaProject.APID)
+	requireRemoteActorCached(t, beta.db, alice.APID)
+	requireRemoteActorCached(t, beta.db, gina.APID)
+	acceptRemoteFollower(t, ctx, beta.db, alice.APID, betaProject.ID)
+	acceptRemoteFollower(t, ctx, beta.db, gina.APID, betaProject.ID)
+
+	ticketAPID := alpha.cfg.BaseURL + "/tickets/fanout-ticket-1"
+	createActivityAPID := alpha.cfg.BaseURL + "/activities/fanout-create-ticket-1"
+	createBody := marshalLocalFederationJSON(t, map[string]any{
+		"@context": activitypub.Context(),
+		"id":       createActivityAPID,
+		"type":     "Create",
+		"actor":    alice.APID,
+		"target":   betaProject.APID,
+		"object": map[string]any{
+			"id":               ticketAPID,
+			"type":             []string{"forge:Ticket"},
+			"attributedTo":     alice.APID,
+			"context":          betaProject.APID,
+			"name":             "Fan-out task",
+			"content":          "Created on alpha and fanned out by beta.",
+			"forge:priority":   "high",
+			"forge:ticketType": "task",
+			"forge:isResolved": false,
+		},
+	})
+	createResp := postLocalSignedActivity(t, ctx, router, alpha, alice.ID, activitypub.Inbox(betaProject.APID), createBody)
+	defer createResp.Body.Close()
+	rawCreateResp, err := io.ReadAll(createResp.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusAccepted, createResp.StatusCode, string(rawCreateResp))
+
+	requireObjectType(t, beta.db, ticketAPID, "Ticket")
+	requireInboxItem(t, beta.db, betaProject.ID, "Create", ticketAPID)
+	requireDeliveryForObjectFromActor(t, beta.db, "Create", ticketAPID, activitypub.Inbox(gina.APID), betaProject.ID)
+	requireNoDeliveryForObject(t, beta.db, "Create", ticketAPID, activitypub.Inbox(alice.APID))
+
+	deliveryID := requireDeliveryIDForTarget(t, beta.db, ticketAPID, activitypub.Inbox(gina.APID))
+	worker := delivery.NewWorker(
+		delivery.NewRepository(beta.db),
+		beta.signatureService,
+		router,
+		delivery.WithRemoteActorRefresher(beta.remoteActorService),
+		delivery.WithTargetActorRefreshMaxAge(0),
+	)
+	require.NoError(t, worker.HandleDeliveryTask(ctx, federationDeliveryTask(t, deliveryID)))
+	requireInboxItem(t, gamma.db, gina.ID, "Create", ticketAPID)
+	requireRemoteActorCached(t, gamma.db, betaProject.APID)
+}
+
 type localFederationInstance struct {
 	name               string
 	domain             string
@@ -101,6 +176,58 @@ type localFederationInstance struct {
 	projectService     *project.Service
 	remoteActorService *remoteactor.Service
 	signatureService   *httpsig.Service
+}
+
+func sendLocalFollow(t *testing.T, ctx context.Context, router *localFederationRouter, source *localFederationInstance, actorID, actorAPID, projectAPID string) {
+	t.Helper()
+
+	followID := source.cfg.BaseURL + "/activities/follow-" + lastLocalFederationPath(projectAPID)
+	body := marshalLocalFederationJSON(t, map[string]any{
+		"@context": activitypub.Context(),
+		"id":       followID,
+		"type":     "Follow",
+		"actor":    actorAPID,
+		"object":   projectAPID,
+	})
+	resp := postLocalSignedActivity(t, ctx, router, source, actorID, activitypub.Inbox(projectAPID), body)
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusAccepted, resp.StatusCode, string(raw))
+}
+
+func postLocalSignedActivity(t *testing.T, ctx context.Context, router *localFederationRouter, source *localFederationInstance, actorID, inboxURL string, body []byte) *http.Response {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, inboxURL, bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set(echo.HeaderContentType, activitypub.ActivityJSONMediaType)
+	require.NoError(t, source.signatureService.SignRequest(ctx, actorID, req, body))
+	resp, err := router.Do(req)
+	require.NoError(t, err)
+	return resp
+}
+
+func acceptRemoteFollower(t *testing.T, ctx context.Context, db *sqlx.DB, followerAPID, projectID string) {
+	t.Helper()
+
+	var followerID string
+	require.NoError(t, db.GetContext(ctx, &followerID, `SELECT id::text FROM actors WHERE ap_id = $1`, followerAPID))
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO actor_follows (follower_actor_id, followed_actor_id, state)
+		VALUES ($1, $2, 'accepted')
+		ON CONFLICT (follower_actor_id, followed_actor_id)
+		DO UPDATE SET state = 'accepted'
+	`, followerID, projectID)
+	require.NoError(t, err)
+}
+
+func lastLocalFederationPath(apID string) string {
+	idx := strings.LastIndex(apID, "/")
+	if idx == -1 || idx == len(apID)-1 {
+		return apID
+	}
+	return apID[idx+1:]
 }
 
 func newLocalFederationInstance(t *testing.T, ctx context.Context, source, name, domain string, router *localFederationRouter) *localFederationInstance {

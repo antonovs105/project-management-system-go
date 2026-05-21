@@ -840,6 +840,24 @@ func TestServiceReceiveRejectsSignatureActorMismatch(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbiddenActor)
 }
 
+func TestServiceReceiveAcceptsProjectForwardedActivity(t *testing.T) {
+	repo := &memoryRepository{targetActorID: "target-user"}
+	service := NewService(repo, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-project",
+		ActorAPID: "https://remote.example/projects/project-1",
+	}})
+	body := []byte(`{"id":"https://remote.example/activities/forwarded-1","type":"Create","actor":"https://remote.example/users/alice","object":"https://remote.example/tickets/1","target":"https://remote.example/projects/project-1"}`)
+
+	accepted, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/users/bob", body)
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://remote.example/activities/forwarded-1", accepted.ActivityAPID)
+	require.NotNil(t, repo.stored)
+	assert.Equal(t, "https://remote.example/users/alice", repo.stored.ActorAPID)
+	require.NotNil(t, repo.stored.TargetAPID)
+	assert.Equal(t, "https://remote.example/projects/project-1", *repo.stored.TargetAPID)
+}
+
 func TestServiceReceiveRejectsBlockedActorDomainBeforeVerification(t *testing.T) {
 	repo := &memoryRepository{targetActorID: "target-actor"}
 	verifier := &countingVerifier{verified: &httpsig.VerifiedRequest{
