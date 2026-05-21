@@ -26,14 +26,17 @@ var (
 	errActorMismatch       = errors.New("activity actor does not match authenticated user")
 )
 
+// TicketCreator creates local tickets from ActivityPub client activities.
 type TicketCreator interface {
 	CreateTicket(ctx context.Context, req ticket.CreateTicketRequest, projectID, reporterID string) (*ticket.Ticket, error)
 }
 
+// CommentCreator creates local comments from ActivityPub client activities.
 type CommentCreator interface {
 	CreateComment(ctx context.Context, ticketID, authorID, content string) (*comment.Comment, error)
 }
 
+// Repository resolves local ActivityPub IDs needed by the C2S outbox handler.
 type Repository interface {
 	LocalUser(ctx context.Context, userID string) (*localUser, error)
 	LocalTicketID(ctx context.Context, apID string) (string, error)
@@ -42,12 +45,14 @@ type Repository interface {
 	CreatedActivity(ctx context.Context, actorID, objectAPID string) (*createdActivity, error)
 }
 
+// Handler accepts local client-to-server ActivityPub outbox submissions.
 type Handler struct {
 	repo     Repository
 	tickets  TicketCreator
 	comments CommentCreator
 }
 
+// PgRepository implements Repository using PostgreSQL.
 type PgRepository struct {
 	db *sqlx.DB
 }
@@ -71,22 +76,27 @@ type createdActivity struct {
 	Document json.RawMessage `db:"document"`
 }
 
+// NewHandler creates a C2S outbox handler with the default repository.
 func NewHandler(db *sqlx.DB, cfg activitypub.Config, tickets TicketCreator, comments CommentCreator) *Handler {
 	return NewHandlerWithRepository(NewRepository(db), tickets, comments)
 }
 
+// NewRepository creates a PostgreSQL-backed C2S repository.
 func NewRepository(db *sqlx.DB) *PgRepository {
 	return &PgRepository{db: db}
 }
 
+// NewHandlerWithRepository creates a C2S outbox handler with explicit dependencies.
 func NewHandlerWithRepository(repo Repository, tickets TicketCreator, comments CommentCreator) *Handler {
 	return &Handler{repo: repo, tickets: tickets, comments: comments}
 }
 
+// RegisterRoutes registers client-to-server outbox posting routes.
 func (h *Handler) RegisterRoutes(e *echo.Echo, middleware ...echo.MiddlewareFunc) {
 	e.POST("/users/:username/outbox", h.PostUserOutbox, middleware...)
 }
 
+// PostUserOutbox accepts supported local Create activities from an authenticated user.
 func (h *Handler) PostUserOutbox(c echo.Context) error {
 	if !isSupportedContentType(c.Request().Header.Get(echo.HeaderContentType)) {
 		return c.JSON(http.StatusUnsupportedMediaType, map[string]string{"error": "content type must be application/activity+json or application/ld+json"})
@@ -222,6 +232,7 @@ func (h *Handler) createTicket(ctx context.Context, user *localUser, activity cl
 	return h.repo.CreatedActivity(ctx, user.ID, created.APID)
 }
 
+// LocalUser loads the local actor record for an authenticated user.
 func (r *PgRepository) LocalUser(ctx context.Context, userID string) (*localUser, error) {
 	var user localUser
 	err := r.db.GetContext(ctx, &user, `
@@ -236,6 +247,7 @@ func (r *PgRepository) LocalUser(ctx context.Context, userID string) (*localUser
 	return &user, nil
 }
 
+// LocalTicketID resolves a local ticket UUID from its ActivityPub ID.
 func (r *PgRepository) LocalTicketID(ctx context.Context, apID string) (string, error) {
 	var id string
 	err := r.db.GetContext(ctx, &id, `
@@ -260,6 +272,7 @@ func (h *Handler) optionalLocalTicketID(ctx context.Context, apID string) (*stri
 	return &id, nil
 }
 
+// LocalProjectID resolves a local project UUID from its ActivityPub ID.
 func (r *PgRepository) LocalProjectID(ctx context.Context, apID string) (string, error) {
 	var id string
 	err := r.db.GetContext(ctx, &id, `
@@ -281,6 +294,7 @@ func (h *Handler) optionalActorID(ctx context.Context, apID string) (*string, er
 	return h.repo.ActorID(ctx, apID)
 }
 
+// ActorID resolves any local or known remote actor UUID from its ActivityPub ID.
 func (r *PgRepository) ActorID(ctx context.Context, apID string) (*string, error) {
 	var id string
 	err := r.db.GetContext(ctx, &id, `
@@ -297,6 +311,7 @@ func (r *PgRepository) ActorID(ctx context.Context, apID string) (*string, error
 	return &id, nil
 }
 
+// CreatedActivity loads the most recent Create activity for a created object.
 func (r *PgRepository) CreatedActivity(ctx context.Context, actorID, objectAPID string) (*createdActivity, error) {
 	var activity createdActivity
 	err := r.db.GetContext(ctx, &activity, `

@@ -16,12 +16,15 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/httpsig"
 )
 
+// DefaultMaxBodyBytes is the default maximum accepted inbox request body size.
 const DefaultMaxBodyBytes int64 = 1 << 20
 
+// Verifier validates HTTP signatures for inbound inbox requests.
 type Verifier interface {
 	VerifyRequest(ctx context.Context, req *http.Request, body []byte) (*httpsig.VerifiedRequest, error)
 }
 
+// Service verifies, validates, stores, and fans out remote inbox activities.
 type Service struct {
 	repo           Repository
 	verifier       Verifier
@@ -30,13 +33,16 @@ type Service struct {
 	blockedDomains map[string]struct{}
 }
 
+// DeliveryEnqueuer queues response and fan-out deliveries produced by inbound activity handling.
 type DeliveryEnqueuer interface {
 	Enqueue(ctx context.Context, activityID string, targetInboxURL string) (*delivery.Delivery, error)
 	EnqueueWithActor(ctx context.Context, activityID string, actorID string, targetInboxURL string) (*delivery.Delivery, error)
 }
 
+// Option configures an inbound inbox service.
 type Option func(*Service)
 
+// NewService creates an inbound inbox service.
 func NewService(repo Repository, verifier Verifier, opts ...Option) *Service {
 	service := &Service{
 		repo:         repo,
@@ -49,6 +55,7 @@ func NewService(repo Repository, verifier Verifier, opts ...Option) *Service {
 	return service
 }
 
+// WithMaxBodyBytes overrides the maximum accepted inbox request body size.
 func WithMaxBodyBytes(size int64) Option {
 	return func(s *Service) {
 		if size > 0 {
@@ -57,12 +64,14 @@ func WithMaxBodyBytes(size int64) Option {
 	}
 }
 
+// WithDelivery attaches a delivery queue for follow responses and project fan-out.
 func WithDelivery(delivery DeliveryEnqueuer) Option {
 	return func(s *Service) {
 		s.delivery = delivery
 	}
 }
 
+// WithBlockedDomains preloads blocked actor domains from configuration.
 func WithBlockedDomains(domains []string) Option {
 	return func(s *Service) {
 		for _, domain := range domains {
@@ -78,6 +87,7 @@ func WithBlockedDomains(domains []string) Option {
 	}
 }
 
+// MaxBodyBytes returns the configured maximum accepted inbox request body size.
 func (s *Service) MaxBodyBytes() int64 {
 	return s.maxBodyBytes
 }
@@ -97,6 +107,7 @@ func (s *Service) isActorDomainBlocked(ctx context.Context, actorAPID string) (b
 	return blocked, nil
 }
 
+// Receive verifies and applies a remote ActivityPub inbox activity.
 func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID string, body []byte) (*AcceptedActivity, error) {
 	targetActorID, err := s.repo.FindLocalActorIDByAPID(ctx, targetAPID)
 	if err != nil {

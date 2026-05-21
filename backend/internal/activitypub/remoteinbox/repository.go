@@ -12,6 +12,7 @@ import (
 	"github.com/lib/pq"
 )
 
+// Repository defines persistence operations for inbound ActivityPub handling.
 type Repository interface {
 	FindLocalActorIDByAPID(ctx context.Context, apID string) (string, error)
 	FindActorAPIDByID(ctx context.Context, actorID string) (string, error)
@@ -31,11 +32,13 @@ type Repository interface {
 	UndoProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) error
 }
 
+// PgRepository implements Repository using PostgreSQL.
 type PgRepository struct {
 	db  *sqlx.DB
 	cfg activitypub.Config
 }
 
+// NewRepository creates a PostgreSQL-backed remote inbox repository.
 func NewRepository(db *sqlx.DB, configs ...activitypub.Config) Repository {
 	cfg := activitypub.NewConfig("", "")
 	if len(configs) > 0 {
@@ -44,6 +47,7 @@ func NewRepository(db *sqlx.DB, configs ...activitypub.Config) Repository {
 	return &PgRepository{db: db, cfg: cfg}
 }
 
+// FindLocalActorIDByAPID resolves a local actor UUID from its ActivityPub ID.
 func (r *PgRepository) FindLocalActorIDByAPID(ctx context.Context, apID string) (string, error) {
 	var id string
 	err := r.db.GetContext(ctx, &id, `
@@ -54,12 +58,14 @@ func (r *PgRepository) FindLocalActorIDByAPID(ctx context.Context, apID string) 
 	return id, err
 }
 
+// FindActorAPIDByID resolves an actor ActivityPub ID from its UUID.
 func (r *PgRepository) FindActorAPIDByID(ctx context.Context, actorID string) (string, error) {
 	var apID string
 	err := r.db.GetContext(ctx, &apID, `SELECT ap_id FROM actors WHERE id = $1`, actorID)
 	return apID, err
 }
 
+// IsDomainBlocked reports whether any candidate domain is currently blocked.
 func (r *PgRepository) IsDomainBlocked(ctx context.Context, domains []string) (bool, error) {
 	if len(domains) == 0 {
 		return false, nil
@@ -75,12 +81,14 @@ func (r *PgRepository) IsDomainBlocked(ctx context.Context, domains []string) (b
 	return blocked, err
 }
 
+// IsProjectActor reports whether actorID belongs to a local project.
 func (r *PgRepository) IsProjectActor(ctx context.Context, actorID string) (bool, error) {
 	var exists bool
 	err := r.db.GetContext(ctx, &exists, `SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1)`, actorID)
 	return exists, err
 }
 
+// RemoteProjectFollowerInboxesExceptActor lists remote follower inboxes excluding the sender.
 func (r *PgRepository) RemoteProjectFollowerInboxesExceptActor(ctx context.Context, projectID string, actorID string) ([]string, error) {
 	var inboxes []string
 	err := r.db.SelectContext(ctx, &inboxes, `
@@ -104,6 +112,7 @@ func (r *PgRepository) RemoteProjectFollowerInboxesExceptActor(ctx context.Conte
 	return inboxes, err
 }
 
+// StoreInboundActivity stores a generic inbound activity with inbox membership.
 func (r *PgRepository) StoreInboundActivity(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -122,6 +131,7 @@ func (r *PgRepository) StoreInboundActivity(ctx context.Context, targetActorID s
 	return accepted, nil
 }
 
+// StoreInboundCreateNote stores a remote Create Note and its comment projection.
 func (r *PgRepository) StoreInboundCreateNote(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
 	if activity.ObjectNote == nil {
 		return nil, ErrInvalidActivity
@@ -148,6 +158,7 @@ func (r *PgRepository) StoreInboundCreateNote(ctx context.Context, targetActorID
 	return accepted, nil
 }
 
+// StoreInboundCreateTicket stores a remote Create Ticket and its ticket projection.
 func (r *PgRepository) StoreInboundCreateTicket(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
 	if activity.ObjectTicket == nil {
 		return nil, ErrInvalidActivity
@@ -174,6 +185,7 @@ func (r *PgRepository) StoreInboundCreateTicket(ctx context.Context, targetActor
 	return accepted, nil
 }
 
+// StoreInboundUpdateTicket stores a remote Update Ticket and refreshes its projection.
 func (r *PgRepository) StoreInboundUpdateTicket(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
 	if activity.ObjectTicket == nil {
 		return nil, ErrInvalidActivity
@@ -200,6 +212,7 @@ func (r *PgRepository) StoreInboundUpdateTicket(ctx context.Context, targetActor
 	return accepted, nil
 }
 
+// StoreInboundAddTicketAssignee stores a remote Add assignee activity.
 func (r *PgRepository) StoreInboundAddTicketAssignee(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
 	if activity.ObjectAPID == nil || activity.TargetAPID == nil {
 		return nil, ErrInvalidActivity
@@ -226,6 +239,7 @@ func (r *PgRepository) StoreInboundAddTicketAssignee(ctx context.Context, target
 	return accepted, nil
 }
 
+// StoreInboundRemoveTicketAssignee stores a remote Remove assignee activity.
 func (r *PgRepository) StoreInboundRemoveTicketAssignee(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
 	if activity.ObjectAPID == nil || activity.TargetAPID == nil {
 		return nil, ErrInvalidActivity
@@ -252,6 +266,7 @@ func (r *PgRepository) StoreInboundRemoveTicketAssignee(ctx context.Context, tar
 	return accepted, nil
 }
 
+// StoreInboundDeleteTicket stores a remote Delete ticket activity and tombstones the ticket.
 func (r *PgRepository) StoreInboundDeleteTicket(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
 	if activity.ObjectAPID == nil {
 		return nil, ErrInvalidActivity
@@ -278,10 +293,12 @@ func (r *PgRepository) StoreInboundDeleteTicket(ctx context.Context, targetActor
 	return accepted, nil
 }
 
+// StoreInboundAcceptInvite stores an inbound Accept for a project invite.
 func (r *PgRepository) StoreInboundAcceptInvite(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
 	return r.storeInboundInviteResponse(ctx, targetActorID, activity, InviteResponseAccept)
 }
 
+// StoreInboundRejectInvite stores an inbound Reject for a project invite.
 func (r *PgRepository) StoreInboundRejectInvite(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
 	return r.storeInboundInviteResponse(ctx, targetActorID, activity, InviteResponseReject)
 }
@@ -1015,6 +1032,7 @@ func updateTicketAssignedToDocumentTx(ctx context.Context, tx *sqlx.Tx, ticketID
 	return err
 }
 
+// AcceptProjectFollow accepts a remote Follow for a local project actor.
 func (r *PgRepository) AcceptProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) (*FollowResponse, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -1084,6 +1102,7 @@ func (r *PgRepository) AcceptProjectFollow(ctx context.Context, targetActorID st
 	}, nil
 }
 
+// UndoProjectFollow removes a remote follow relationship for a local project actor.
 func (r *PgRepository) UndoProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {

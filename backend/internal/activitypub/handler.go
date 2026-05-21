@@ -21,12 +21,14 @@ const (
 	maxCollectionPageLimit     = 100
 )
 
+// Handler exposes local ActivityPub read endpoints for actors, objects, and collections.
 type Handler struct {
 	db         *sqlx.DB
 	cfg        Config
 	authorizer Authorizer
 }
 
+// Authorizer checks access to protected local ActivityPub resources.
 type Authorizer interface {
 	AuthorizeActor(ctx context.Context, req *http.Request, actorID string) error
 	AuthorizeProject(ctx context.Context, req *http.Request, projectID string) error
@@ -38,14 +40,17 @@ type collectionPageRequest struct {
 	Offset int
 }
 
+// NewHandler creates an ActivityPub read handler without access enforcement.
 func NewHandler(db *sqlx.DB, cfg Config) *Handler {
 	return &Handler{db: db, cfg: cfg}
 }
 
+// NewHandlerWithAuthorizer creates an ActivityPub read handler with access enforcement.
 func NewHandlerWithAuthorizer(db *sqlx.DB, cfg Config, authorizer Authorizer) *Handler {
 	return &Handler{db: db, cfg: cfg, authorizer: authorizer}
 }
 
+// RegisterRoutes registers ActivityPub actor, object, activity, and collection routes.
 func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/users/:username", h.GetUserActor, requireActivityPubAccept)
 	e.GET("/users/:username/inbox", h.UserInbox, requireActivityPubAccept)
@@ -61,26 +66,31 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/activities/:id", h.GetActivity, requireActivityPubAccept)
 }
 
+// GetUserActor returns a local Person actor document.
 func (h *Handler) GetUserActor(c echo.Context) error {
 	apID := UserAPID(h.cfg, c.Param("username"))
 	return h.writeObject(c, apID)
 }
 
+// GetProjectActor returns a local project Group actor document.
 func (h *Handler) GetProjectActor(c echo.Context) error {
 	apID := ProjectAPID(h.cfg, c.Param("id"))
 	return h.writeObject(c, apID)
 }
 
+// GetTicket returns a local ForgeFed ticket document.
 func (h *Handler) GetTicket(c echo.Context) error {
 	apID := TicketAPID(h.cfg, c.Param("id"))
 	return h.writeObject(c, apID)
 }
 
+// GetComment returns a local Note document.
 func (h *Handler) GetComment(c echo.Context) error {
 	apID := CommentAPID(h.cfg, c.Param("id"))
 	return h.writeObject(c, apID)
 }
 
+// GetActivity returns a stored ActivityStreams activity document.
 func (h *Handler) GetActivity(c echo.Context) error {
 	apID := ActivityAPID(h.cfg, c.Param("id"))
 	var activity struct {
@@ -147,30 +157,37 @@ func (h *Handler) GetActivity(c echo.Context) error {
 	return c.Blob(http.StatusOK, ActivityJSONMediaType, activity.Document)
 }
 
+// UserInbox returns the inbox collection for a local user actor.
 func (h *Handler) UserInbox(c echo.Context) error {
 	return h.actorActivityCollection(c, UserAPID(h.cfg, c.Param("username")), "inbox")
 }
 
+// UserOutbox returns the outbox collection for a local user actor.
 func (h *Handler) UserOutbox(c echo.Context) error {
 	return h.actorActivityCollection(c, UserAPID(h.cfg, c.Param("username")), "outbox")
 }
 
+// UserFollowers returns the followers collection for a local user actor.
 func (h *Handler) UserFollowers(c echo.Context) error {
 	return h.followersCollection(c, UserAPID(h.cfg, c.Param("username")))
 }
 
+// ProjectInbox returns the inbox collection for a local project actor.
 func (h *Handler) ProjectInbox(c echo.Context) error {
 	return h.actorActivityCollection(c, ProjectAPID(h.cfg, c.Param("id")), "inbox")
 }
 
+// ProjectOutbox returns the outbox collection for a local project actor.
 func (h *Handler) ProjectOutbox(c echo.Context) error {
 	return h.actorActivityCollection(c, ProjectAPID(h.cfg, c.Param("id")), "outbox")
 }
 
+// ProjectFollowers returns the followers collection for a local project actor.
 func (h *Handler) ProjectFollowers(c echo.Context) error {
 	return h.followersCollection(c, ProjectAPID(h.cfg, c.Param("id")))
 }
 
+// ProjectTickets returns the ticket collection for a local project actor.
 func (h *Handler) ProjectTickets(c echo.Context) error {
 	return h.projectTicketsCollection(c, ProjectAPID(h.cfg, c.Param("id")))
 }

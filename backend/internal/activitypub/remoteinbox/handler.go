@@ -9,24 +9,29 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// Handler exposes remote ActivityPub inbox POST endpoints.
 type Handler struct {
 	service *Service
 	cfg     activitypub.Config
 }
 
+// NewHandler creates a remote inbox HTTP handler.
 func NewHandler(service *Service, cfg activitypub.Config) *Handler {
 	return &Handler{service: service, cfg: cfg}
 }
 
+// RegisterRoutes registers user and project inbox POST routes.
 func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/users/:username/inbox", h.ReceiveUserInbox)
 	e.POST("/projects/:id/inbox", h.ReceiveProjectInbox)
 }
 
+// ReceiveUserInbox accepts an inbound activity addressed to a local user actor.
 func (h *Handler) ReceiveUserInbox(c echo.Context) error {
 	return h.receive(c, activitypub.UserAPID(h.cfg, c.Param("username")))
 }
 
+// ReceiveProjectInbox accepts an inbound activity addressed to a local project actor.
 func (h *Handler) ReceiveProjectInbox(c echo.Context) error {
 	return h.receive(c, activitypub.ProjectAPID(h.cfg, c.Param("id")))
 }
