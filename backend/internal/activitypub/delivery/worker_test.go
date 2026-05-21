@@ -83,6 +83,35 @@ func (f actorRefresherFunc) RefreshIfStale(ctx context.Context, actorAPID string
 	return f(ctx, actorAPID, maxAge)
 }
 
+type workerMetricsRecorder struct {
+	inFlight     int
+	observations []workerMetricObservation
+}
+
+func (r *workerMetricsRecorder) IncDeliveryInFlight() {
+	r.inFlight++
+}
+
+func (r *workerMetricsRecorder) DecDeliveryInFlight() {
+	r.inFlight--
+}
+
+func (r *workerMetricsRecorder) ObserveDeliveryAttempt(outcome, failureKind string, statusCode *int, duration time.Duration) {
+	r.observations = append(r.observations, workerMetricObservation{
+		outcome:     outcome,
+		failureKind: failureKind,
+		statusCode:  statusCode,
+		duration:    duration,
+	})
+}
+
+type workerMetricObservation struct {
+	outcome     string
+	failureKind string
+	statusCode  *int
+	duration    time.Duration
+}
+
 type staticKeyRepo struct {
 	key *httpsig.ActorKey
 }
@@ -115,6 +144,26 @@ func TestWorkerDeliversActivity(t *testing.T) {
 	assert.Equal(t, "local-actor", signedActorID)
 	assert.Equal(t, "delivery-1", repo.deliveredID)
 	assert.Empty(t, repo.failedID)
+}
+
+func TestWorkerRecordsSuccessMetrics(t *testing.T) {
+	metrics := &workerMetricsRecorder{}
+	repo := &workerRepo{delivery: testDelivery(1, 3)}
+	worker := NewWorker(repo, signerFunc(func(ctx context.Context, actorID string, req *http.Request, body []byte) error {
+		return nil
+	}), httpClientFunc(func(req *http.Request) (*http.Response, error) {
+		return response(http.StatusAccepted, ""), nil
+	}), WithMetrics(metrics))
+
+	err := worker.HandleDeliveryTask(context.Background(), taskForDelivery(t, "delivery-1"))
+
+	require.NoError(t, err)
+	require.Len(t, metrics.observations, 1)
+	assert.Equal(t, 0, metrics.inFlight)
+	assert.Equal(t, DeliveryMetricDelivered, metrics.observations[0].outcome)
+	assert.Equal(t, DeliveryMetricFailureNone, metrics.observations[0].failureKind)
+	assert.Nil(t, metrics.observations[0].statusCode)
+	assert.GreaterOrEqual(t, metrics.observations[0].duration, time.Duration(0))
 }
 
 func TestWorkerDeliversVerifiableSignedActivity(t *testing.T) {
@@ -229,11 +278,12 @@ func TestWorkerTreatsFinalRetryAsDeadDelivery(t *testing.T) {
 
 func TestWorkerRetriesRateLimitFailure(t *testing.T) {
 	repo := &workerRepo{delivery: testDelivery(1, 5)}
+	metrics := &workerMetricsRecorder{}
 	worker := NewWorker(repo, signerFunc(func(ctx context.Context, actorID string, req *http.Request, body []byte) error {
 		return nil
 	}), httpClientFunc(func(req *http.Request) (*http.Response, error) {
 		return response(http.StatusTooManyRequests, "slow down"), nil
-	}))
+	}), WithMetrics(metrics))
 
 	err := worker.HandleDeliveryTask(context.Background(), taskForDelivery(t, "delivery-1"))
 
@@ -245,6 +295,11 @@ func TestWorkerRetriesRateLimitFailure(t *testing.T) {
 	require.NotNil(t, repo.failedDetails.StatusCode)
 	assert.Equal(t, http.StatusTooManyRequests, *repo.failedDetails.StatusCode)
 	require.NotNil(t, repo.nextAttempt)
+	require.Len(t, metrics.observations, 1)
+	assert.Equal(t, DeliveryMetricRetryableFailure, metrics.observations[0].outcome)
+	assert.Equal(t, FailureKindHTTP, metrics.observations[0].failureKind)
+	require.NotNil(t, metrics.observations[0].statusCode)
+	assert.Equal(t, http.StatusTooManyRequests, *metrics.observations[0].statusCode)
 }
 
 func TestWorkerRetriesNetworkFailure(t *testing.T) {

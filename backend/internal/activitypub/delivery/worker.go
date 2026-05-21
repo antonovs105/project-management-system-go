@@ -23,6 +23,24 @@ const (
 	deliveryUserAgent = "project-management-system-go/activitypub-delivery"
 	// maxResponseSnippetBytes bounds stored remote failure response snippets.
 	maxResponseSnippetBytes = int64(1024)
+	// DeliveryMetricDelivered marks a successful remote inbox delivery.
+	DeliveryMetricDelivered = "delivered"
+	// DeliveryMetricRetryableFailure marks a failure that will be retried.
+	DeliveryMetricRetryableFailure = "retryable_failure"
+	// DeliveryMetricDead marks a permanent or exhausted delivery failure.
+	DeliveryMetricDead = "dead"
+	// DeliveryMetricSkipped marks a task that did not need delivery work.
+	DeliveryMetricSkipped = "skipped"
+	// DeliveryMetricError marks local worker or repository errors.
+	DeliveryMetricError = "error"
+	// DeliveryMetricInvalidTask marks malformed Asynq task payloads.
+	DeliveryMetricInvalidTask = "invalid_task"
+	// DeliveryMetricFailureNone marks delivery outcomes without a failure category.
+	DeliveryMetricFailureNone = "none"
+	// DeliveryMetricFailureRepository marks local repository failures.
+	DeliveryMetricFailureRepository = "repository"
+	// DeliveryMetricFailureTask marks malformed or incomplete task payloads.
+	DeliveryMetricFailureTask = "task"
 )
 
 // Signer signs outbound ActivityPub HTTP requests for a local actor.
@@ -40,6 +58,13 @@ type RemoteActorRefresher interface {
 	RefreshIfStale(ctx context.Context, actorAPID string, maxAge time.Duration) error
 }
 
+// WorkerMetrics records ActivityPub delivery worker outcomes.
+type WorkerMetrics interface {
+	IncDeliveryInFlight()
+	DecDeliveryInFlight()
+	ObserveDeliveryAttempt(outcome, failureKind string, statusCode *int, duration time.Duration)
+}
+
 // remoteActorInboxResolver resolves a remote actor from a target inbox URL.
 type remoteActorInboxResolver interface {
 	RemoteActorAPIDByInboxURL(ctx context.Context, inboxURL string) (string, error)
@@ -52,6 +77,7 @@ type Worker struct {
 	client                   HTTPClient
 	remoteActorRefresher     RemoteActorRefresher
 	targetActorRefreshMaxAge time.Duration
+	metrics                  WorkerMetrics
 }
 
 // WorkerOption configures a delivery worker.
@@ -90,6 +116,13 @@ func WithTargetActorRefreshMaxAge(maxAge time.Duration) WorkerOption {
 	}
 }
 
+// WithMetrics attaches Prometheus-compatible delivery metrics to the worker.
+func WithMetrics(metrics WorkerMetrics) WorkerOption {
+	return func(w *Worker) {
+		w.metrics = metrics
+	}
+}
+
 // NewAsynqServer creates the federation Asynq worker server.
 func NewAsynqServer(redis asynq.RedisConnOpt) *asynq.Server {
 	return asynq.NewServer(redis, asynq.Config{
@@ -108,22 +141,31 @@ func NewServeMux(worker *Worker) *asynq.ServeMux {
 
 // HandleDeliveryTask processes one outbound delivery task.
 func (w *Worker) HandleDeliveryTask(ctx context.Context, task *asynq.Task) error {
+	startedAt := time.Now()
+	w.incDeliveryInFlight()
+	defer w.decDeliveryInFlight()
+
 	var payload TaskPayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		w.observeDeliveryAttempt(DeliveryMetricInvalidTask, DeliveryMetricFailureTask, nil, startedAt)
 		return fmt.Errorf("decode delivery task: %w: %w", err, asynq.SkipRetry)
 	}
 	if payload.DeliveryID == "" {
+		w.observeDeliveryAttempt(DeliveryMetricInvalidTask, DeliveryMetricFailureTask, nil, startedAt)
 		return fmt.Errorf("delivery id required: %w", asynq.SkipRetry)
 	}
 
 	delivery, err := w.repo.StartAttempt(ctx, payload.DeliveryID)
 	if err != nil {
 		if errors.Is(err, ErrDeliveryDone) {
+			w.observeDeliveryAttempt(DeliveryMetricSkipped, DeliveryMetricFailureNone, nil, startedAt)
 			return nil
 		}
 		if errors.Is(err, ErrDeliveryNotFound) || errors.Is(err, ErrDeliveryExhausted) {
+			w.observeDeliveryAttempt(DeliveryMetricSkipped, DeliveryMetricFailureNone, nil, startedAt)
 			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
 		}
+		w.observeDeliveryAttempt(DeliveryMetricError, DeliveryMetricFailureRepository, nil, startedAt)
 		return err
 	}
 
@@ -153,15 +195,19 @@ func (w *Worker) HandleDeliveryTask(ctx context.Context, task *asynq.Task) error
 			err.Error(),
 		)
 		if markErr := w.repo.MarkFailed(ctx, delivery.ID, err.Error(), details, next); markErr != nil {
+			w.observeDeliveryAttempt(DeliveryMetricError, DeliveryMetricFailureRepository, nil, startedAt)
 			return markErr
 		}
 		if !retryable {
+			w.observeDeliveryAttempt(DeliveryMetricDead, details.Kind, details.StatusCode, startedAt)
 			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
 		}
+		w.observeDeliveryAttempt(DeliveryMetricRetryableFailure, details.Kind, details.StatusCode, startedAt)
 		return err
 	}
 
 	if err := w.repo.MarkDelivered(ctx, delivery.ID); err != nil {
+		w.observeDeliveryAttempt(DeliveryMetricError, DeliveryMetricFailureRepository, nil, startedAt)
 		return err
 	}
 	log.Printf(
@@ -172,7 +218,29 @@ func (w *Worker) HandleDeliveryTask(ctx context.Context, task *asynq.Task) error
 		delivery.TargetInboxURL,
 		delivery.Attempts,
 	)
+	w.observeDeliveryAttempt(DeliveryMetricDelivered, DeliveryMetricFailureNone, nil, startedAt)
 	return nil
+}
+
+// incDeliveryInFlight increments worker in-flight metrics when configured.
+func (w *Worker) incDeliveryInFlight() {
+	if w.metrics != nil {
+		w.metrics.IncDeliveryInFlight()
+	}
+}
+
+// decDeliveryInFlight decrements worker in-flight metrics when configured.
+func (w *Worker) decDeliveryInFlight() {
+	if w.metrics != nil {
+		w.metrics.DecDeliveryInFlight()
+	}
+}
+
+// observeDeliveryAttempt records one worker outcome when metrics are configured.
+func (w *Worker) observeDeliveryAttempt(outcome, failureKind string, statusCode *int, startedAt time.Time) {
+	if w.metrics != nil {
+		w.metrics.ObserveDeliveryAttempt(outcome, failureKind, statusCode, time.Since(startedAt))
+	}
 }
 
 // deliver signs and POSTs one stored ActivityPub activity to a remote inbox.

@@ -62,6 +62,8 @@ const (
 	inboxRateLimitPerSecond = 20
 	// inboxRateLimitBurst allows remote servers to deliver short federation bursts.
 	inboxRateLimitBurst = 100
+	// metricsReadHeaderTimeout bounds standalone metrics server header reads.
+	metricsReadHeaderTimeout = 5 * time.Second
 )
 
 const (
@@ -228,12 +230,16 @@ func main() {
 		log.Fatal("LOCAL_DOMAIN environment variable is not set")
 	}
 	redisAddr := os.Getenv("REDIS_ADDR")
+	metricsAddr := strings.TrimSpace(os.Getenv("METRICS_ADDR"))
 	adminBootstrapToken := strings.TrimSpace(os.Getenv("ADMIN_BOOTSTRAP_TOKEN"))
 	if err := validateRuntimeConfig(production, jwtSecret, publicBaseURL, localDomain, adminBootstrapToken); err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("backend_runtime_start app_env=%s role=%s public_base_url=%s local_domain=%s redis_configured=%t", appEnv, role, publicBaseURL, localDomain, redisAddr != "")
+	log.Printf("backend_runtime_start app_env=%s role=%s public_base_url=%s local_domain=%s redis_configured=%t metrics_addr=%s", appEnv, role, publicBaseURL, localDomain, redisAddr != "", metricsAddr)
 	apConfig := activitypub.NewConfig(publicBaseURL, localDomain)
+	metrics := observability.NewMetrics()
+	metricsServer := startMetricsServer(metrics, metricsAddr)
+	defer shutdownMetricsServer(metricsServer, gracefulShutdownTimeout)
 
 	db, err := sqlx.Connect("postgres", dbSource)
 	if err != nil {
@@ -290,6 +296,7 @@ func main() {
 				sigService,
 				nil,
 				delivery.WithRemoteActorRefresher(remoteActorService),
+				delivery.WithMetrics(metrics),
 			)
 			deliveryServer := delivery.NewAsynqServer(redisOpt)
 			if err := deliveryServer.Start(delivery.NewServeMux(deliveryWorker)); err != nil {
@@ -331,7 +338,7 @@ func main() {
 	server := &ApiServer{
 		db:                db,
 		redisAddr:         redisAddr,
-		metrics:           observability.NewMetrics(),
+		metrics:           metrics,
 		userHandler:       userHandler,
 		projectHandler:    projectHandler,
 		ticketHandler:     ticketHandler,
@@ -430,6 +437,39 @@ func runHTTPServer(e *echo.Echo, addr string, timeout time.Duration) error {
 	}
 	log.Println("HTTP server stopped gracefully")
 	return nil
+}
+
+// startMetricsServer starts an optional standalone Prometheus endpoint.
+func startMetricsServer(metrics *observability.Metrics, addr string) *http.Server {
+	if strings.TrimSpace(addr) == "" {
+		return nil
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", metrics.Handler())
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: metricsReadHeaderTimeout,
+	}
+	go func() {
+		log.Printf("Prometheus metrics server listening on %s", addr)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("Prometheus metrics server failed: %v", err)
+		}
+	}()
+	return server
+}
+
+// shutdownMetricsServer stops the optional standalone metrics server.
+func shutdownMetricsServer(server *http.Server, timeout time.Duration) {
+	if server == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := server.Shutdown(ctx); err != nil {
+		log.Printf("Prometheus metrics server shutdown failed: %v", err)
+	}
 }
 
 // registerGlobalMiddleware adds request logging, request IDs, panic recovery, and optional metrics.

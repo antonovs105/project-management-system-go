@@ -80,6 +80,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     init: true
+    ports:
+      - "${BACKEND_WORKER_METRICS_PORT:-9091}:9091"
     environment:
       DB_SOURCE: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-pms}?sslmode=disable
       APP_ENV: ${APP_ENV:-development}
@@ -88,6 +90,7 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       LOCAL_DOMAIN: ${LOCAL_DOMAIN:-localhost:8080}
       REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+      METRICS_ADDR: :9091
     depends_on:
       migrations:
         condition: service_completed_successfully
