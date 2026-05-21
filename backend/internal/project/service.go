@@ -79,12 +79,10 @@ func (s *Service) GetProjectByID(ctx context.Context, projectID, userID string) 
 		return nil, err
 	}
 
-	role, err := s.GetProjectRole(ctx, projectID, userID)
-	if err != nil {
+	if _, err := s.GetProjectRole(ctx, projectID, userID); err != nil {
 		return nil, errors.New("project not found or access denied")
 	}
 
-	log.Printf("User %s has role '%s' in project %s", userID, role, projectID)
 	return project, nil
 }
 

@@ -141,7 +141,9 @@ func (s *Service) ChangePassword(ctx context.Context, userID, currentPassword, n
 
 	existingUser, err := s.repo.GetUserByID(ctx, userID)
 	if err != nil {
-		log.Printf("[DEBUG] Change password failed for user '%s'. Reason: user not found or DB error. Error: %v", userID, err)
+		if !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, ErrUserNotFound) {
+			log.Printf("change password credential lookup failed: %v", err)
+		}
 		return ErrInvalidCredentials
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(existingUser.PasswordHash), []byte(currentPassword)); err != nil {
@@ -172,7 +174,9 @@ func (s *Service) ValidateTokenVersion(ctx context.Context, userID string, token
 	}
 	currentVersion, err := s.repo.TokenVersion(ctx, userID)
 	if err != nil {
-		log.Printf("[DEBUG] JWT token version validation failed for user '%s': %v", userID, err)
+		if !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, ErrUserNotFound) {
+			log.Printf("jwt token version validation failed: %v", err)
+		}
 		return ErrInvalidCredentials
 	}
 	if currentVersion != tokenVersion {
@@ -296,7 +300,9 @@ func (s *Service) Login(ctx context.Context, email, password string) (string, er
 
 	user, err := s.repo.GetUserByEmail(ctx, email)
 	if err != nil {
-		log.Printf("[DEBUG] Login failed for email '%s'. Reason: user not found or DB error. Error: %v", email, err)
+		if !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, ErrUserNotFound) {
+			log.Printf("login credential lookup failed: %v", err)
+		}
 		return "", ErrInvalidCredentials
 	}
 
