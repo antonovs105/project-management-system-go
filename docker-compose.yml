@@ -49,6 +49,7 @@ services:
     environment:
       DB_SOURCE: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-pms}?sslmode=disable
       APP_ENV: ${APP_ENV:-development}
+      APP_ROLE: api
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-your_secret_key_here}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       LOCAL_DOMAIN: ${LOCAL_DOMAIN:-localhost:8080}
@@ -71,6 +72,31 @@ services:
       timeout: 5s
       retries: 6
       start_period: 10s
+
+  backend-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    init: true
+    environment:
+      DB_SOURCE: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-pms}?sslmode=disable
+      APP_ENV: ${APP_ENV:-development}
+      APP_ROLE: worker
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-your_secret_key_here}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      LOCAL_DOMAIN: ${LOCAL_DOMAIN:-localhost:8080}
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    stop_grace_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
 
   frontend:
     build:

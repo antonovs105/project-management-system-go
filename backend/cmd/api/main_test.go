@@ -17,6 +17,34 @@ func TestValidateRuntimeConfigAllowsDevelopmentLocalhost(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestParseAppRoleDefaultsToAll(t *testing.T) {
+	role, err := parseAppRole("")
+
+	require.NoError(t, err)
+	require.Equal(t, appRoleAll, role)
+	require.True(t, role.runsAPI())
+	require.True(t, role.runsWorker())
+}
+
+func TestParseAppRoleSupportsSplitRoles(t *testing.T) {
+	apiRole, err := parseAppRole("api")
+	require.NoError(t, err)
+	require.True(t, apiRole.runsAPI())
+	require.False(t, apiRole.runsWorker())
+
+	workerRole, err := parseAppRole(" worker ")
+	require.NoError(t, err)
+	require.False(t, workerRole.runsAPI())
+	require.True(t, workerRole.runsWorker())
+}
+
+func TestParseAppRoleRejectsUnknownRole(t *testing.T) {
+	_, err := parseAppRole("scheduler")
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "APP_ROLE")
+}
+
 func TestValidateRuntimeConfigRejectsProductionDefaults(t *testing.T) {
 	err := validateRuntimeConfig(true, "your_secret_key_here", "http://localhost:8080", "localhost:8080", "")
 

@@ -46,6 +46,18 @@ const (
 	gracefulShutdownTimeout = 10 * time.Second
 )
 
+const (
+	// appRoleAPI runs only the HTTP API process.
+	appRoleAPI appRole = "api"
+	// appRoleWorker runs only the ActivityPub delivery worker process.
+	appRoleWorker appRole = "worker"
+	// appRoleAll runs the HTTP API and the delivery worker in one process.
+	appRoleAll appRole = "all"
+)
+
+// appRole selects which server responsibilities this process owns.
+type appRole string
+
 // ApiServer wires database-backed services into the HTTP server.
 type ApiServer struct {
 	db                *sqlx.DB
@@ -104,6 +116,30 @@ func splitCSVEnv(name string) []string {
 	return values
 }
 
+// parseAppRole validates the configured process role.
+func parseAppRole(raw string) (appRole, error) {
+	role := appRole(strings.ToLower(strings.TrimSpace(raw)))
+	if role == "" {
+		role = appRoleAll
+	}
+	switch role {
+	case appRoleAPI, appRoleWorker, appRoleAll:
+		return role, nil
+	default:
+		return "", fmt.Errorf("APP_ROLE must be one of api, worker, or all")
+	}
+}
+
+// runsAPI reports whether the process role serves HTTP traffic.
+func (r appRole) runsAPI() bool {
+	return r == appRoleAPI || r == appRoleAll
+}
+
+// runsWorker reports whether the process role processes Asynq delivery tasks.
+func (r appRole) runsWorker() bool {
+	return r == appRoleWorker || r == appRoleAll
+}
+
 // validateRuntimeConfig rejects unsafe deployment configuration before the server starts.
 func validateRuntimeConfig(production bool, jwtSecret, publicBaseURL, localDomain, adminBootstrapToken string) error {
 	parsedBaseURL, err := url.Parse(strings.TrimSpace(publicBaseURL))
@@ -152,6 +188,10 @@ func main() {
 	}
 	appEnv := normalizedEnv("APP_ENV", "development")
 	production := appEnv == "production"
+	role, err := parseAppRole(os.Getenv("APP_ROLE"))
+	if err != nil {
+		log.Fatal(err)
+	}
 	dbSource := os.Getenv("DB_SOURCE")
 	if dbSource == "" {
 		log.Fatal("DB_SOURCE environment variable is not set")
@@ -225,22 +265,24 @@ func main() {
 		deliveryQueue = delivery.NewAsynqQueue(redisOpt)
 		defer deliveryQueue.Close()
 
-		deliveryWorker := delivery.NewWorker(
-			deliveryRepo,
-			sigService,
-			nil,
-			delivery.WithRemoteActorRefresher(remoteActorService),
-		)
-		deliveryServer := delivery.NewAsynqServer(redisOpt)
-		if err := deliveryServer.Start(delivery.NewServeMux(deliveryWorker)); err != nil {
-			log.Fatalf("Can't start ActivityPub delivery worker: %v", err)
-		}
-		defer deliveryServer.Shutdown()
+		if role.runsWorker() {
+			deliveryWorker := delivery.NewWorker(
+				deliveryRepo,
+				sigService,
+				nil,
+				delivery.WithRemoteActorRefresher(remoteActorService),
+			)
+			deliveryServer := delivery.NewAsynqServer(redisOpt)
+			if err := deliveryServer.Start(delivery.NewServeMux(deliveryWorker)); err != nil {
+				log.Fatalf("Can't start ActivityPub delivery worker: %v", err)
+			}
+			defer deliveryServer.Shutdown()
 
-		log.Printf("ActivityPub delivery worker started with Redis at %s", redisAddr)
+			log.Printf("ActivityPub delivery worker started with Redis at %s", redisAddr)
+		}
 	} else {
-		if production {
-			log.Fatal("REDIS_ADDR environment variable is required in production")
+		if production || role.runsWorker() {
+			log.Fatal("REDIS_ADDR environment variable is required for production or worker roles")
 		}
 		log.Println("REDIS_ADDR is not set; ActivityPub delivery worker disabled")
 	}
@@ -282,6 +324,12 @@ func main() {
 		auditHandler:      auditHandler,
 		deliverySvc:       deliveryService,
 		wfHandler:         wfHandler,
+	}
+
+	if !role.runsAPI() {
+		log.Printf("Backend process running as %s; HTTP API disabled", role)
+		waitForShutdownSignal()
+		return
 	}
 
 	e := echo.New()
@@ -328,6 +376,16 @@ func main() {
 	if err := runHTTPServer(e, defaultHTTPAddr, gracefulShutdownTimeout); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// waitForShutdownSignal blocks worker-only processes until the container stops them.
+func waitForShutdownSignal() {
+	shutdownSignals := make(chan os.Signal, 1)
+	signal.Notify(shutdownSignals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(shutdownSignals)
+
+	signal := <-shutdownSignals
+	log.Printf("Shutdown signal received: %s", signal)
 }
 
 // runHTTPServer starts Echo and stops it gracefully on SIGINT or SIGTERM.
