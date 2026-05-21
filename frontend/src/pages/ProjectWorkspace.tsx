@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { GitFork, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { GitFork, Pencil, Plus, RefreshCw, Settings, Trash2, Truck } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
+import { ProjectDeliveriesPanel } from "../features/projects/ProjectDeliveriesPanel";
+import { ProjectSettingsPanel } from "../features/projects/ProjectSettingsPanel";
 import { TicketBoard } from "../features/tickets/TicketBoard";
 import { TicketDetailPanel } from "../features/tickets/TicketDetailPanel";
 import { TicketFormModal } from "../features/tickets/TicketFormModal";
@@ -16,6 +18,21 @@ import { Button, ErrorState, LoadingState, Modal, Panel, TextAreaField, TextFiel
 const ProjectGraph = lazy(() =>
   import("../features/graph/ProjectGraph").then((module) => ({ default: module.ProjectGraph })),
 );
+
+type ProjectView = "board" | "graph" | "deliveries" | "settings";
+
+function viewFromPath(pathname: string): ProjectView {
+  if (pathname.endsWith("/graph")) {
+    return "graph";
+  }
+  if (pathname.endsWith("/deliveries")) {
+    return "deliveries";
+  }
+  if (pathname.endsWith("/settings")) {
+    return "settings";
+  }
+  return "board";
+}
 
 function tabClass(active: boolean): string {
   return [
@@ -36,7 +53,7 @@ export function ProjectWorkspace() {
   const [projectDescription, setProjectDescription] = useState("");
   const activeProjectId = projectId || "";
 
-  const view = location.pathname.endsWith("/graph") ? "graph" : "board";
+  const view = viewFromPath(location.pathname);
 
   const project = useQuery({
     queryKey: queryKeys.project(activeProjectId),
@@ -148,7 +165,7 @@ export function ProjectWorkspace() {
           </div>
 
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="flex w-fit rounded-full border border-zinc-200 bg-white p-1 shadow-sm">
+            <div className="flex max-w-full overflow-x-auto rounded-full border border-zinc-200 bg-white p-1 shadow-sm">
               <Link to={`/projects/${activeProjectId}`} className={tabClass(view === "board")}>
                 Board
               </Link>
@@ -156,14 +173,22 @@ export function ProjectWorkspace() {
                 <GitFork size={16} />
                 Graph
               </Link>
+              <Link to={`/projects/${activeProjectId}/deliveries`} className={tabClass(view === "deliveries")}>
+                <Truck size={16} />
+                Deliveries
+              </Link>
+              <Link to={`/projects/${activeProjectId}/settings`} className={tabClass(view === "settings")}>
+                <Settings size={16} />
+                Settings
+              </Link>
             </div>
             <div className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-sm text-zinc-500 shadow-sm">
               {tickets.data?.length || 0} tickets
             </div>
           </div>
 
-          {tickets.isLoading ? <LoadingState label="Loading tickets" /> : null}
-          {tickets.isError ? (
+          {view === "board" && tickets.isLoading ? <LoadingState label="Loading tickets" /> : null}
+          {view === "board" && tickets.isError ? (
             <ErrorState title="Could not load tickets" body={errorMessage(tickets.error, "Ticket list request failed.")} />
           ) : null}
 
@@ -186,6 +211,10 @@ export function ProjectWorkspace() {
               </Suspense>
             ) : null
           ) : null}
+
+          {view === "deliveries" ? <ProjectDeliveriesPanel projectId={activeProjectId} /> : null}
+
+          {view === "settings" ? <ProjectSettingsPanel project={project.data} /> : null}
 
           <TicketFormModal
             projectId={activeProjectId}

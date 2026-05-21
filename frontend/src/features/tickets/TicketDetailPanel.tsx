@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { MessageSquare, Save, Trash2, X } from "lucide-react";
+import { Link2, MessageSquare, Save, Trash2, Unlink, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
 import { api, errorMessage, type UpdateTicketPayload } from "../../lib/api";
-import { ticketPriorities, ticketStatuses, ticketTypes } from "../../lib/constants";
+import { ticketLinkTypes, ticketPriorities, ticketStatuses, ticketTypes } from "../../lib/constants";
 import { compactId, relativeDate } from "../../lib/format";
 import { queryKeys } from "../../lib/queryKeys";
 import type { ID, Ticket, TicketPriority, TicketStatus, TicketType } from "../../types";
@@ -143,6 +143,94 @@ function TicketEditor({
   );
 }
 
+function TicketLinksPanel({ projectId, ticketId, tickets }: { projectId: ID; ticketId: ID; tickets: Ticket[] }) {
+  const queryClient = useQueryClient();
+  const [targetTicketId, setTargetTicketId] = useState("");
+  const [linkType, setLinkType] = useState<(typeof ticketLinkTypes)[number]["id"]>("relates_to");
+  const [linkId, setLinkId] = useState("");
+  const candidates = tickets.filter((ticket) => ticket.id !== ticketId);
+
+  const addLink = useMutation({
+    mutationFn: () => api.addTicketLink(ticketId, { target_id: targetTicketId, link_type: linkType }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.ticket(ticketId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.tickets(projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.graph(projectId) }),
+      ]);
+      setTargetTicketId("");
+      toast.success("Ticket link created");
+    },
+  });
+
+  const removeLink = useMutation({
+    mutationFn: () => api.removeTicketLink(linkId.trim()),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.graph(projectId) });
+      setLinkId("");
+      toast.success("Ticket link removed");
+    },
+  });
+
+  function submitLink(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    addLink.mutate();
+  }
+
+  function submitRemove(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    removeLink.mutate();
+  }
+
+  return (
+    <section className="border-t border-slate-200 pt-5">
+      <div className="mb-3 flex items-center gap-2">
+        <Link2 size={18} className="text-slate-500" />
+        <h3 className="font-semibold text-slate-950">Links</h3>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <form className="grid gap-3" onSubmit={submitLink}>
+          {addLink.isError ? <ErrorState title="Could not link ticket" body={errorMessage(addLink.error, "Link request failed.")} /> : null}
+          <SelectField label="Target" value={targetTicketId} onChange={(event) => setTargetTicketId(event.target.value)}>
+            <option value="">Select ticket</option>
+            {candidates.map((ticket) => (
+              <option key={ticket.id} value={ticket.id}>
+                {ticket.title}
+              </option>
+            ))}
+          </SelectField>
+          <SelectField
+            label="Type"
+            value={linkType}
+            onChange={(event) => setLinkType(event.target.value as (typeof ticketLinkTypes)[number]["id"])}
+          >
+            {ticketLinkTypes.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </SelectField>
+          <Button type="submit" tone="primary" disabled={addLink.isPending || !targetTicketId}>
+            <Link2 size={16} />
+            Add link
+          </Button>
+        </form>
+
+        <form className="grid gap-3" onSubmit={submitRemove}>
+          {removeLink.isError ? (
+            <ErrorState title="Could not remove link" body={errorMessage(removeLink.error, "Remove link request failed.")} />
+          ) : null}
+          <TextField label="Link ID" value={linkId} onChange={(event) => setLinkId(event.target.value)} />
+          <Button type="submit" tone="danger" disabled={removeLink.isPending || !linkId.trim()}>
+            <Unlink size={16} />
+            Remove link
+          </Button>
+        </form>
+      </div>
+    </section>
+  );
+}
+
 export function TicketDetailPanel({
   projectId,
   ticketId,
@@ -229,6 +317,8 @@ export function TicketDetailPanel({
                 tickets={tickets}
                 onClose={onClose}
               />
+
+              <TicketLinksPanel projectId={projectId} ticketId={ticketId} tickets={tickets} />
 
               <section className="border-t border-slate-200 pt-5">
                 <div className="mb-3 flex items-center gap-2">

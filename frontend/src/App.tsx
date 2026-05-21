@@ -31,6 +31,8 @@ export function App() {
               <Route path="/projects" element={<ProjectsPage />} />
               <Route path="/projects/:projectId" element={<ProjectWorkspace />} />
               <Route path="/projects/:projectId/graph" element={<ProjectWorkspace />} />
+              <Route path="/projects/:projectId/deliveries" element={<ProjectWorkspace />} />
+              <Route path="/projects/:projectId/settings" element={<ProjectWorkspace />} />
             </Route>
           </Route>
 
