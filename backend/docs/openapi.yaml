@@ -12,6 +12,7 @@ tags:
   - name: Tickets
   - name: Comments
   - name: Delivery
+  - name: Admin Audit
   - name: Federation Moderation
   - name: WebFinger
   - name: ActivityPub
@@ -174,6 +175,45 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
         "409":
+          $ref: "#/components/responses/Error"
+  /api/admin/audit-events:
+    get:
+      tags: [Admin Audit]
+      operationId: listAdminAuditEvents
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: action
+          in: query
+          schema:
+            $ref: "#/components/schemas/AdminAuditAction"
+        - name: actor_user_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: target_type
+          in: query
+          schema:
+            $ref: "#/components/schemas/AdminAuditTargetType"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+      responses:
+        "200":
+          description: Admin audit events ordered newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminAuditEvent"
+        "400":
+          $ref: "#/components/responses/Error"
+        "403":
           $ref: "#/components/responses/Error"
   /api/projects:
     get:
@@ -1134,6 +1174,38 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
   schemas:
+    AdminAuditAction:
+      type: string
+      enum:
+        - user.role_updated
+        - federation.domain_blocked
+        - federation.domain_unblocked
+        - federation.delivery_retried
+    AdminAuditEvent:
+      type: object
+      required: [id, action, target_type, target_id, metadata, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        actor_user_id:
+          type: string
+          format: uuid
+        action:
+          $ref: "#/components/schemas/AdminAuditAction"
+        target_type:
+          $ref: "#/components/schemas/AdminAuditTargetType"
+        target_id:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+    AdminAuditTargetType:
+      type: string
+      enum: [user, federation_domain, federation_delivery]
     ActivityPubDocument:
       type: object
       additionalProperties: true

@@ -54,7 +54,7 @@ func (s *Service) UnblockDomain(ctx context.Context, userID, domain string) erro
 	if normalized == "" {
 		return fmt.Errorf("%w: domain is required", ErrInvalidDomainBlock)
 	}
-	if err := s.repo.DeleteDomainBlock(ctx, normalized); err != nil {
+	if err := s.repo.DeleteDomainBlock(ctx, normalized, userID); err != nil {
 		if err == sql.ErrNoRows {
 			return ErrDomainBlockNotFound
 		}
@@ -89,7 +89,7 @@ func (s *Service) RetryFederationDelivery(ctx context.Context, userID string, de
 	if err := s.requireAdmin(ctx, userID); err != nil {
 		return nil, err
 	}
-	delivery, err := s.repo.RetryFederationDelivery(ctx, deliveryID)
+	delivery, err := s.repo.RetryFederationDelivery(ctx, deliveryID, userID)
 	if err != nil {
 		return nil, err
 	}

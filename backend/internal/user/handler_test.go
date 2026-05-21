@@ -95,7 +95,7 @@ func TestHandler_AdminUserRoutes(t *testing.T) {
 		repo := new(MockRepository)
 		updated := &User{ID: targetID, Role: RoleAdmin}
 		repo.On("UserRole", mock.Anything, adminID).Return(RoleAdmin, nil).Once()
-		repo.On("UpdateUserRole", mock.Anything, targetID, RoleAdmin).Return(updated, nil).Once()
+		repo.On("UpdateUserRole", mock.Anything, adminID, targetID, RoleAdmin).Return(updated, nil).Once()
 		e := newAdminUserEcho(repo, adminID)
 
 		rec := doAdminUserRequest(e, http.MethodPatch, "/api/admin/users/"+targetID+"/role", `{"role":"admin"}`)

@@ -21,6 +21,7 @@ import (
 	apmoderation "github.com/antonovs105/project-management-system-go/internal/activitypub/moderation"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteactor"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteinbox"
+	"github.com/antonovs105/project-management-system-go/internal/adminaudit"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
 	"github.com/antonovs105/project-management-system-go/internal/project"
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
@@ -89,6 +90,13 @@ func TestAdminUserManagement(t *testing.T) {
 
 	_, err = userService.UpdateUserRole(ctx, worker.ID, worker.ID, user.RoleWorker)
 	require.ErrorIs(t, err, user.ErrCannotDemoteLastAdmin)
+
+	auditService := adminaudit.NewService(adminaudit.NewRepository(db))
+	events, err := auditService.ListEvents(ctx, worker.ID, adminaudit.ListOptions{Action: adminaudit.ActionUserRoleUpdated})
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+	assert.Equal(t, adminaudit.TargetTypeUser, events[0].TargetType)
+	assert.NotNil(t, events[0].ActorUserID)
 }
 
 func TestActivityPubFoundationFlow(t *testing.T) {
@@ -1342,6 +1350,14 @@ func TestFederationDomainBlockModeration(t *testing.T) {
 
 	require.NoError(t, moderationService.UnblockDomain(ctx, admin.ID, "Remote.Example"))
 	requireRowCount(t, db, "federation_domain_blocks", 0)
+
+	auditService := adminaudit.NewService(adminaudit.NewRepository(db))
+	events, err := auditService.ListEvents(ctx, admin.ID, adminaudit.ListOptions{TargetType: adminaudit.TargetTypeFederationDomain})
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+	assert.Equal(t, adminaudit.ActionFederationDomainUnblock, events[0].Action)
+	assert.Equal(t, "remote.example", events[0].TargetID)
+	assert.Equal(t, adminaudit.ActionFederationDomainBlocked, events[1].Action)
 }
 
 func TestFederationModerationInspection(t *testing.T) {
@@ -1408,6 +1424,12 @@ func TestFederationModerationInspection(t *testing.T) {
 	assert.Nil(t, retried.LastError)
 	assert.Empty(t, retried.LastFailureKind)
 	assert.Nil(t, retried.LastStatusCode)
+
+	auditService := adminaudit.NewService(adminaudit.NewRepository(db))
+	events, err := auditService.ListEvents(ctx, admin.ID, adminaudit.ListOptions{Action: adminaudit.ActionFederationDeliveryRetry})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, createdDelivery.ID, events[0].TargetID)
 }
 
 func TestRemoteInboxRefreshesRotatedActorKey(t *testing.T) {

@@ -139,7 +139,7 @@ func TestService_AdminUserManagement(t *testing.T) {
 		service := NewService(mockRepo, []byte("secret"), cfg)
 		updated := &User{ID: targetID, Role: RoleAdmin}
 		mockRepo.On("UserRole", ctx, adminID).Return(RoleAdmin, nil).Once()
-		mockRepo.On("UpdateUserRole", ctx, targetID, RoleAdmin).Return(updated, nil).Once()
+		mockRepo.On("UpdateUserRole", ctx, adminID, targetID, RoleAdmin).Return(updated, nil).Once()
 
 		got, err := service.UpdateUserRole(ctx, adminID, targetID, " ADMIN ")
 

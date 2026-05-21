@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	"github.com/antonovs105/project-management-system-go/internal/adminaudit"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -17,7 +18,7 @@ type Repository interface {
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
 	UserRole(ctx context.Context, userID string) (string, error)
 	ListUsers(ctx context.Context) ([]User, error)
-	UpdateUserRole(ctx context.Context, userID, role string) (*User, error)
+	UpdateUserRole(ctx context.Context, adminUserID, userID, role string) (*User, error)
 }
 
 // PgRepository implements Repository using PostgreSQL
@@ -191,7 +192,7 @@ func (r *PgRepository) ListUsers(ctx context.Context) ([]User, error) {
 	return users, nil
 }
 
-func (r *PgRepository) UpdateUserRole(ctx context.Context, userID, role string) (*User, error) {
+func (r *PgRepository) UpdateUserRole(ctx context.Context, adminUserID, userID, role string) (*User, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -218,6 +219,20 @@ func (r *PgRepository) UpdateUserRole(ctx context.Context, userID, role string) 
 
 	if _, err := tx.ExecContext(ctx, `UPDATE users SET role = $2 WHERE id = $1`, userID, role); err != nil {
 		return nil, err
+	}
+	if currentRole != role {
+		if _, err := adminaudit.InsertEvent(ctx, tx, adminaudit.EventInput{
+			ActorUserID: adminUserID,
+			Action:      adminaudit.ActionUserRoleUpdated,
+			TargetType:  adminaudit.TargetTypeUser,
+			TargetID:    userID,
+			Metadata: map[string]any{
+				"old_role": currentRole,
+				"new_role": role,
+			},
+		}); err != nil {
+			return nil, err
+		}
 	}
 
 	updated, err := loadUserByID(ctx, tx, userID)

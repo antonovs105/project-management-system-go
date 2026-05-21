@@ -5,6 +5,7 @@ import (
 	"database/sql"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
+	"github.com/antonovs105/project-management-system-go/internal/adminaudit"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -12,10 +13,10 @@ type Repository interface {
 	UserRole(ctx context.Context, userID string) (string, error)
 	ListDomainBlocks(ctx context.Context) ([]DomainBlock, error)
 	UpsertDomainBlock(ctx context.Context, domain, reason, userID string) (*DomainBlock, error)
-	DeleteDomainBlock(ctx context.Context, domain string) error
+	DeleteDomainBlock(ctx context.Context, domain, userID string) error
 	ListRemoteActors(ctx context.Context, options RemoteActorListOptions) ([]RemoteActorInspection, error)
 	ListFederationDeliveries(ctx context.Context, options FederationDeliveryListOptions) ([]FederationDeliveryInspection, error)
-	RetryFederationDelivery(ctx context.Context, deliveryID string) (*delivery.Delivery, error)
+	RetryFederationDelivery(ctx context.Context, deliveryID, userID string) (*delivery.Delivery, error)
 }
 
 type PgRepository struct {
@@ -45,8 +46,14 @@ func (r *PgRepository) ListDomainBlocks(ctx context.Context) ([]DomainBlock, err
 }
 
 func (r *PgRepository) UpsertDomainBlock(ctx context.Context, domain, reason, userID string) (*DomainBlock, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	var block DomainBlock
-	if err := r.db.GetContext(ctx, &block, `
+	if err := tx.GetContext(ctx, &block, `
 		INSERT INTO federation_domain_blocks (domain, reason, created_by)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (domain) DO UPDATE SET
@@ -57,22 +64,57 @@ func (r *PgRepository) UpsertDomainBlock(ctx context.Context, domain, reason, us
 	`, domain, reason, userID); err != nil {
 		return nil, err
 	}
+	if _, err := adminaudit.InsertEvent(ctx, tx, adminaudit.EventInput{
+		ActorUserID: userID,
+		Action:      adminaudit.ActionFederationDomainBlocked,
+		TargetType:  adminaudit.TargetTypeFederationDomain,
+		TargetID:    domain,
+		Metadata: map[string]any{
+			"domain_block_id": block.ID,
+			"reason":          reason,
+		},
+	}); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
 	return &block, nil
 }
 
-func (r *PgRepository) DeleteDomainBlock(ctx context.Context, domain string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM federation_domain_blocks WHERE domain = $1`, domain)
+func (r *PgRepository) DeleteDomainBlock(ctx context.Context, domain, userID string) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
+	defer tx.Rollback()
+
+	var block DomainBlock
+	if err := tx.GetContext(ctx, &block, `
+		SELECT id::text, domain, reason, created_by::text, created_at, updated_at
+		FROM federation_domain_blocks
+		WHERE domain = $1
+		FOR UPDATE
+	`, domain); err != nil {
 		return err
 	}
-	if affected == 0 {
-		return sql.ErrNoRows
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM federation_domain_blocks WHERE domain = $1`, domain); err != nil {
+		return err
 	}
-	return nil
+	if _, err := adminaudit.InsertEvent(ctx, tx, adminaudit.EventInput{
+		ActorUserID: userID,
+		Action:      adminaudit.ActionFederationDomainUnblock,
+		TargetType:  adminaudit.TargetTypeFederationDomain,
+		TargetID:    domain,
+		Metadata: map[string]any{
+			"domain_block_id": block.ID,
+			"reason":          block.Reason,
+		},
+	}); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *PgRepository) ListRemoteActors(ctx context.Context, options RemoteActorListOptions) ([]RemoteActorInspection, error) {
@@ -145,7 +187,7 @@ func (r *PgRepository) ListFederationDeliveries(ctx context.Context, options Fed
 	return deliveries, nil
 }
 
-func (r *PgRepository) RetryFederationDelivery(ctx context.Context, deliveryID string) (*delivery.Delivery, error) {
+func (r *PgRepository) RetryFederationDelivery(ctx context.Context, deliveryID, userID string) (*delivery.Delivery, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -191,6 +233,19 @@ func (r *PgRepository) RetryFederationDelivery(ctx context.Context, deliveryID s
 
 	retried, err := loadFederationDelivery(ctx, tx, deliveryID)
 	if err != nil {
+		return nil, err
+	}
+	if _, err := adminaudit.InsertEvent(ctx, tx, adminaudit.EventInput{
+		ActorUserID: userID,
+		Action:      adminaudit.ActionFederationDeliveryRetry,
+		TargetType:  adminaudit.TargetTypeFederationDelivery,
+		TargetID:    deliveryID,
+		Metadata: map[string]any{
+			"activity_id":  retried.ActivityID,
+			"state":        retried.State,
+			"max_attempts": retried.MaxAttempts,
+		},
+	}); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {

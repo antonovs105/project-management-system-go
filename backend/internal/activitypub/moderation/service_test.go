@@ -19,12 +19,14 @@ type fakeRepository struct {
 	upsertReason    string
 	upsertUserID    string
 	deleteDomain    string
+	deleteUserID    string
 	deleteErr       error
 	actors          []RemoteActorInspection
 	actorOptions    RemoteActorListOptions
 	deliveries      []FederationDeliveryInspection
 	deliveryOptions FederationDeliveryListOptions
 	retryDeliveryID string
+	retryUserID     string
 	retryDelivery   *delivery.Delivery
 	retryErr        error
 }
@@ -54,8 +56,9 @@ func (r *fakeRepository) UpsertDomainBlock(ctx context.Context, domain, reason, 
 	}, nil
 }
 
-func (r *fakeRepository) DeleteDomainBlock(ctx context.Context, domain string) error {
+func (r *fakeRepository) DeleteDomainBlock(ctx context.Context, domain, userID string) error {
 	r.deleteDomain = domain
+	r.deleteUserID = userID
 	return r.deleteErr
 }
 
@@ -69,8 +72,9 @@ func (r *fakeRepository) ListFederationDeliveries(ctx context.Context, options F
 	return r.deliveries, nil
 }
 
-func (r *fakeRepository) RetryFederationDelivery(ctx context.Context, deliveryID string) (*delivery.Delivery, error) {
+func (r *fakeRepository) RetryFederationDelivery(ctx context.Context, deliveryID, userID string) (*delivery.Delivery, error) {
 	r.retryDeliveryID = deliveryID
+	r.retryUserID = userID
 	if r.retryErr != nil {
 		return nil, r.retryErr
 	}
@@ -135,6 +139,17 @@ func TestServiceUnblockMapsMissingDomain(t *testing.T) {
 	require.ErrorIs(t, err, ErrDomainBlockNotFound)
 }
 
+func TestServiceUnblockDomainRecordsAdmin(t *testing.T) {
+	repo := &fakeRepository{role: RoleAdmin}
+	service := NewService(repo)
+
+	err := service.UnblockDomain(context.Background(), "admin-1", "remote.example")
+
+	require.NoError(t, err)
+	assert.Equal(t, "remote.example", repo.deleteDomain)
+	assert.Equal(t, "admin-1", repo.deleteUserID)
+}
+
 func TestServiceListRemoteActorsUsesAdminAndOptions(t *testing.T) {
 	repo := &fakeRepository{role: RoleAdmin}
 	service := NewService(repo)
@@ -178,6 +193,7 @@ func TestServiceRetryFederationDeliveryQueuesTask(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "delivery-1", retried.ID)
 	assert.Equal(t, "delivery-1", repo.retryDeliveryID)
+	assert.Equal(t, "admin-1", repo.retryUserID)
 	assert.Equal(t, "delivery-1", queue.deliveryID)
 	assert.Equal(t, delivery.DefaultMaxRetry, queue.maxAttempts)
 }

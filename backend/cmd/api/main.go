@@ -19,6 +19,7 @@ import (
 	apmoderation "github.com/antonovs105/project-management-system-go/internal/activitypub/moderation"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteactor"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteinbox"
+	"github.com/antonovs105/project-management-system-go/internal/adminaudit"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
 	authMiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
 	"github.com/antonovs105/project-management-system-go/internal/project"
@@ -47,6 +48,7 @@ type ApiServer struct {
 	inboxHandler      *remoteinbox.Handler
 	moderationHandler *apmoderation.Handler
 	deliveryHandler   *delivery.Handler
+	auditHandler      *adminaudit.Handler
 	deliverySvc       *delivery.Service
 	wfHandler         *webfinger.Handler
 }
@@ -247,6 +249,7 @@ func main() {
 	)
 	inboxHandler := remoteinbox.NewHandler(inboxService, apConfig)
 	moderationHandler := apmoderation.NewHandler(apmoderation.NewService(apmoderation.NewRepository(db), deliveryQueue))
+	auditHandler := adminaudit.NewHandler(adminaudit.NewService(adminaudit.NewRepository(db)))
 
 	// WebFinger discovery dependencies
 	wfRepo := webfinger.NewRepository(db)
@@ -266,6 +269,7 @@ func main() {
 		inboxHandler:      inboxHandler,
 		moderationHandler: moderationHandler,
 		deliveryHandler:   deliveryHandler,
+		auditHandler:      auditHandler,
 		deliverySvc:       deliveryService,
 		wfHandler:         wfHandler,
 	}
@@ -313,6 +317,7 @@ func main() {
 	server.commentHandler.RegisterRoutes(api)
 	server.deliveryHandler.RegisterRoutes(api)
 	server.moderationHandler.RegisterRoutes(api)
+	server.auditHandler.RegisterRoutes(api)
 
 	e.Logger.Fatal(e.Start(":8080"))
 }

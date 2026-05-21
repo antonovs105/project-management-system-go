@@ -97,7 +97,7 @@ func (s *Service) UpdateUserRole(ctx context.Context, adminUserID, targetUserID,
 	if !IsValidRole(role) {
 		return nil, invalidUserInput("invalid user role")
 	}
-	return s.repo.UpdateUserRole(ctx, targetUserID, role)
+	return s.repo.UpdateUserRole(ctx, adminUserID, targetUserID, role)
 }
 
 func (s *Service) newLocalUser(username, email, password, role string) (*User, error) {

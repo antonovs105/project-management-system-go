@@ -42,8 +42,8 @@ func (m *MockRepository) ListUsers(ctx context.Context) ([]User, error) {
 	return args.Get(0).([]User), args.Error(1)
 }
 
-func (m *MockRepository) UpdateUserRole(ctx context.Context, userID, role string) (*User, error) {
-	args := m.Called(ctx, userID, role)
+func (m *MockRepository) UpdateUserRole(ctx context.Context, adminUserID, userID, role string) (*User, error) {
+	args := m.Called(ctx, adminUserID, userID, role)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
