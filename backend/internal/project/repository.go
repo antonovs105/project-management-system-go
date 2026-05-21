@@ -372,6 +372,7 @@ func (r *PgRepository) Delete(ctx context.Context, id string, actorID string) (*
 	}, nil
 }
 
+// remoteProjectFollowerInboxes returns remote inboxes for accepted project followers.
 func remoteProjectFollowerInboxes(ctx context.Context, q sqlx.QueryerContext, projectID string) ([]string, error) {
 	var inboxes []string
 	err := sqlx.SelectContext(ctx, q, &inboxes, `
@@ -387,6 +388,7 @@ func remoteProjectFollowerInboxes(ctx context.Context, q sqlx.QueryerContext, pr
 	return inboxes, err
 }
 
+// remoteActorInboxes returns inbox URLs for a known remote actor.
 func remoteActorInboxes(ctx context.Context, q sqlx.QueryerContext, actorID string) ([]string, error) {
 	var inboxes []string
 	err := sqlx.SelectContext(ctx, q, &inboxes, `
@@ -400,6 +402,7 @@ func remoteActorInboxes(ctx context.Context, q sqlx.QueryerContext, actorID stri
 	return inboxes, err
 }
 
+// mergeInboxes merges inbox URL groups while preserving first-seen order.
 func mergeInboxes(groups ...[]string) []string {
 	seen := make(map[string]struct{})
 	var merged []string
@@ -418,6 +421,7 @@ func mergeInboxes(groups ...[]string) []string {
 	return merged
 }
 
+// writeProjectUpdateActivity stores an ActivityStreams Update for project metadata.
 func (r *PgRepository) writeProjectUpdateActivity(ctx context.Context, tx *sqlx.Tx, projectID, actorID, projectAPID string, object any) (string, error) {
 	actorAPID, err := lookupActorAPID(ctx, tx, actorID)
 	if err != nil {
@@ -455,6 +459,7 @@ func (r *PgRepository) writeProjectUpdateActivity(ctx context.Context, tx *sqlx.
 	return activityID, nil
 }
 
+// tombstoneProjectTree tombstones a project actor and all contained ticket objects.
 func tombstoneProjectTree(ctx context.Context, tx *sqlx.Tx, projectID, projectAPID string) error {
 	var commentAPIDs []string
 	if err := tx.SelectContext(ctx, &commentAPIDs, `
@@ -490,6 +495,7 @@ func tombstoneProjectTree(ctx context.Context, tx *sqlx.Tx, projectID, projectAP
 	return tombstoneObject(ctx, tx, projectAPID, "Group")
 }
 
+// writeProjectDeleteActivity stores an ActivityStreams Delete for a project actor.
 func (r *PgRepository) writeProjectDeleteActivity(ctx context.Context, tx *sqlx.Tx, projectID, actorID, projectAPID string) (string, error) {
 	actorAPID, err := lookupActorAPID(ctx, tx, actorID)
 	if err != nil {
@@ -1045,6 +1051,7 @@ func (r *PgRepository) RevokeInvite(ctx context.Context, inviteID, actorID strin
 	}, nil
 }
 
+// writeMemberRemovalActivity stores Remove or Undo activity for member removal.
 func (r *PgRepository) writeMemberRemovalActivity(ctx context.Context, tx *sqlx.Tx, projectID, actorID, targetUserID string) (string, error) {
 	projectAPID, err := lookupActorAPID(ctx, tx, projectID)
 	if err != nil {
@@ -1106,11 +1113,13 @@ func (r *PgRepository) writeMemberRemovalActivity(ctx context.Context, tx *sqlx.
 	return activityID, nil
 }
 
+// affectedTicketAssignment identifies a ticket whose assignee projection changed.
 type affectedTicketAssignment struct {
 	ID   string `db:"id"`
 	APID string `db:"ap_id"`
 }
 
+// removeTicketAssigneeForProjectMember clears assignments for a removed member.
 func removeTicketAssigneeForProjectMember(ctx context.Context, tx *sqlx.Tx, projectID, actorID string) ([]affectedTicketAssignment, error) {
 	var affected []affectedTicketAssignment
 	if err := tx.SelectContext(ctx, &affected, `
@@ -1135,6 +1144,7 @@ func removeTicketAssigneeForProjectMember(ctx context.Context, tx *sqlx.Tx, proj
 	return affected, nil
 }
 
+// updateTicketAssignedToDocument rewrites forge:assignedTo in a ticket JSON-LD snapshot.
 func updateTicketAssignedToDocument(ctx context.Context, tx *sqlx.Tx, ticketID, ticketAPID string) error {
 	var rawDocument []byte
 	if err := tx.GetContext(ctx, &rawDocument, `
@@ -1180,6 +1190,7 @@ func updateTicketAssignedToDocument(ctx context.Context, tx *sqlx.Tx, ticketID, 
 	return err
 }
 
+// tombstoneObject replaces a stored ActivityPub object with a Tombstone document.
 func tombstoneObject(ctx context.Context, q sqlx.ExecerContext, apID string, formerType string) error {
 	rawDoc, err := json.Marshal(activitypub.TombstoneDocument(apID, formerType, time.Now().UTC()))
 	if err != nil {
@@ -1197,6 +1208,7 @@ func tombstoneObject(ctx context.Context, q sqlx.ExecerContext, apID string, for
 	return err
 }
 
+// getInviteForUpdate locks and returns a project invite.
 func getInviteForUpdate(ctx context.Context, tx *sqlx.Tx, inviteID string) (*ProjectInvite, error) {
 	var invite ProjectInvite
 	if err := tx.GetContext(ctx, &invite, `
@@ -1219,6 +1231,7 @@ func getInviteForUpdate(ctx context.Context, tx *sqlx.Tx, inviteID string) (*Pro
 	return &invite, nil
 }
 
+// isProjectMemberTx reports whether a user is a project member inside a transaction.
 func isProjectMemberTx(ctx context.Context, q sqlx.QueryerContext, projectID, userID string) (bool, error) {
 	var member bool
 	err := sqlx.GetContext(ctx, q, &member, `
@@ -1231,6 +1244,7 @@ func isProjectMemberTx(ctx context.Context, q sqlx.QueryerContext, projectID, us
 	return member, err
 }
 
+// hasPendingInviteTx reports whether a user has a pending invite inside a transaction.
 func hasPendingInviteTx(ctx context.Context, q sqlx.QueryerContext, projectID, userID string) (bool, error) {
 	var pending bool
 	err := sqlx.GetContext(ctx, q, &pending, `
@@ -1245,12 +1259,14 @@ func hasPendingInviteTx(ctx context.Context, q sqlx.QueryerContext, projectID, u
 	return pending, err
 }
 
+// lookupActorAPID resolves an actor UUID to its ActivityPub ID.
 func lookupActorAPID(ctx context.Context, q sqlx.QueryerContext, actorID string) (string, error) {
 	var apID string
 	err := sqlx.GetContext(ctx, q, &apID, `SELECT ap_id FROM actors WHERE id = $1`, actorID)
 	return apID, err
 }
 
+// lookupActivePublicKey returns the active public signing key for an actor.
 func lookupActivePublicKey(ctx context.Context, q sqlx.QueryerContext, actorID string) (string, error) {
 	var publicKey string
 	err := sqlx.GetContext(ctx, q, &publicKey, `

@@ -18,6 +18,7 @@ type PgRepository struct {
 	db *sqlx.DB
 }
 
+// queryRowerContext is the subset of sqlx executors that can insert audit rows.
 type queryRowerContext interface {
 	QueryRowxContext(ctx context.Context, query string, args ...any) *sqlx.Row
 }

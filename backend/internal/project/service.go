@@ -158,6 +158,7 @@ func (s *Service) DeleteProject(ctx context.Context, projectID, userID string) e
 	return nil
 }
 
+// enqueueActivityRecipientInboxes queues a project activity to explicit inbox URLs.
 func (s *Service) enqueueActivityRecipientInboxes(ctx context.Context, projectID string, activityID string, inboxes []string) {
 	if s.delivery == nil || activityID == "" {
 		return
@@ -172,6 +173,7 @@ func (s *Service) enqueueActivityRecipientInboxes(ctx context.Context, projectID
 	}
 }
 
+// removeMember removes a member and queues any resulting federation delivery.
 func (s *Service) removeMember(ctx context.Context, projectID, actorID, targetUserID string) error {
 	result, err := s.repo.RemoveMember(ctx, projectID, actorID, targetUserID)
 	if err != nil {
@@ -271,6 +273,7 @@ func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUser
 	return invite, nil
 }
 
+// invalidProjectInput wraps a validation message with the project input sentinel.
 func invalidProjectInput(message string) error {
 	return fmt.Errorf("%w: %s", ErrInvalidProjectInput, message)
 }

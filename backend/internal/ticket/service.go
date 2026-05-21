@@ -65,7 +65,7 @@ type CreateTicketRequest struct {
 // ErrInvalidTicketInput reports malformed ticket-management input.
 var ErrInvalidTicketInput = errors.New("invalid ticket input")
 
-// Hierarchy ranks
+// ticketRanks defines allowed parent-child ordering for ticket hierarchy.
 var ticketRanks = map[string]int{
 	"epic":    3,
 	"task":    2,
@@ -300,6 +300,7 @@ func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, tic
 	return nil
 }
 
+// invalidTicketInput wraps a validation message with the ticket input sentinel.
 func invalidTicketInput(message string) error {
 	return fmt.Errorf("%w: %s", ErrInvalidTicketInput, message)
 }
@@ -401,6 +402,7 @@ func hasPath(adj map[string][]string, start, end string) bool {
 	return false
 }
 
+// enqueueProjectFollowers queues ticket activities to all remote project followers.
 func (s *Service) enqueueProjectFollowers(ctx context.Context, projectID string, activityIDs ...string) {
 	if s.delivery == nil || len(activityIDs) == 0 {
 		return
@@ -410,6 +412,7 @@ func (s *Service) enqueueProjectFollowers(ctx context.Context, projectID string,
 	}
 }
 
+// enqueueProjectTicketRecipients queues ticket activities to ticket-related recipients.
 func (s *Service) enqueueProjectTicketRecipients(ctx context.Context, projectID, ticketID string, activityIDs ...string) {
 	if s.delivery == nil || len(activityIDs) == 0 {
 		return
@@ -419,6 +422,7 @@ func (s *Service) enqueueProjectTicketRecipients(ctx context.Context, projectID,
 	}
 }
 
+// enqueueRecipientInboxes queues delete activities to precomputed remote inboxes.
 func (s *Service) enqueueRecipientInboxes(ctx context.Context, projectID string, result *DeleteResult) {
 	if s.delivery == nil || result == nil || len(result.ActivityIDs) == 0 {
 		return
@@ -530,6 +534,7 @@ func (s *Service) GetTicketGraph(ctx context.Context, projectID, userID string) 
 	return response, nil
 }
 
+// requireProjectPermission checks a project role predicate and normalizes denial errors.
 func (s *Service) requireProjectPermission(ctx context.Context, projectID, userID string, allowed func(string) bool, deniedMessage string) error {
 	role, err := s.projectService.GetProjectRole(ctx, projectID, userID)
 	if err != nil {

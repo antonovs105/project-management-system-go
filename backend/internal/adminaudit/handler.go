@@ -38,11 +38,13 @@ func (h *Handler) ListEvents(c echo.Context) error {
 	return c.JSON(http.StatusOK, events)
 }
 
+// currentUserID extracts the authenticated user identifier from Echo context.
 func currentUserID(c echo.Context) string {
 	userID, _ := c.Get("userID").(string)
 	return userID
 }
 
+// listOptions parses audit-event query filters.
 func listOptions(c echo.Context) (ListOptions, error) {
 	limit, err := parseOptionalLimit(c.QueryParam("limit"))
 	if err != nil {
@@ -61,6 +63,7 @@ func listOptions(c echo.Context) (ListOptions, error) {
 	}, nil
 }
 
+// parseOptionalLimit parses a positive optional list limit.
 func parseOptionalLimit(raw string) (int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -73,6 +76,7 @@ func parseOptionalLimit(raw string) (int, error) {
 	return limit, nil
 }
 
+// parseOptionalOffset parses a non-negative optional list offset.
 func parseOptionalOffset(raw string) (int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -85,6 +89,7 @@ func parseOptionalOffset(raw string) (int, error) {
 	return offset, nil
 }
 
+// writeAuditError maps audit service errors to HTTP responses.
 func writeAuditError(c echo.Context, err error) error {
 	switch {
 	case errors.Is(err, ErrAdminRequired):

@@ -242,12 +242,14 @@ func (r *PgRepository) Delete(ctx context.Context, commentID string, actorID str
 	}, nil
 }
 
+// lookupActorAPID resolves an actor UUID to its ActivityPub ID.
 func lookupActorAPID(ctx context.Context, q sqlx.QueryerContext, actorID string) (string, error) {
 	var apID string
 	err := sqlx.GetContext(ctx, q, &apID, `SELECT ap_id FROM actors WHERE id = $1`, actorID)
 	return apID, err
 }
 
+// tombstoneObject replaces a stored ActivityPub object with a Tombstone document.
 func tombstoneObject(ctx context.Context, q sqlx.ExecerContext, apID string, formerType string) error {
 	rawDoc, err := json.Marshal(activitypub.TombstoneDocument(apID, formerType, time.Now().UTC()))
 	if err != nil {
@@ -265,6 +267,7 @@ func tombstoneObject(ctx context.Context, q sqlx.ExecerContext, apID string, for
 	return err
 }
 
+// remoteTicketRecipientInboxes returns remote inboxes related to a ticket.
 func remoteTicketRecipientInboxes(ctx context.Context, q sqlx.QueryerContext, projectID string, ticketID string) ([]string, error) {
 	var inboxes []string
 	err := sqlx.SelectContext(ctx, q, &inboxes, `

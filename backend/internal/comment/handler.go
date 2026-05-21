@@ -25,6 +25,7 @@ func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.DELETE("/comments/:id", h.Delete)
 }
 
+// createCommentRequest is the JSON payload for adding a comment to a ticket.
 type createCommentRequest struct {
 	Content string `json:"content"`
 }
@@ -72,6 +73,7 @@ func (h *Handler) Delete(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// writeCommentError maps comment service errors to HTTP responses.
 func writeCommentError(c echo.Context, err error) error {
 	switch {
 	case errors.Is(err, ErrInvalidCommentInput):

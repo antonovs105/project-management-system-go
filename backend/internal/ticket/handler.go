@@ -30,6 +30,7 @@ func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.DELETE("/links/:linkID", h.RemoveLink)
 }
 
+// createTicketRequest is the JSON payload for creating a ticket.
 type createTicketRequest struct {
 	Title       string  `json:"title"`
 	Description string  `json:"description"`
@@ -81,6 +82,7 @@ func (h *Handler) List(c echo.Context) error {
 	return c.JSON(http.StatusOK, tickets)
 }
 
+// updateTicketRequest is the JSON payload for partial ticket updates.
 type updateTicketRequest struct {
 	Title       *string  `json:"title"`
 	Description *string  `json:"description"`
@@ -140,6 +142,7 @@ func (h *Handler) Delete(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// addLinkRequest is the JSON payload for creating a ticket link.
 type addLinkRequest struct {
 	TargetID string `json:"target_id"`
 	LinkType string `json:"link_type"`
@@ -195,6 +198,7 @@ func (h *Handler) GetGraph(c echo.Context) error {
 	return c.JSON(http.StatusOK, graph)
 }
 
+// writeTicketError maps ticket service errors to HTTP responses.
 func writeTicketError(c echo.Context, err error) error {
 	switch {
 	case errors.Is(err, ErrInvalidTicketInput):

@@ -33,6 +33,7 @@ func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.POST("/invites/:id/revoke", h.RevokeInvite)
 }
 
+// createProjectRequest is the JSON payload for creating a project.
 type createProjectRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -113,6 +114,7 @@ func (h *Handler) Delete(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// addMemberRequest is the JSON payload for inviting a project member.
 type addMemberRequest struct {
 	UserID string `json:"user_id"`
 	Role   string `json:"role"`
@@ -186,6 +188,7 @@ func (h *Handler) RevokeInvite(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// writeProjectError maps project service errors to HTTP responses.
 func writeProjectError(c echo.Context, err error) error {
 	switch {
 	case errors.Is(err, ErrInvalidProjectInput):

@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// jrdMediaType is the JSON Resource Descriptor response media type.
 const jrdMediaType = "application/jrd+json"
 
 // Handler exposes the WebFinger discovery endpoint.
@@ -53,6 +54,7 @@ func (h *Handler) Resolve(c echo.Context) error {
 	return c.Blob(http.StatusOK, jrdMediaType, raw)
 }
 
+// acceptsJRDResponse reports whether an Accept header allows WebFinger JSON.
 func acceptsJRDResponse(header string) bool {
 	header = strings.TrimSpace(header)
 	if header == "" {
@@ -75,6 +77,7 @@ func acceptsJRDResponse(header string) bool {
 	return false
 }
 
+// isZeroQuality reports whether an Accept q-value explicitly disables a media type.
 func isZeroQuality(raw string) bool {
 	if raw == "" {
 		return false

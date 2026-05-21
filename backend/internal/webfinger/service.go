@@ -55,6 +55,7 @@ func (s *Service) Resolve(ctx context.Context, resource string) (*JRD, error) {
 	}, nil
 }
 
+// parseAcctResource validates and splits an acct: WebFinger resource.
 func parseAcctResource(resource string) (username string, domain string, err error) {
 	resource = strings.TrimSpace(resource)
 	if resource == "" || !strings.HasPrefix(strings.ToLower(resource), "acct:") {

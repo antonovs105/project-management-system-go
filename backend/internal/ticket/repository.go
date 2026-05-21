@@ -347,6 +347,7 @@ func (r *PgRepository) GetLinksByProjectID(ctx context.Context, projectID string
 	return links, nil
 }
 
+// writeTicketObject writes the current ForgeFed Ticket JSON-LD snapshot.
 func (r *PgRepository) writeTicketObject(ctx context.Context, tx *sqlx.Tx, ticket *Ticket) error {
 	projectAPID, err := lookupActorAPID(ctx, tx, ticket.ProjectID)
 	if err != nil {
@@ -401,6 +402,7 @@ func (r *PgRepository) writeTicketObject(ctx context.Context, tx *sqlx.Tx, ticke
 	return err
 }
 
+// writeTicketActivity stores an ActivityStreams activity for a ticket change.
 func (r *PgRepository) writeTicketActivity(ctx context.Context, tx *sqlx.Tx, activityType string, ticket *Ticket, actorID string, object any, target any) (string, error) {
 	activityID, err := activitypub.NewID()
 	if err != nil {
@@ -453,6 +455,7 @@ func (r *PgRepository) writeTicketActivity(ctx context.Context, tx *sqlx.Tx, act
 	return activityID, nil
 }
 
+// ticketSelectBase returns the shared ticket projection query.
 func ticketSelectBase() string {
 	return `
 		SELECT
@@ -481,12 +484,14 @@ func ticketSelectBase() string {
 	`
 }
 
+// lookupActorAPID resolves an actor UUID to its ActivityPub ID.
 func lookupActorAPID(ctx context.Context, q sqlx.QueryerContext, actorID string) (string, error) {
 	var apID string
 	err := sqlx.GetContext(ctx, q, &apID, `SELECT ap_id FROM actors WHERE id = $1`, actorID)
 	return apID, err
 }
 
+// lookupAssigneeAPIDs returns ActivityPub IDs assigned to a ticket.
 func lookupAssigneeAPIDs(ctx context.Context, q sqlx.QueryerContext, ticketID string) ([]string, error) {
 	var apIDs []string
 	err := sqlx.SelectContext(ctx, q, &apIDs, `
@@ -499,6 +504,7 @@ func lookupAssigneeAPIDs(ctx context.Context, q sqlx.QueryerContext, ticketID st
 	return apIDs, err
 }
 
+// lookupAssigneeActorIDs returns actor UUIDs assigned to a ticket.
 func lookupAssigneeActorIDs(ctx context.Context, q sqlx.QueryerContext, ticketID string) ([]string, error) {
 	var actorIDs []string
 	err := sqlx.SelectContext(ctx, q, &actorIDs, `
@@ -510,6 +516,7 @@ func lookupAssigneeActorIDs(ctx context.Context, q sqlx.QueryerContext, ticketID
 	return actorIDs, err
 }
 
+// ensureProjectParticipant validates that an actor can be assigned in a project.
 func ensureProjectParticipant(ctx context.Context, q sqlx.QueryerContext, projectID string, actorID string) error {
 	var participant bool
 	if err := sqlx.GetContext(ctx, q, &participant, `
@@ -533,6 +540,7 @@ func ensureProjectParticipant(ctx context.Context, q sqlx.QueryerContext, projec
 	return nil
 }
 
+// containsString reports whether a string slice contains target.
 func containsString(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
@@ -542,6 +550,7 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
+// tombstoneObject replaces a stored ActivityPub object with a Tombstone document.
 func tombstoneObject(ctx context.Context, q sqlx.ExecerContext, apID string, formerType string) error {
 	rawDoc, err := json.Marshal(activitypub.TombstoneDocument(apID, formerType, time.Now().UTC()))
 	if err != nil {
@@ -559,6 +568,7 @@ func tombstoneObject(ctx context.Context, q sqlx.ExecerContext, apID string, for
 	return err
 }
 
+// tombstoneTicketComments tombstones all comment objects attached to a ticket.
 func tombstoneTicketComments(ctx context.Context, tx *sqlx.Tx, ticketID string) error {
 	var commentAPIDs []string
 	if err := tx.SelectContext(ctx, &commentAPIDs, `
@@ -576,6 +586,7 @@ func tombstoneTicketComments(ctx context.Context, tx *sqlx.Tx, ticketID string) 
 	return nil
 }
 
+// remoteTicketRecipientInboxes returns remote inboxes related to a ticket.
 func (r *PgRepository) remoteTicketRecipientInboxes(ctx context.Context, q sqlx.QueryerContext, projectID string, ticketID string) ([]string, error) {
 	var inboxes []string
 	err := sqlx.SelectContext(ctx, q, &inboxes, `

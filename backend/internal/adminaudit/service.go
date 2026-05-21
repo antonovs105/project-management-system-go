@@ -52,6 +52,7 @@ func (s *Service) ListEvents(ctx context.Context, adminUserID string, options Li
 	return s.repo.ListEvents(ctx, options)
 }
 
+// requireAdmin verifies that the current user has the global admin role.
 func (s *Service) requireAdmin(ctx context.Context, userID string) error {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -70,6 +71,7 @@ func (s *Service) requireAdmin(ctx context.Context, userID string) error {
 	return nil
 }
 
+// normalizeLimit bounds audit-event list sizes.
 func normalizeLimit(limit int) int {
 	if limit <= 0 {
 		return defaultAuditLimit
@@ -80,6 +82,7 @@ func normalizeLimit(limit int) int {
 	return limit
 }
 
+// normalizeOffset clamps negative audit pagination offsets to zero.
 func normalizeOffset(offset int) int {
 	if offset < 0 {
 		return 0

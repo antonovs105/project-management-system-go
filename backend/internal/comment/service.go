@@ -83,6 +83,7 @@ func (s *Service) CreateComment(ctx context.Context, ticketID, authorID, content
 	return comment, nil
 }
 
+// invalidCommentInput wraps a validation message with the comment input sentinel.
 func invalidCommentInput(message string) error {
 	return fmt.Errorf("%w: %s", ErrInvalidCommentInput, message)
 }
@@ -125,6 +126,7 @@ func (s *Service) DeleteComment(ctx context.Context, commentID, userID string) e
 	return nil
 }
 
+// enqueueProjectFollowers queues comment activities to all remote project followers.
 func (s *Service) enqueueProjectFollowers(ctx context.Context, projectID string, activityIDs ...string) {
 	if s.delivery == nil || len(activityIDs) == 0 {
 		return
@@ -134,6 +136,7 @@ func (s *Service) enqueueProjectFollowers(ctx context.Context, projectID string,
 	}
 }
 
+// enqueueProjectTicketRecipients queues comment activities to ticket-related recipients.
 func (s *Service) enqueueProjectTicketRecipients(ctx context.Context, projectID, ticketID string, activityIDs ...string) {
 	if s.delivery == nil || len(activityIDs) == 0 {
 		return
@@ -143,6 +146,7 @@ func (s *Service) enqueueProjectTicketRecipients(ctx context.Context, projectID,
 	}
 }
 
+// enqueueRecipientInboxes queues delete activities to precomputed remote inboxes.
 func (s *Service) enqueueRecipientInboxes(ctx context.Context, result *DeleteResult) {
 	if s.delivery == nil || result == nil || result.ActivityID == "" {
 		return
