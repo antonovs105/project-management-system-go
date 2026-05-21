@@ -12,12 +12,13 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/project"
 )
 
-// ProjectChecker interface
+// ProjectChecker exposes project access checks required by ticket workflows.
 type ProjectChecker interface {
 	GetProjectByID(ctx context.Context, projectID, userID string) (*project.Project, error)
 	GetProjectRole(ctx context.Context, projectID, userID string) (string, error)
 }
 
+// Service contains ticket, assignment, and dependency workflows.
 type Service struct {
 	repo           Repository
 	projectService ProjectChecker
@@ -25,12 +26,14 @@ type Service struct {
 	delivery       DeliveryEnqueuer
 }
 
+// DeliveryEnqueuer queues federation deliveries created by ticket actions.
 type DeliveryEnqueuer interface {
 	Enqueue(ctx context.Context, activityID string, targetInboxURL string) (*apdelivery.Delivery, error)
 	EnqueueProjectFollowers(ctx context.Context, projectID string, activityIDs ...string) error
 	EnqueueProjectTicketRecipients(ctx context.Context, projectID string, ticketID string, activityIDs ...string) error
 }
 
+// NewService creates a ticket service.
 func NewService(repo Repository, projectService ProjectChecker, apConfig activitypub.Config) *Service {
 	return &Service{
 		repo:           repo,
@@ -39,15 +42,17 @@ func NewService(repo Repository, projectService ProjectChecker, apConfig activit
 	}
 }
 
+// SetDelivery attaches the delivery queue used for ticket federation.
 func (s *Service) SetDelivery(delivery DeliveryEnqueuer) {
 	s.delivery = delivery
 }
 
+// GetProjectRole returns a user's role in a project through the project service.
 func (s *Service) GetProjectRole(ctx context.Context, projectID, userID string) (string, error) {
 	return s.projectService.GetProjectRole(ctx, projectID, userID)
 }
 
-// CreateTicketRequest DTO for ticket creation
+// CreateTicketRequest contains fields for creating a ticket.
 type CreateTicketRequest struct {
 	Title       string
 	Description string
@@ -57,6 +62,9 @@ type CreateTicketRequest struct {
 	AssigneeID  *string
 }
 
+// ErrInvalidTicketInput reports malformed ticket-management input.
+var ErrInvalidTicketInput = errors.New("invalid ticket input")
+
 // Hierarchy ranks
 var ticketRanks = map[string]int{
 	"epic":    3,
@@ -65,8 +73,6 @@ var ticketRanks = map[string]int{
 }
 
 var (
-	ErrInvalidTicketInput = errors.New("invalid ticket input")
-
 	ticketPriorities = map[string]bool{
 		"low":    true,
 		"medium": true,
@@ -81,7 +87,7 @@ var (
 	}
 )
 
-// CreateTicket logic for ticket creation
+// CreateTicket creates a ticket and records its ActivityPub Create activity.
 func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, projectID, reporterID string) (*Ticket, error) {
 	if err := s.requireProjectPermission(ctx, projectID, reporterID, project.CanWriteTickets, "insufficient permissions: viewers cannot create tickets"); err != nil {
 		return nil, err
@@ -92,7 +98,6 @@ func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, pro
 		return nil, invalidTicketInput("title is required")
 	}
 
-	// Validate Ticket Type
 	rank, ok := ticketRanks[req.Type]
 	if !ok {
 		if req.Type == "" {
@@ -103,7 +108,6 @@ func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, pro
 		}
 	}
 
-	// Validate Hierarchy
 	if req.ParentID != nil {
 		parent, err := s.repo.GetByID(ctx, *req.ParentID)
 		if err != nil {
@@ -162,9 +166,8 @@ func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, pro
 	return t, nil
 }
 
-// ListTicketsInProject logic for ticket list
+// ListTicketsInProject returns tickets in a project visible to the user.
 func (s *Service) ListTicketsInProject(ctx context.Context, projectID, userID string) ([]Ticket, error) {
-	// check access
 	_, err := s.projectService.GetProjectByID(ctx, projectID, userID)
 	if err != nil {
 		return nil, err
@@ -173,14 +176,13 @@ func (s *Service) ListTicketsInProject(ctx context.Context, projectID, userID st
 	return s.repo.ListByProjectID(ctx, projectID)
 }
 
-// GetTicketByID gogic to get single ticket
+// GetTicketByID returns a single ticket visible to the user.
 func (s *Service) GetTicketByID(ctx context.Context, ticketID, userID string) (*Ticket, error) {
 	ticket, err := s.repo.GetByID(ctx, ticketID)
 	if err != nil {
 		return nil, errors.New("ticket not found")
 	}
 
-	// check access
 	_, err = s.projectService.GetProjectByID(ctx, ticket.ProjectID, userID)
 	if err != nil {
 		return nil, errors.New("ticket not found or access denied")
@@ -189,7 +191,7 @@ func (s *Service) GetTicketByID(ctx context.Context, ticketID, userID string) (*
 	return ticket, nil
 }
 
-// UpdateTicketRequest DTO for updating ticket
+// UpdateTicketRequest contains nullable partial ticket updates.
 type UpdateTicketRequest struct {
 	Title       *string  `json:"title"`
 	Description *string  `json:"description"`
@@ -200,7 +202,7 @@ type UpdateTicketRequest struct {
 	AssigneeID  **string `json:"assignee_id"`
 }
 
-// UpdateTicket logic for update
+// UpdateTicket changes ticket fields and emits Update or Add activities as needed.
 func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, ticketID, userID string) error {
 	ticketToUpdate, err := s.GetTicketByID(ctx, ticketID, userID)
 	if err != nil {
@@ -302,7 +304,7 @@ func invalidTicketInput(message string) error {
 	return fmt.Errorf("%w: %s", ErrInvalidTicketInput, message)
 }
 
-// DeleteTicket logic for deleting
+// DeleteTicket removes a ticket and tombstones its ActivityPub objects.
 func (s *Service) DeleteTicket(ctx context.Context, ticketID, userID string) error {
 	ticket, err := s.GetTicketByID(ctx, ticketID, userID)
 	if err != nil {
@@ -320,7 +322,7 @@ func (s *Service) DeleteTicket(ctx context.Context, ticketID, userID string) err
 	return nil
 }
 
-// AddTicketLink adds a link and checks for cycles
+// AddTicketLink creates a directed ticket link after checking for cycles.
 func (s *Service) AddTicketLink(ctx context.Context, sourceID, targetID string, linkType string, projectID, userID string) error {
 	if sourceID == targetID {
 		return invalidTicketInput("cannot link ticket to itself")
@@ -436,7 +438,7 @@ func (s *Service) enqueueRecipientInboxes(ctx context.Context, projectID string,
 	}
 }
 
-// RemoveTicketLink removes a link
+// RemoveTicketLink removes a ticket link when the user can edit the source ticket.
 func (s *Service) RemoveTicketLink(ctx context.Context, linkID, projectID, userID string) error {
 	link, err := s.repo.GetLinkByID(ctx, linkID)
 	if err != nil {
@@ -452,7 +454,7 @@ func (s *Service) RemoveTicketLink(ctx context.Context, linkID, projectID, userI
 	return s.repo.DeleteLink(ctx, linkID)
 }
 
-// GraphNode DTO
+// GraphNode is a ticket node in the graph response.
 type GraphNode struct {
 	ID       string `json:"id"`
 	Label    string `json:"label"`
@@ -462,22 +464,21 @@ type GraphNode struct {
 	Group    string `json:"group"`
 }
 
-// GraphLink DTO
+// GraphLink is a ticket dependency or hierarchy edge in the graph response.
 type GraphLink struct {
 	Source string `json:"source"`
 	Target string `json:"target"`
 	Type   string `json:"type"`
 }
 
-// GraphResponse DTO
+// GraphResponse contains graph-ready ticket nodes and links.
 type GraphResponse struct {
 	Nodes []GraphNode `json:"nodes"`
 	Links []GraphLink `json:"links"`
 }
 
-// GetTicketGraph returns nodes and links for react-force-graph
+// GetTicketGraph returns project tickets and links as graph data.
 func (s *Service) GetTicketGraph(ctx context.Context, projectID, userID string) (*GraphResponse, error) {
-	// check access
 	_, err := s.projectService.GetProjectByID(ctx, projectID, userID)
 	if err != nil {
 		return nil, err

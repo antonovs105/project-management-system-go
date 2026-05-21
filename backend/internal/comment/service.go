@@ -13,13 +13,16 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
 )
 
+// ErrInvalidCommentInput reports malformed comment input.
 var ErrInvalidCommentInput = errors.New("invalid comment input")
 
+// TicketChecker exposes ticket lookups and project roles needed by comments.
 type TicketChecker interface {
 	GetTicketByID(ctx context.Context, ticketID, userID string) (*ticket.Ticket, error)
 	GetProjectRole(ctx context.Context, projectID, userID string) (string, error)
 }
 
+// Service contains comment workflows and ActivityPub side effects.
 type Service struct {
 	repo     Repository
 	tickets  TicketChecker
@@ -27,20 +30,24 @@ type Service struct {
 	delivery DeliveryEnqueuer
 }
 
+// NewService creates a comment service.
 func NewService(repo Repository, tickets TicketChecker, apConfig activitypub.Config) *Service {
 	return &Service{repo: repo, tickets: tickets, apConfig: apConfig}
 }
 
+// DeliveryEnqueuer queues federation deliveries created by comment actions.
 type DeliveryEnqueuer interface {
 	Enqueue(ctx context.Context, activityID string, targetInboxURL string) (*apdelivery.Delivery, error)
 	EnqueueProjectFollowers(ctx context.Context, projectID string, activityIDs ...string) error
 	EnqueueProjectTicketRecipients(ctx context.Context, projectID string, ticketID string, activityIDs ...string) error
 }
 
+// SetDelivery attaches the delivery queue used for comment federation.
 func (s *Service) SetDelivery(delivery DeliveryEnqueuer) {
 	s.delivery = delivery
 }
 
+// CreateComment creates a Note on a ticket and records its Create activity.
 func (s *Service) CreateComment(ctx context.Context, ticketID, authorID, content string) (*Comment, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
@@ -80,6 +87,7 @@ func invalidCommentInput(message string) error {
 	return fmt.Errorf("%w: %s", ErrInvalidCommentInput, message)
 }
 
+// ListComments returns comments for a ticket visible to the current user.
 func (s *Service) ListComments(ctx context.Context, ticketID, userID string) ([]Comment, error) {
 	if _, err := s.tickets.GetTicketByID(ctx, ticketID, userID); err != nil {
 		return nil, err
@@ -87,6 +95,7 @@ func (s *Service) ListComments(ctx context.Context, ticketID, userID string) ([]
 	return s.repo.ListByTicketID(ctx, ticketID)
 }
 
+// DeleteComment removes a comment and emits a Delete activity.
 func (s *Service) DeleteComment(ctx context.Context, commentID, userID string) error {
 	comment, err := s.repo.GetByID(ctx, commentID)
 	if err != nil {

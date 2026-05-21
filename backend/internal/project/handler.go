@@ -9,14 +9,17 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// Handler exposes project HTTP endpoints.
 type Handler struct {
 	service *Service
 }
 
+// NewHandler creates a project HTTP handler.
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
+// RegisterRoutes registers authenticated project routes.
 func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.POST("/projects", h.Create)
 	api.GET("/projects/:id", h.Get)
@@ -35,14 +38,13 @@ type createProjectRequest struct {
 	Description string `json:"description"`
 }
 
-// Create is handler of POST /api/projects
+// Create creates a project owned by the current user.
 func (h *Handler) Create(c echo.Context) error {
 	var req createProjectRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
 
-	// Taking userID from context
 	userID := c.Get("userID").(string)
 
 	project, err := h.service.CreateProject(c.Request().Context(), req.Name, req.Description, userID)
@@ -53,7 +55,7 @@ func (h *Handler) Create(c echo.Context) error {
 	return c.JSON(http.StatusCreated, project)
 }
 
-// Get handler for GET /api/projects/:id
+// Get returns a project visible to the current user.
 func (h *Handler) Get(c echo.Context) error {
 	projectID := c.Param("id")
 
@@ -67,11 +69,10 @@ func (h *Handler) Get(c echo.Context) error {
 	return c.JSON(http.StatusOK, project)
 }
 
-// List handler of GET /api/projects
+// List returns projects where the current user is a member.
 func (h *Handler) List(c echo.Context) error {
 	userID := c.Get("userID").(string)
 
-	// Call service for projects list
 	projects, err := h.service.ListUserProjects(c.Request().Context(), userID)
 	if err != nil {
 		log.Printf("Error listing user projects: %v", err)
@@ -81,11 +82,10 @@ func (h *Handler) List(c echo.Context) error {
 	return c.JSON(http.StatusOK, projects)
 }
 
-// Update handler for PATCH /api/projects/:id
+// Update changes project metadata.
 func (h *Handler) Update(c echo.Context) error {
 	projectID := c.Param("id")
 
-	// parsing request body
 	var req UpdateProjectRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
@@ -93,7 +93,6 @@ func (h *Handler) Update(c echo.Context) error {
 
 	userID := c.Get("userID").(string)
 
-	// call service for update
 	if err := h.service.UpdateProject(c.Request().Context(), projectID, userID, req); err != nil {
 		return writeProjectError(c, err)
 	}
@@ -101,13 +100,12 @@ func (h *Handler) Update(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-// Delete handler of DELETE /api/projects/:id
+// Delete removes a project.
 func (h *Handler) Delete(c echo.Context) error {
 	projectID := c.Param("id")
 
 	userID := c.Get("userID").(string)
 
-	// call service for deleting
 	if err := h.service.DeleteProject(c.Request().Context(), projectID, userID); err != nil {
 		return writeProjectError(c, err)
 	}
@@ -115,25 +113,22 @@ func (h *Handler) Delete(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-// addMemberRequest struct for parsing JSON request
 type addMemberRequest struct {
 	UserID string `json:"user_id"`
 	Role   string `json:"role"`
 }
 
-// AddMember handler for POST /api/projects/:id/members
+// AddMember creates an invite for a new project member.
 func (h *Handler) AddMember(c echo.Context) error {
 	projectID := c.Param("id")
 
 	currentUserID := c.Get("userID").(string)
 
-	// parse request
 	var req addMemberRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
 
-	// call service logic
 	invite, err := h.service.AddMemberToProject(c.Request().Context(), projectID, currentUserID, req.UserID, req.Role)
 	if err != nil {
 		return writeProjectError(c, err)
@@ -142,6 +137,7 @@ func (h *Handler) AddMember(c echo.Context) error {
 	return c.JSON(http.StatusAccepted, invite)
 }
 
+// RemoveMember removes a user from a project.
 func (h *Handler) RemoveMember(c echo.Context) error {
 	projectID := c.Param("id")
 	targetUserID := c.Param("userID")
@@ -154,7 +150,7 @@ func (h *Handler) RemoveMember(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-// AcceptInvite handler for POST /api/invites/:id/accept
+// AcceptInvite accepts a pending invite for the current user.
 func (h *Handler) AcceptInvite(c echo.Context) error {
 	inviteID := c.Param("id")
 	userID := c.Get("userID").(string)
@@ -166,6 +162,7 @@ func (h *Handler) AcceptInvite(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// RejectInvite rejects a pending invite for the current user.
 func (h *Handler) RejectInvite(c echo.Context) error {
 	inviteID := c.Param("id")
 	userID := c.Get("userID").(string)
@@ -177,6 +174,7 @@ func (h *Handler) RejectInvite(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// RevokeInvite revokes a pending invite.
 func (h *Handler) RevokeInvite(c echo.Context) error {
 	inviteID := c.Param("id")
 	userID := c.Get("userID").(string)

@@ -13,15 +13,18 @@ const (
 	activityJSONMediaTyp = "application/activity+json"
 )
 
+// Service resolves local actor handles into WebFinger JRD documents.
 type Service struct {
 	repo Repository
 	cfg  activitypub.Config
 }
 
+// NewService creates a WebFinger service.
 func NewService(repo Repository, cfg activitypub.Config) *Service {
 	return &Service{repo: repo, cfg: cfg}
 }
 
+// Resolve returns a JRD document for an acct: resource on the local domain.
 func (s *Service) Resolve(ctx context.Context, resource string) (*JRD, error) {
 	username, domain, err := parseAcctResource(resource)
 	if err != nil {

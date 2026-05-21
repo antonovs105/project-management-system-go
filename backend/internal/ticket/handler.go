@@ -8,14 +8,17 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// Handler exposes ticket HTTP endpoints.
 type Handler struct {
 	service *Service
 }
 
+// NewHandler creates a ticket HTTP handler.
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
+// RegisterRoutes registers authenticated ticket routes.
 func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.POST("/projects/:projectID/tickets", h.Create)
 	api.GET("/projects/:projectID/tickets", h.List)
@@ -36,7 +39,7 @@ type createTicketRequest struct {
 	AssigneeID  *string `json:"assignee_id"`
 }
 
-// Create handler for POST /api/projects/:projectID/tickets
+// Create creates a ticket in a project.
 func (h *Handler) Create(c echo.Context) error {
 	projectID := c.Param("projectID")
 
@@ -64,7 +67,7 @@ func (h *Handler) Create(c echo.Context) error {
 	return c.JSON(http.StatusCreated, ticket)
 }
 
-// List handler for GET /api/projects/:projectID/tickets
+// List returns tickets for a project.
 func (h *Handler) List(c echo.Context) error {
 	projectID := c.Param("projectID")
 
@@ -88,7 +91,7 @@ type updateTicketRequest struct {
 	AssigneeID  **string `json:"assignee_id"`
 }
 
-// Get handler for GET /api/tickets/:id
+// Get returns a ticket by ID.
 func (h *Handler) Get(c echo.Context) error {
 	ticketID := c.Param("id")
 	userID := c.Get("userID").(string)
@@ -100,7 +103,7 @@ func (h *Handler) Get(c echo.Context) error {
 	return c.JSON(http.StatusOK, ticket)
 }
 
-// Update handler for PATCH /api/tickets/:id
+// Update changes ticket fields.
 func (h *Handler) Update(c echo.Context) error {
 	ticketID := c.Param("id")
 	userID := c.Get("userID").(string)
@@ -126,7 +129,7 @@ func (h *Handler) Update(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-// Delete handler for DELETE /api/tickets/:id
+// Delete removes a ticket.
 func (h *Handler) Delete(c echo.Context) error {
 	ticketID := c.Param("id")
 	userID := c.Get("userID").(string)
@@ -142,7 +145,7 @@ type addLinkRequest struct {
 	LinkType string `json:"link_type"`
 }
 
-// AddLink handler for POST /api/tickets/:id/links
+// AddLink creates a directed link from one ticket to another.
 func (h *Handler) AddLink(c echo.Context) error {
 	sourceID := c.Param("id")
 
@@ -153,7 +156,6 @@ func (h *Handler) AddLink(c echo.Context) error {
 
 	userID := c.Get("userID").(string)
 
-	// Fetch source ticket to get ProjectID
 	sourceTicket, err := h.service.GetTicketByID(c.Request().Context(), sourceID, userID)
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "Source ticket not found"})
@@ -167,12 +169,11 @@ func (h *Handler) AddLink(c echo.Context) error {
 	return c.NoContent(http.StatusCreated)
 }
 
-// RemoveLink handler for DELETE /api/links/:linkID
+// RemoveLink removes a ticket link.
 func (h *Handler) RemoveLink(c echo.Context) error {
 	linkID := c.Param("linkID")
 	userID := c.Get("userID").(string)
 
-	// Passing 0 as projectID, assuming Service/Repo handles it or simplistic check.
 	err := h.service.RemoveTicketLink(c.Request().Context(), linkID, "", userID)
 	if err != nil {
 		return writeTicketError(c, err)
@@ -181,7 +182,7 @@ func (h *Handler) RemoveLink(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-// GetGraph handler for GET /api/projects/:projectID/graph
+// GetGraph returns ticket graph data for a project.
 func (h *Handler) GetGraph(c echo.Context) error {
 	projectID := c.Param("projectID")
 	userID := c.Get("userID").(string)

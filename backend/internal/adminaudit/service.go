@@ -14,14 +14,17 @@ const (
 	maxAuditLimit     = 500
 )
 
+// Service enforces admin authorization before reading audit events.
 type Service struct {
 	repo Repository
 }
 
+// NewService creates an audit service.
 func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
 }
 
+// ListEvents validates filters and returns audit events for an admin.
 func (s *Service) ListEvents(ctx context.Context, adminUserID string, options ListOptions) ([]Event, error) {
 	if err := s.requireAdmin(ctx, adminUserID); err != nil {
 		return nil, err

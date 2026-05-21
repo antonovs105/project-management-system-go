@@ -10,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+// Repository defines persistence operations for projects, members, and invites.
 type Repository interface {
 	Create(ctx context.Context, project *Project) error
 	GetByID(ctx context.Context, id string) (*Project, error)
@@ -27,15 +28,18 @@ type Repository interface {
 	RevokeInvite(ctx context.Context, inviteID, actorID string) (*MembershipResult, error)
 }
 
+// PgRepository implements Repository using PostgreSQL.
 type PgRepository struct {
 	db  *sqlx.DB
 	cfg activitypub.Config
 }
 
+// NewRepository creates a PostgreSQL-backed project repository.
 func NewRepository(db *sqlx.DB, cfg activitypub.Config) Repository {
 	return &PgRepository{db: db, cfg: cfg}
 }
 
+// Create stores a project actor, owner membership, and Create activity.
 func (r *PgRepository) Create(ctx context.Context, project *Project) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -155,6 +159,7 @@ func (r *PgRepository) Create(ctx context.Context, project *Project) error {
 	return tx.Commit()
 }
 
+// GetByID loads a project by UUID.
 func (r *PgRepository) GetByID(ctx context.Context, id string) (*Project, error) {
 	var p Project
 	query := `
@@ -175,6 +180,7 @@ func (r *PgRepository) GetByID(ctx context.Context, id string) (*Project, error)
 	return &p, err
 }
 
+// ListByOwnerID returns projects where the user is a member.
 func (r *PgRepository) ListByOwnerID(ctx context.Context, ownerID string) ([]Project, error) {
 	var projects []Project
 	query := `
@@ -199,6 +205,7 @@ func (r *PgRepository) ListByOwnerID(ctx context.Context, ownerID string) ([]Pro
 	return projects, nil
 }
 
+// GetUserRole returns a user's role in a project.
 func (r *PgRepository) GetUserRole(ctx context.Context, userID, projectID string) (string, error) {
 	var role string
 	err := r.db.GetContext(ctx, &role, `
@@ -209,6 +216,7 @@ func (r *PgRepository) GetUserRole(ctx context.Context, userID, projectID string
 	return role, err
 }
 
+// IsProjectMember reports whether a user belongs to a project.
 func (r *PgRepository) IsProjectMember(ctx context.Context, projectID, userID string) (bool, error) {
 	var member bool
 	err := r.db.GetContext(ctx, &member, `
@@ -221,6 +229,7 @@ func (r *PgRepository) IsProjectMember(ctx context.Context, projectID, userID st
 	return member, err
 }
 
+// HasPendingInvite reports whether a user already has an open invite.
 func (r *PgRepository) HasPendingInvite(ctx context.Context, projectID, userID string) (bool, error) {
 	var pending bool
 	err := r.db.GetContext(ctx, &pending, `
@@ -235,6 +244,7 @@ func (r *PgRepository) HasPendingInvite(ctx context.Context, projectID, userID s
 	return pending, err
 }
 
+// Update changes project metadata and records an Update activity.
 func (r *PgRepository) Update(ctx context.Context, project *Project, actorID string) (*UpdateResult, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -300,6 +310,7 @@ func (r *PgRepository) Update(ctx context.Context, project *Project, actorID str
 	}, nil
 }
 
+// Delete removes a project and tombstones its ActivityPub objects.
 func (r *PgRepository) Delete(ctx context.Context, id string, actorID string) (*DeleteResult, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -516,6 +527,7 @@ func (r *PgRepository) writeProjectDeleteActivity(ctx context.Context, tx *sqlx.
 	return activityID, nil
 }
 
+// RemoveMember removes a user from a project and records membership activity.
 func (r *PgRepository) RemoveMember(ctx context.Context, projectID, actorID, targetUserID string) (*MembershipResult, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -630,6 +642,7 @@ func (r *PgRepository) RemoveMember(ctx context.Context, projectID, actorID, tar
 	}, nil
 }
 
+// GetInviteByID loads a project invite by UUID.
 func (r *PgRepository) GetInviteByID(ctx context.Context, inviteID string) (*ProjectInvite, error) {
 	var invite ProjectInvite
 	if err := r.db.GetContext(ctx, &invite, `
@@ -651,6 +664,7 @@ func (r *PgRepository) GetInviteByID(ctx context.Context, inviteID string) (*Pro
 	return &invite, nil
 }
 
+// CreateInvite stores an invite and its ActivityPub Invite activity.
 func (r *PgRepository) CreateInvite(ctx context.Context, invite *ProjectInvite) (*MembershipResult, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -757,6 +771,7 @@ func (r *PgRepository) CreateInvite(ctx context.Context, invite *ProjectInvite) 
 	}, nil
 }
 
+// AcceptInvite accepts a pending invite and creates membership records.
 func (r *PgRepository) AcceptInvite(ctx context.Context, inviteID, userID string) (*MembershipResult, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -875,6 +890,7 @@ func (r *PgRepository) AcceptInvite(ctx context.Context, inviteID, userID string
 	}, nil
 }
 
+// RejectInvite rejects a pending invite and records a Reject activity.
 func (r *PgRepository) RejectInvite(ctx context.Context, inviteID, userID string) (*MembershipResult, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -953,6 +969,7 @@ func (r *PgRepository) RejectInvite(ctx context.Context, inviteID, userID string
 	}, nil
 }
 
+// RevokeInvite revokes a pending invite and records an Undo activity.
 func (r *PgRepository) RevokeInvite(ctx context.Context, inviteID, actorID string) (*MembershipResult, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {

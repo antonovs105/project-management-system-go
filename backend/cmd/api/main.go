@@ -35,7 +35,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// Server structure
+// ApiServer wires database-backed services into the HTTP server.
 type ApiServer struct {
 	db                *sqlx.DB
 	redisAddr         string
@@ -57,6 +57,7 @@ type signatureActorVerifier struct {
 	service *httpsig.Service
 }
 
+// VerifyActorID validates an HTTP signature request and returns the signer actor ID.
 func (v signatureActorVerifier) VerifyActorID(ctx context.Context, req *http.Request) (string, error) {
 	verified, err := v.service.VerifyRequest(ctx, req, nil)
 	if err != nil {

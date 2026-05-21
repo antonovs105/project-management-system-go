@@ -8,14 +8,17 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// Handler exposes comment HTTP endpoints.
 type Handler struct {
 	service *Service
 }
 
+// NewHandler creates a comment HTTP handler.
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
+// RegisterRoutes registers authenticated comment routes.
 func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.POST("/tickets/:id/comments", h.Create)
 	api.GET("/tickets/:id/comments", h.List)
@@ -26,6 +29,7 @@ type createCommentRequest struct {
 	Content string `json:"content"`
 }
 
+// Create adds a comment to a ticket.
 func (h *Handler) Create(c echo.Context) error {
 	ticketID := c.Param("id")
 	userID := c.Get("userID").(string)
@@ -43,6 +47,7 @@ func (h *Handler) Create(c echo.Context) error {
 	return c.JSON(http.StatusCreated, comment)
 }
 
+// List returns comments for a ticket.
 func (h *Handler) List(c echo.Context) error {
 	ticketID := c.Param("id")
 	userID := c.Get("userID").(string)
@@ -55,6 +60,7 @@ func (h *Handler) List(c echo.Context) error {
 	return c.JSON(http.StatusOK, comments)
 }
 
+// Delete removes a comment by ID.
 func (h *Handler) Delete(c echo.Context) error {
 	commentID := c.Param("id")
 	userID := c.Get("userID").(string)

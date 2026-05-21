@@ -7,23 +7,33 @@ import (
 )
 
 const (
-	ActionUserRoleUpdated         = "user.role_updated"
+	// ActionUserRoleUpdated records a user role change by an admin.
+	ActionUserRoleUpdated = "user.role_updated"
+	// ActionFederationDomainBlocked records a domain moderation block.
 	ActionFederationDomainBlocked = "federation.domain_blocked"
+	// ActionFederationDomainUnblock records removal of a domain moderation block.
 	ActionFederationDomainUnblock = "federation.domain_unblocked"
+	// ActionFederationDeliveryRetry records a manual federation delivery retry.
 	ActionFederationDeliveryRetry = "federation.delivery_retried"
 
-	TargetTypeUser               = "user"
-	TargetTypeFederationDomain   = "federation_domain"
+	// TargetTypeUser identifies a local user audit target.
+	TargetTypeUser = "user"
+	// TargetTypeFederationDomain identifies a domain moderation audit target.
+	TargetTypeFederationDomain = "federation_domain"
+	// TargetTypeFederationDelivery identifies a federation delivery audit target.
 	TargetTypeFederationDelivery = "federation_delivery"
 
 	roleAdmin = "admin"
 )
 
 var (
+	// ErrAdminRequired reports that the current user is not an admin.
 	ErrAdminRequired = errors.New("admin role required")
+	// ErrInvalidFilter reports malformed audit listing filters.
 	ErrInvalidFilter = errors.New("invalid admin audit filter")
 )
 
+// Event is a persisted administrative audit record.
 type Event struct {
 	ID          string          `db:"id" json:"id"`
 	ActorUserID *string         `db:"actor_user_id" json:"actor_user_id,omitempty"`
@@ -34,6 +44,7 @@ type Event struct {
 	CreatedAt   time.Time       `db:"created_at" json:"created_at"`
 }
 
+// EventInput describes a new administrative audit record.
 type EventInput struct {
 	ActorUserID string
 	Action      string
@@ -42,6 +53,7 @@ type EventInput struct {
 	Metadata    map[string]any
 }
 
+// ListOptions contains filters and pagination for audit event listing.
 type ListOptions struct {
 	Action      string
 	ActorUserID string
@@ -50,6 +62,7 @@ type ListOptions struct {
 	Offset      int
 }
 
+// IsAction reports whether value is a supported audit action.
 func IsAction(value string) bool {
 	switch value {
 	case ActionUserRoleUpdated, ActionFederationDomainBlocked, ActionFederationDomainUnblock, ActionFederationDeliveryRetry:
@@ -59,6 +72,7 @@ func IsAction(value string) bool {
 	}
 }
 
+// IsTargetType reports whether value is a supported audit target type.
 func IsTargetType(value string) bool {
 	switch value {
 	case TargetTypeUser, TargetTypeFederationDomain, TargetTypeFederationDelivery:

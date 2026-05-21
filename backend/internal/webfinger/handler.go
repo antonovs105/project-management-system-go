@@ -13,18 +13,22 @@ import (
 
 const jrdMediaType = "application/jrd+json"
 
+// Handler exposes the WebFinger discovery endpoint.
 type Handler struct {
 	service *Service
 }
 
+// NewHandler creates a WebFinger HTTP handler.
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
+// RegisterRoutes registers the WebFinger well-known route.
 func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/.well-known/webfinger", h.Resolve)
 }
 
+// Resolve handles RFC 7033 resource lookup requests.
 func (h *Handler) Resolve(c echo.Context) error {
 	if !acceptsJRDResponse(c.Request().Header.Get(echo.HeaderAccept)) {
 		return c.JSON(http.StatusNotAcceptable, map[string]string{"error": "accept header must allow webfinger json"})

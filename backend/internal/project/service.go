@@ -11,18 +11,22 @@ import (
 	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
 )
 
+// ErrInvalidProjectInput reports malformed project-management input.
 var ErrInvalidProjectInput = errors.New("invalid project input")
 
+// Service contains project board, membership, and invite workflows.
 type Service struct {
 	repo     Repository
 	apConfig activitypub.Config
 	delivery DeliveryEnqueuer
 }
 
+// DeliveryEnqueuer queues ActivityPub deliveries created by project actions.
 type DeliveryEnqueuer interface {
 	Enqueue(ctx context.Context, activityID string, targetInboxURL string) (*apdelivery.Delivery, error)
 }
 
+// NewService creates a project service.
 func NewService(repo Repository, apConfig activitypub.Config) *Service {
 	return &Service{
 		repo:     repo,
@@ -30,10 +34,12 @@ func NewService(repo Repository, apConfig activitypub.Config) *Service {
 	}
 }
 
+// SetDelivery attaches the delivery queue used for project federation.
 func (s *Service) SetDelivery(delivery DeliveryEnqueuer) {
 	s.delivery = delivery
 }
 
+// CreateProject creates a project actor, owner membership, and Create activity.
 func (s *Service) CreateProject(ctx context.Context, name, description string, userID string) (*Project, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -66,6 +72,7 @@ func (s *Service) CreateProject(ctx context.Context, name, description string, u
 	return p, nil
 }
 
+// GetProjectByID returns a project visible to the given user.
 func (s *Service) GetProjectByID(ctx context.Context, projectID, userID string) (*Project, error) {
 	project, err := s.repo.GetByID(ctx, projectID)
 	if err != nil {
@@ -81,19 +88,23 @@ func (s *Service) GetProjectByID(ctx context.Context, projectID, userID string) 
 	return project, nil
 }
 
+// GetProjectRole returns the user's role in a project.
 func (s *Service) GetProjectRole(ctx context.Context, projectID, userID string) (string, error) {
 	return s.repo.GetUserRole(ctx, userID, projectID)
 }
 
+// ListUserProjects returns projects where the user is a member.
 func (s *Service) ListUserProjects(ctx context.Context, userID string) ([]Project, error) {
 	return s.repo.ListByOwnerID(ctx, userID)
 }
 
+// UpdateProjectRequest contains partial project metadata updates.
 type UpdateProjectRequest struct {
 	Name        *string `json:"name"`
 	Description *string `json:"description"`
 }
 
+// UpdateProject changes project metadata and emits an Update activity.
 func (s *Service) UpdateProject(ctx context.Context, projectID, userID string, req UpdateProjectRequest) error {
 	projectToUpdate, err := s.GetProjectByID(ctx, projectID, userID)
 	if err != nil {
@@ -127,6 +138,7 @@ func (s *Service) UpdateProject(ctx context.Context, projectID, userID string, r
 	return nil
 }
 
+// DeleteProject deletes a project and emits ActivityPub tombstone side effects.
 func (s *Service) DeleteProject(ctx context.Context, projectID, userID string) error {
 	if _, err := s.GetProjectByID(ctx, projectID, userID); err != nil {
 		return err
@@ -171,6 +183,7 @@ func (s *Service) removeMember(ctx context.Context, projectID, actorID, targetUs
 	return nil
 }
 
+// RemoveMemberFromProject removes a member when the acting user is allowed to do so.
 func (s *Service) RemoveMemberFromProject(ctx context.Context, projectID, actorID, targetUserID string) error {
 	actorRole, err := s.repo.GetUserRole(ctx, actorID, projectID)
 	if err != nil {
@@ -198,6 +211,7 @@ func (s *Service) RemoveMemberFromProject(ctx context.Context, projectID, actorI
 	}
 }
 
+// AddMemberToProject creates a pending project invite for a local user.
 func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUserID, newUserID string, role string) (*ProjectInvite, error) {
 	if strings.TrimSpace(newUserID) == "" {
 		return nil, invalidProjectInput("user_id is required")
@@ -261,6 +275,7 @@ func invalidProjectInput(message string) error {
 	return fmt.Errorf("%w: %s", ErrInvalidProjectInput, message)
 }
 
+// AcceptInvite accepts a pending project invite for the current user.
 func (s *Service) AcceptInvite(ctx context.Context, inviteID, userID string) error {
 	result, err := s.repo.AcceptInvite(ctx, inviteID, userID)
 	if err != nil {
@@ -272,6 +287,7 @@ func (s *Service) AcceptInvite(ctx context.Context, inviteID, userID string) err
 	return nil
 }
 
+// RejectInvite rejects a pending project invite for the current user.
 func (s *Service) RejectInvite(ctx context.Context, inviteID, userID string) error {
 	result, err := s.repo.RejectInvite(ctx, inviteID, userID)
 	if err != nil {
@@ -283,6 +299,7 @@ func (s *Service) RejectInvite(ctx context.Context, inviteID, userID string) err
 	return nil
 }
 
+// RevokeInvite revokes a pending project invite when the actor can manage members.
 func (s *Service) RevokeInvite(ctx context.Context, inviteID, userID string) error {
 	invite, err := s.repo.GetInviteByID(ctx, inviteID)
 	if err != nil {

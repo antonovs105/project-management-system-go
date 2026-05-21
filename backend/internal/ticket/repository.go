@@ -11,6 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+// Repository defines persistence operations for tickets and ticket links.
 type Repository interface {
 	Create(ctx context.Context, ticket *Ticket) ([]string, error)
 	ListByProjectID(ctx context.Context, projectID string) ([]Ticket, error)
@@ -23,15 +24,18 @@ type Repository interface {
 	GetLinksByProjectID(ctx context.Context, projectID string) ([]TicketLink, error)
 }
 
+// PgRepository implements Repository using PostgreSQL.
 type PgRepository struct {
 	db  *sqlx.DB
 	cfg activitypub.Config
 }
 
+// NewRepository creates a PostgreSQL-backed ticket repository.
 func NewRepository(db *sqlx.DB, cfg activitypub.Config) Repository {
 	return &PgRepository{db: db, cfg: cfg}
 }
 
+// Create stores a ticket, its ForgeFed object, and a Create activity.
 func (r *PgRepository) Create(ctx context.Context, ticket *Ticket) ([]string, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -87,6 +91,7 @@ func (r *PgRepository) Create(ctx context.Context, ticket *Ticket) ([]string, er
 	return []string{activityID}, nil
 }
 
+// ListByProjectID returns tickets for a project.
 func (r *PgRepository) ListByProjectID(ctx context.Context, projectID string) ([]Ticket, error) {
 	var tickets []Ticket
 	query := ticketSelectBase() + `
@@ -99,6 +104,7 @@ func (r *PgRepository) ListByProjectID(ctx context.Context, projectID string) ([
 	return tickets, nil
 }
 
+// GetByID loads a ticket by UUID.
 func (r *PgRepository) GetByID(ctx context.Context, id string) (*Ticket, error) {
 	var t Ticket
 	query := ticketSelectBase() + ` WHERE t.id = $1`
@@ -106,6 +112,7 @@ func (r *PgRepository) GetByID(ctx context.Context, id string) (*Ticket, error) 
 	return &t, err
 }
 
+// Update changes a ticket and records ActivityPub activities for the change.
 func (r *PgRepository) Update(ctx context.Context, ticket *Ticket, actorID string) ([]string, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -220,6 +227,7 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket, actorID strin
 	return activityIDs, nil
 }
 
+// Delete removes a ticket and tombstones its related ActivityPub objects.
 func (r *PgRepository) Delete(ctx context.Context, id string, actorID string) (*DeleteResult, error) {
 	t, err := r.GetByID(ctx, id)
 	if err != nil {
@@ -266,6 +274,7 @@ func (r *PgRepository) Delete(ctx context.Context, id string, actorID string) (*
 	}, nil
 }
 
+// CreateLink stores a directed link between tickets.
 func (r *PgRepository) CreateLink(ctx context.Context, link *TicketLink) error {
 	query := `
 		INSERT INTO ticket_links (source_id, target_id, link_type)
@@ -284,6 +293,7 @@ func (r *PgRepository) CreateLink(ctx context.Context, link *TicketLink) error {
 	return errors.New("link creation failed")
 }
 
+// GetLinkByID loads a ticket link by UUID.
 func (r *PgRepository) GetLinkByID(ctx context.Context, linkID string) (*TicketLink, error) {
 	var link TicketLink
 	if err := r.db.GetContext(ctx, &link, `
@@ -301,6 +311,7 @@ func (r *PgRepository) GetLinkByID(ctx context.Context, linkID string) (*TicketL
 	return &link, nil
 }
 
+// DeleteLink removes a ticket link by UUID.
 func (r *PgRepository) DeleteLink(ctx context.Context, linkID string) error {
 	result, err := r.db.ExecContext(ctx, `DELETE FROM ticket_links WHERE id = $1`, linkID)
 	if err != nil {
@@ -316,6 +327,7 @@ func (r *PgRepository) DeleteLink(ctx context.Context, linkID string) error {
 	return nil
 }
 
+// GetLinksByProjectID returns all links between tickets in a project.
 func (r *PgRepository) GetLinksByProjectID(ctx context.Context, projectID string) ([]TicketLink, error) {
 	var links []TicketLink
 	query := `

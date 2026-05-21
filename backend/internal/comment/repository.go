@@ -11,6 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+// Repository defines persistence operations for comments and their ActivityPub records.
 type Repository interface {
 	Create(ctx context.Context, comment *Comment) (string, error)
 	GetByID(ctx context.Context, commentID string) (*Comment, error)
@@ -18,15 +19,18 @@ type Repository interface {
 	Delete(ctx context.Context, commentID string, actorID string) (*DeleteResult, error)
 }
 
+// PgRepository implements Repository using PostgreSQL.
 type PgRepository struct {
 	db  *sqlx.DB
 	cfg activitypub.Config
 }
 
+// NewRepository creates a PostgreSQL-backed comment repository.
 func NewRepository(db *sqlx.DB, cfg activitypub.Config) Repository {
 	return &PgRepository{db: db, cfg: cfg}
 }
 
+// Create stores a comment, Note object, and Create activity in one transaction.
 func (r *PgRepository) Create(ctx context.Context, comment *Comment) (string, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -113,6 +117,7 @@ func (r *PgRepository) Create(ctx context.Context, comment *Comment) (string, er
 	return activityID, nil
 }
 
+// ListByTicketID returns comments ordered by creation time for a ticket.
 func (r *PgRepository) ListByTicketID(ctx context.Context, ticketID string) ([]Comment, error) {
 	var comments []Comment
 	if err := r.db.SelectContext(ctx, &comments, `
@@ -126,6 +131,7 @@ func (r *PgRepository) ListByTicketID(ctx context.Context, ticketID string) ([]C
 	return comments, nil
 }
 
+// GetByID returns a single comment by UUID.
 func (r *PgRepository) GetByID(ctx context.Context, commentID string) (*Comment, error) {
 	var comment Comment
 	err := r.db.GetContext(ctx, &comment, `
@@ -139,6 +145,7 @@ func (r *PgRepository) GetByID(ctx context.Context, commentID string) (*Comment,
 	return &comment, nil
 }
 
+// Delete removes a comment and tombstones its ActivityPub object.
 func (r *PgRepository) Delete(ctx context.Context, commentID string, actorID string) (*DeleteResult, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {

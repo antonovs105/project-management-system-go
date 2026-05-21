@@ -2,6 +2,7 @@ package comment
 
 import "time"
 
+// Comment is a local Note object attached to a ticket.
 type Comment struct {
 	ID        string    `db:"id" json:"id"`
 	APID      string    `db:"ap_id" json:"ap_id"`
@@ -12,6 +13,7 @@ type Comment struct {
 	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 }
 
+// DeleteResult carries the ActivityPub side effects produced by comment deletion.
 type DeleteResult struct {
 	ActivityID       string
 	ProjectID        string

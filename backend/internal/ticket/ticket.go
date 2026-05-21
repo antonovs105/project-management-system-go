@@ -2,6 +2,7 @@ package ticket
 
 import "time"
 
+// Ticket is a ForgeFed-style issue object owned by a project.
 type Ticket struct {
 	ID          string    `db:"id" json:"id"`
 	APID        string    `db:"ap_id" json:"ap_id"`
@@ -19,6 +20,7 @@ type Ticket struct {
 	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
 }
 
+// TicketLink is a directed relationship between two tickets.
 type TicketLink struct {
 	ID        string    `db:"id" json:"id"`
 	SourceID  string    `db:"source_id" json:"source_id"`
@@ -27,6 +29,7 @@ type TicketLink struct {
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
+// DeleteResult carries the ActivityPub side effects produced by ticket deletion.
 type DeleteResult struct {
 	ActivityIDs      []string
 	RecipientInboxes []string

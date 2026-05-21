@@ -9,18 +9,22 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// Handler exposes administrative audit HTTP endpoints.
 type Handler struct {
 	service *Service
 }
 
+// NewHandler creates an audit HTTP handler.
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
+// RegisterRoutes registers audit routes on an authenticated API group.
 func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.GET("/admin/audit-events", h.ListEvents)
 }
 
+// ListEvents returns audit events visible to the current admin.
 func (h *Handler) ListEvents(c echo.Context) error {
 	options, err := listOptions(c)
 	if err != nil {

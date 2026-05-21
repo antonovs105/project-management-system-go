@@ -7,11 +7,13 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+// Repository defines persistence operations for administrative audit events.
 type Repository interface {
 	UserRole(ctx context.Context, userID string) (string, error)
 	ListEvents(ctx context.Context, options ListOptions) ([]Event, error)
 }
 
+// PgRepository implements Repository using PostgreSQL.
 type PgRepository struct {
 	db *sqlx.DB
 }
@@ -20,16 +22,19 @@ type queryRowerContext interface {
 	QueryRowxContext(ctx context.Context, query string, args ...any) *sqlx.Row
 }
 
+// NewRepository creates a PostgreSQL-backed audit repository.
 func NewRepository(db *sqlx.DB) Repository {
 	return &PgRepository{db: db}
 }
 
+// UserRole returns the global role for a local user.
 func (r *PgRepository) UserRole(ctx context.Context, userID string) (string, error) {
 	var role string
 	err := r.db.GetContext(ctx, &role, `SELECT role FROM users WHERE id = $1`, userID)
 	return role, err
 }
 
+// ListEvents loads audit events matching the given filters.
 func (r *PgRepository) ListEvents(ctx context.Context, options ListOptions) ([]Event, error) {
 	var events []Event
 	if err := r.db.SelectContext(ctx, &events, `
@@ -46,6 +51,7 @@ func (r *PgRepository) ListEvents(ctx context.Context, options ListOptions) ([]E
 	return events, nil
 }
 
+// InsertEvent appends an administrative audit event using the provided query executor.
 func InsertEvent(ctx context.Context, q queryRowerContext, input EventInput) (*Event, error) {
 	rawMetadata, err := json.Marshal(input.Metadata)
 	if err != nil {
