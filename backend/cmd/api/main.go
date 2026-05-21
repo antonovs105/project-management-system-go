@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -10,7 +11,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
@@ -34,6 +37,13 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
+)
+
+const (
+	// defaultHTTPAddr is the in-container API listen address.
+	defaultHTTPAddr = ":8080"
+	// gracefulShutdownTimeout bounds HTTP and worker shutdown on container stop.
+	gracefulShutdownTimeout = 10 * time.Second
 )
 
 // ApiServer wires database-backed services into the HTTP server.
@@ -315,7 +325,43 @@ func main() {
 	server.moderationHandler.RegisterRoutes(api)
 	server.auditHandler.RegisterRoutes(api)
 
-	e.Logger.Fatal(e.Start(":8080"))
+	if err := runHTTPServer(e, defaultHTTPAddr, gracefulShutdownTimeout); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// runHTTPServer starts Echo and stops it gracefully on SIGINT or SIGTERM.
+func runHTTPServer(e *echo.Echo, addr string, timeout time.Duration) error {
+	serverErrors := make(chan error, 1)
+	go func() {
+		log.Printf("HTTP server listening on %s", addr)
+		if err := e.Start(addr); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErrors <- err
+		}
+		close(serverErrors)
+	}()
+
+	shutdownSignals := make(chan os.Signal, 1)
+	signal.Notify(shutdownSignals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(shutdownSignals)
+
+	select {
+	case signal := <-shutdownSignals:
+		log.Printf("Shutdown signal received: %s", signal)
+	case err := <-serverErrors:
+		if err != nil {
+			return fmt.Errorf("HTTP server failed: %w", err)
+		}
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := e.Shutdown(ctx); err != nil {
+		return fmt.Errorf("HTTP server shutdown failed: %w", err)
+	}
+	log.Println("HTTP server stopped gracefully")
+	return nil
 }
 
 // registerGlobalMiddleware adds request logging, request IDs, and panic recovery.
@@ -346,7 +392,7 @@ func (s *ApiServer) healthCheck(c echo.Context) error {
 
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"status": "error",
-			"system": "database unreacheble",
+			"system": "database unreachable",
 		})
 	}
 	return c.JSON(http.StatusOK, map[string]string{
