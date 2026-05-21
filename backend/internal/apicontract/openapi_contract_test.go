@@ -113,6 +113,45 @@ func TestOpenAPIContractDocumentsDeliveryResponseShapes(t *testing.T) {
 	require.NotContains(t, projectDeliveryProps, "actor_id")
 }
 
+func TestOpenAPIContractDocumentsVersionedRESTAliases(t *testing.T) {
+	doc := loadOpenAPI(t)
+
+	for _, path := range []string{
+		"/api/me",
+		"/api/me/password",
+		"/api/admin/users",
+		"/api/admin/users/{userID}/role",
+		"/api/admin/audit-events",
+		"/api/projects",
+		"/api/projects/{projectID}",
+		"/api/projects/{projectID}/members",
+		"/api/projects/{projectID}/members/{userID}",
+		"/api/invites/{inviteID}/accept",
+		"/api/invites/{inviteID}/reject",
+		"/api/invites/{inviteID}/revoke",
+		"/api/projects/{projectID}/tickets",
+		"/api/projects/{projectID}/graph",
+		"/api/tickets/{ticketID}",
+		"/api/tickets/{ticketID}/links",
+		"/api/links/{linkID}",
+		"/api/tickets/{ticketID}/comments",
+		"/api/comments/{commentID}",
+		"/api/projects/{projectID}/deliveries",
+		"/api/projects/{projectID}/deliveries/summary",
+		"/api/projects/{projectID}/deliveries/{deliveryID}/retry",
+		"/api/admin/federation/domain-blocks",
+		"/api/admin/federation/domain-blocks/{domain}",
+		"/api/admin/federation/remote-actors",
+		"/api/admin/federation/deliveries",
+		"/api/admin/federation/deliveries/{deliveryID}/retry",
+	} {
+		versionedPath := "/api/v1" + strings.TrimPrefix(path, "/api")
+		pathItem, ok := doc.Paths[versionedPath]
+		require.True(t, ok, "missing OpenAPI path %s", versionedPath)
+		require.Equal(t, "#/paths/"+openAPIPathRef(path), pathItem["$ref"])
+	}
+}
+
 func loadOpenAPI(t *testing.T) openAPIDocument {
 	t.Helper()
 
@@ -167,6 +206,10 @@ func schemaProperties(t *testing.T, doc openAPIDocument, name string) map[string
 	schemas := doc.Components["schemas"]
 	schema := requireMap(t, schemas[name])
 	return requireMap(t, schema["properties"])
+}
+
+func openAPIPathRef(path string) string {
+	return strings.ReplaceAll(path, "/", "~1")
 }
 
 func requireMap(t *testing.T, value any) map[string]any {

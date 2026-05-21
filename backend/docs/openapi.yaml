@@ -766,6 +766,60 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
+  /api/v1/me:
+    $ref: "#/paths/~1api~1me"
+  /api/v1/me/password:
+    $ref: "#/paths/~1api~1me~1password"
+  /api/v1/admin/users:
+    $ref: "#/paths/~1api~1admin~1users"
+  /api/v1/admin/users/{userID}/role:
+    $ref: "#/paths/~1api~1admin~1users~1{userID}~1role"
+  /api/v1/admin/audit-events:
+    $ref: "#/paths/~1api~1admin~1audit-events"
+  /api/v1/projects:
+    $ref: "#/paths/~1api~1projects"
+  /api/v1/projects/{projectID}:
+    $ref: "#/paths/~1api~1projects~1{projectID}"
+  /api/v1/projects/{projectID}/members:
+    $ref: "#/paths/~1api~1projects~1{projectID}~1members"
+  /api/v1/projects/{projectID}/members/{userID}:
+    $ref: "#/paths/~1api~1projects~1{projectID}~1members~1{userID}"
+  /api/v1/invites/{inviteID}/accept:
+    $ref: "#/paths/~1api~1invites~1{inviteID}~1accept"
+  /api/v1/invites/{inviteID}/reject:
+    $ref: "#/paths/~1api~1invites~1{inviteID}~1reject"
+  /api/v1/invites/{inviteID}/revoke:
+    $ref: "#/paths/~1api~1invites~1{inviteID}~1revoke"
+  /api/v1/projects/{projectID}/tickets:
+    $ref: "#/paths/~1api~1projects~1{projectID}~1tickets"
+  /api/v1/projects/{projectID}/graph:
+    $ref: "#/paths/~1api~1projects~1{projectID}~1graph"
+  /api/v1/tickets/{ticketID}:
+    $ref: "#/paths/~1api~1tickets~1{ticketID}"
+  /api/v1/tickets/{ticketID}/links:
+    $ref: "#/paths/~1api~1tickets~1{ticketID}~1links"
+  /api/v1/links/{linkID}:
+    $ref: "#/paths/~1api~1links~1{linkID}"
+  /api/v1/tickets/{ticketID}/comments:
+    $ref: "#/paths/~1api~1tickets~1{ticketID}~1comments"
+  /api/v1/comments/{commentID}:
+    $ref: "#/paths/~1api~1comments~1{commentID}"
+  /api/v1/projects/{projectID}/deliveries:
+    $ref: "#/paths/~1api~1projects~1{projectID}~1deliveries"
+  /api/v1/projects/{projectID}/deliveries/summary:
+    $ref: "#/paths/~1api~1projects~1{projectID}~1deliveries~1summary"
+  /api/v1/projects/{projectID}/deliveries/{deliveryID}/retry:
+    $ref: "#/paths/~1api~1projects~1{projectID}~1deliveries~1{deliveryID}~1retry"
+  /api/v1/admin/federation/domain-blocks:
+    $ref: "#/paths/~1api~1admin~1federation~1domain-blocks"
+  /api/v1/admin/federation/domain-blocks/{domain}:
+    $ref: "#/paths/~1api~1admin~1federation~1domain-blocks~1{domain}"
+  /api/v1/admin/federation/remote-actors:
+    $ref: "#/paths/~1api~1admin~1federation~1remote-actors"
+  /api/v1/admin/federation/deliveries:
+    $ref: "#/paths/~1api~1admin~1federation~1deliveries"
+  /api/v1/admin/federation/deliveries/{deliveryID}/retry:
+    $ref: "#/paths/~1api~1admin~1federation~1deliveries~1{deliveryID}~1retry"
   /.well-known/webfinger:
     get:
       tags: [WebFinger]

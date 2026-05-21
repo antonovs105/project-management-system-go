@@ -376,19 +376,8 @@ func main() {
 	server.c2sHandler.RegisterRoutes(e, authMiddleware.JWTMiddleware([]byte(jwtSecret), userService))
 	server.inboxHandler.RegisterRoutes(e, newRateLimiter(inboxRateLimitPerSecond, inboxRateLimitBurst))
 
-	api := e.Group("/api")
-
-	api.Use(authMiddleware.JWTMiddleware([]byte(jwtSecret), userService))
-
-	api.GET("/me", server.getProfile)
-	server.userHandler.RegisterAccountRoutes(api)
-	server.userHandler.RegisterAdminRoutes(api)
-	server.projectHandler.RegisterRoutes(api)
-	server.ticketHandler.RegisterRoutes(api)
-	server.commentHandler.RegisterRoutes(api)
-	server.deliveryHandler.RegisterRoutes(api)
-	server.moderationHandler.RegisterRoutes(api)
-	server.auditHandler.RegisterRoutes(api)
+	registerAuthenticatedAPIRoutes(e.Group("/api"), server, []byte(jwtSecret), userService)
+	registerAuthenticatedAPIRoutes(e.Group("/api/v1"), server, []byte(jwtSecret), userService)
 
 	if err := runHTTPServer(e, defaultHTTPAddr, gracefulShutdownTimeout); err != nil {
 		log.Fatal(err)
@@ -476,6 +465,21 @@ func newRateLimiter(requestsPerSecond rate.Limit, burst int) echo.MiddlewareFunc
 // rateLimitIdentifier groups unauthenticated requests by Echo's resolved client IP.
 func rateLimitIdentifier(c echo.Context) (string, error) {
 	return c.RealIP(), nil
+}
+
+// registerAuthenticatedAPIRoutes mounts stable REST API routes under one prefix.
+func registerAuthenticatedAPIRoutes(api *echo.Group, server *ApiServer, jwtSecret []byte, userService *user.Service) {
+	api.Use(authMiddleware.JWTMiddleware(jwtSecret, userService))
+
+	api.GET("/me", server.getProfile)
+	server.userHandler.RegisterAccountRoutes(api)
+	server.userHandler.RegisterAdminRoutes(api)
+	server.projectHandler.RegisterRoutes(api)
+	server.ticketHandler.RegisterRoutes(api)
+	server.commentHandler.RegisterRoutes(api)
+	server.deliveryHandler.RegisterRoutes(api)
+	server.moderationHandler.RegisterRoutes(api)
+	server.auditHandler.RegisterRoutes(api)
 }
 
 // healthCheck reports whether the API process can still reach PostgreSQL.
