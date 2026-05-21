@@ -94,6 +94,14 @@ func (s *Service) ListFederationDeliveries(ctx context.Context, userID string, o
 	return s.repo.ListFederationDeliveries(ctx, options)
 }
 
+// GetFederationDeliverySummary returns global delivery health for an admin.
+func (s *Service) GetFederationDeliverySummary(ctx context.Context, userID string) (*FederationDeliverySummary, error) {
+	if err := s.requireAdmin(ctx, userID); err != nil {
+		return nil, err
+	}
+	return s.repo.GetFederationDeliverySummary(ctx)
+}
+
 // RetryFederationDelivery resets and requeues an outbound delivery.
 func (s *Service) RetryFederationDelivery(ctx context.Context, userID string, deliveryID string) (*delivery.Delivery, error) {
 	if err := s.requireAdmin(ctx, userID); err != nil {

@@ -1455,6 +1455,15 @@ func TestFederationModerationInspection(t *testing.T) {
 	assert.Equal(t, http.StatusServiceUnavailable, *deliveries[0].LastStatusCode)
 	assert.True(t, deliveries[0].CanRetry)
 
+	deliverySummary, err := moderationService.GetFederationDeliverySummary(ctx, admin.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, deliverySummary.Total)
+	assert.Equal(t, 1, deliverySummary.Dead)
+	assert.Equal(t, 1, deliverySummary.Retryable)
+	assert.Equal(t, 1, deliverySummary.HTTPFailures)
+	assert.True(t, deliverySummary.CanRetry)
+	require.NotNil(t, deliverySummary.OldestDeadAt)
+
 	retried, err := moderationService.RetryFederationDelivery(ctx, admin.ID, createdDelivery.ID)
 	require.NoError(t, err)
 	assert.Equal(t, delivery.StatePending, retried.State)

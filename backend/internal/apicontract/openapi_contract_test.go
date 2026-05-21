@@ -65,6 +65,7 @@ func TestOpenAPIContractDocumentsRegisteredRoutes(t *testing.T) {
 		{method: "delete", path: "/api/admin/federation/domain-blocks/{domain}"},
 		{method: "get", path: "/api/admin/federation/remote-actors"},
 		{method: "get", path: "/api/admin/federation/deliveries"},
+		{method: "get", path: "/api/admin/federation/deliveries/summary"},
 		{method: "post", path: "/api/admin/federation/deliveries/{deliveryID}/retry"},
 		{method: "get", path: "/.well-known/webfinger"},
 		{method: "get", path: "/users/{username}"},
@@ -98,6 +99,7 @@ func TestOpenAPIContractDocumentsDeliveryResponseShapes(t *testing.T) {
 	require.Equal(t, "#/components/schemas/ProjectDelivery", responseItemsRef(t, doc, "get", "/api/projects/{projectID}/deliveries", "200", "application/json"))
 	require.Equal(t, "#/components/schemas/ProjectDelivery", responseRef(t, doc, "post", "/api/projects/{projectID}/deliveries/{deliveryID}/retry", "202", "application/json"))
 	require.Equal(t, "#/components/schemas/FederationDelivery", responseItemsRef(t, doc, "get", "/api/admin/federation/deliveries", "200", "application/json"))
+	require.Equal(t, "#/components/schemas/FederationDeliverySummary", responseRef(t, doc, "get", "/api/admin/federation/deliveries/summary", "200", "application/json"))
 	require.Equal(t, "#/components/schemas/Delivery", responseRef(t, doc, "post", "/api/admin/federation/deliveries/{deliveryID}/retry", "202", "application/json"))
 
 	rawDeliveryProps := schemaProperties(t, doc, "Delivery")
@@ -144,6 +146,7 @@ func TestOpenAPIContractDocumentsVersionedRESTAliases(t *testing.T) {
 		"/api/admin/federation/domain-blocks/{domain}",
 		"/api/admin/federation/remote-actors",
 		"/api/admin/federation/deliveries",
+		"/api/admin/federation/deliveries/summary",
 		"/api/admin/federation/deliveries/{deliveryID}/retry",
 	} {
 		versionedPath := "/api/v1" + strings.TrimPrefix(path, "/api")

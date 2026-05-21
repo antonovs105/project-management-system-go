@@ -17,6 +17,7 @@ type Repository interface {
 	DeleteDomainBlock(ctx context.Context, domain, userID string) error
 	ListRemoteActors(ctx context.Context, options RemoteActorListOptions) ([]RemoteActorInspection, error)
 	ListFederationDeliveries(ctx context.Context, options FederationDeliveryListOptions) ([]FederationDeliveryInspection, error)
+	GetFederationDeliverySummary(ctx context.Context) (*FederationDeliverySummary, error)
 	RetryFederationDelivery(ctx context.Context, deliveryID, userID string) (*delivery.Delivery, error)
 }
 
@@ -194,6 +195,34 @@ func (r *PgRepository) ListFederationDeliveries(ctx context.Context, options Fed
 		return nil, err
 	}
 	return deliveries, nil
+}
+
+// GetFederationDeliverySummary returns aggregate outbound federation delivery health.
+func (r *PgRepository) GetFederationDeliverySummary(ctx context.Context) (*FederationDeliverySummary, error) {
+	var summary FederationDeliverySummary
+	if err := r.db.GetContext(ctx, &summary, `
+		SELECT
+			COUNT(*)::int AS total,
+			COUNT(*) FILTER (WHERE state = 'pending')::int AS pending,
+			COUNT(*) FILTER (WHERE state = 'processing')::int AS processing,
+			COUNT(*) FILTER (WHERE state = 'delivered')::int AS delivered,
+			COUNT(*) FILTER (WHERE state = 'failed')::int AS failed,
+			COUNT(*) FILTER (WHERE state = 'dead')::int AS dead,
+			COUNT(*) FILTER (WHERE state IN ('failed', 'dead'))::int AS retryable,
+			COUNT(*) FILTER (WHERE state = 'failed' AND next_attempt_at <= now())::int AS due_retry,
+			COUNT(*) FILTER (WHERE last_failure_kind = 'http')::int AS http_failures,
+			COUNT(*) FILTER (WHERE last_failure_kind = 'network')::int AS network_failures,
+			COUNT(*) FILTER (WHERE last_failure_kind = 'signing')::int AS signing_failures,
+			COUNT(*) FILTER (WHERE last_failure_kind = 'safety')::int AS safety_failures,
+			COUNT(*) FILTER (WHERE last_failure_kind = 'unknown')::int AS unknown_failures,
+			MIN(created_at) FILTER (WHERE state = 'pending') AS oldest_pending_at,
+			MIN(updated_at) FILTER (WHERE state = 'dead') AS oldest_dead_at,
+			TRUE AS can_retry
+		FROM activity_deliveries
+	`); err != nil {
+		return nil, err
+	}
+	return &summary, nil
 }
 
 // RetryFederationDelivery resets a failed delivery and records an audit event.

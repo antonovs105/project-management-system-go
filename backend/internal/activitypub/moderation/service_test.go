@@ -25,6 +25,8 @@ type fakeRepository struct {
 	actorOptions    RemoteActorListOptions
 	deliveries      []FederationDeliveryInspection
 	deliveryOptions FederationDeliveryListOptions
+	summaryCalled   bool
+	summary         *FederationDeliverySummary
 	retryDeliveryID string
 	retryUserID     string
 	retryDelivery   *delivery.Delivery
@@ -70,6 +72,14 @@ func (r *fakeRepository) ListRemoteActors(ctx context.Context, options RemoteAct
 func (r *fakeRepository) ListFederationDeliveries(ctx context.Context, options FederationDeliveryListOptions) ([]FederationDeliveryInspection, error) {
 	r.deliveryOptions = options
 	return r.deliveries, nil
+}
+
+func (r *fakeRepository) GetFederationDeliverySummary(ctx context.Context) (*FederationDeliverySummary, error) {
+	r.summaryCalled = true
+	if r.summary != nil {
+		return r.summary, nil
+	}
+	return &FederationDeliverySummary{}, nil
 }
 
 func (r *fakeRepository) RetryFederationDelivery(ctx context.Context, deliveryID, userID string) (*delivery.Delivery, error) {
@@ -181,6 +191,29 @@ func TestServiceListFederationDeliveriesValidatesFilters(t *testing.T) {
 
 	_, err = service.ListFederationDeliveries(context.Background(), "admin-1", FederationDeliveryListOptions{FailureKind: "weird"})
 	require.ErrorIs(t, err, ErrInvalidFilter)
+}
+
+func TestServiceGetsFederationDeliverySummaryForAdmin(t *testing.T) {
+	repo := &fakeRepository{role: RoleAdmin, summary: &FederationDeliverySummary{Total: 3, Dead: 1, Retryable: 1, CanRetry: true}}
+	service := NewService(repo)
+
+	summary, err := service.GetFederationDeliverySummary(context.Background(), "admin-1")
+
+	require.NoError(t, err)
+	assert.True(t, repo.summaryCalled)
+	assert.Equal(t, 3, summary.Total)
+	assert.Equal(t, 1, summary.Dead)
+	assert.True(t, summary.CanRetry)
+}
+
+func TestServiceFederationDeliverySummaryRequiresAdmin(t *testing.T) {
+	repo := &fakeRepository{role: "worker"}
+	service := NewService(repo)
+
+	_, err := service.GetFederationDeliverySummary(context.Background(), "user-1")
+
+	require.ErrorIs(t, err, ErrAdminRequired)
+	assert.False(t, repo.summaryCalled)
 }
 
 func TestServiceRetryFederationDeliveryQueuesTask(t *testing.T) {

@@ -33,6 +33,7 @@ func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.DELETE("/admin/federation/domain-blocks/:domain", h.UnblockDomain)
 	api.GET("/admin/federation/remote-actors", h.ListRemoteActors)
 	api.GET("/admin/federation/deliveries", h.ListFederationDeliveries)
+	api.GET("/admin/federation/deliveries/summary", h.GetFederationDeliverySummary)
 	api.POST("/admin/federation/deliveries/:deliveryID/retry", h.RetryFederationDelivery)
 }
 
@@ -91,6 +92,15 @@ func (h *Handler) ListFederationDeliveries(c echo.Context) error {
 		return writeModerationError(c, err)
 	}
 	return c.JSON(http.StatusOK, deliveries)
+}
+
+// GetFederationDeliverySummary returns aggregate federation delivery health.
+func (h *Handler) GetFederationDeliverySummary(c echo.Context) error {
+	summary, err := h.service.GetFederationDeliverySummary(c.Request().Context(), currentUserID(c))
+	if err != nil {
+		return writeModerationError(c, err)
+	}
+	return c.JSON(http.StatusOK, summary)
 }
 
 // RetryFederationDelivery requeues a failed federation delivery.

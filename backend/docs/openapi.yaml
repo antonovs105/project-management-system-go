@@ -760,6 +760,21 @@ paths:
           $ref: "#/components/responses/Error"
         "403":
           $ref: "#/components/responses/Error"
+  /api/admin/federation/deliveries/summary:
+    get:
+      tags: [Federation Moderation]
+      operationId: getFederationDeliverySummary
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Global federation delivery health summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationDeliverySummary"
+        "403":
+          $ref: "#/components/responses/Error"
   /api/admin/federation/deliveries/{deliveryID}/retry:
     parameters:
       - $ref: "#/components/parameters/DeliveryID"
@@ -833,6 +848,8 @@ paths:
     $ref: "#/paths/~1api~1admin~1federation~1remote-actors"
   /api/v1/admin/federation/deliveries:
     $ref: "#/paths/~1api~1admin~1federation~1deliveries"
+  /api/v1/admin/federation/deliveries/summary:
+    $ref: "#/paths/~1api~1admin~1federation~1deliveries~1summary"
   /api/v1/admin/federation/deliveries/{deliveryID}/retry:
     $ref: "#/paths/~1api~1admin~1federation~1deliveries~1{deliveryID}~1retry"
   /.well-known/webfinger:
@@ -1578,6 +1595,58 @@ components:
               format: uri
             can_retry:
               type: boolean
+    FederationDeliverySummary:
+      type: object
+      required:
+        - total
+        - pending
+        - processing
+        - delivered
+        - failed
+        - dead
+        - retryable
+        - due_retry
+        - http_failures
+        - network_failures
+        - signing_failures
+        - safety_failures
+        - unknown_failures
+        - can_retry
+      properties:
+        total:
+          type: integer
+        pending:
+          type: integer
+        processing:
+          type: integer
+        delivered:
+          type: integer
+        failed:
+          type: integer
+        dead:
+          type: integer
+        retryable:
+          type: integer
+        due_retry:
+          type: integer
+        http_failures:
+          type: integer
+        network_failures:
+          type: integer
+        signing_failures:
+          type: integer
+        safety_failures:
+          type: integer
+        unknown_failures:
+          type: integer
+        oldest_pending_at:
+          type: string
+          format: date-time
+        oldest_dead_at:
+          type: string
+          format: date-time
+        can_retry:
+          type: boolean
     GraphResponse:
       type: object
       required: [nodes, links]

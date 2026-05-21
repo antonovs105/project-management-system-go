@@ -86,3 +86,23 @@ type FederationDeliveryListOptions struct {
 	FailureKind string
 	Limit       int
 }
+
+// FederationDeliverySummary aggregates global outbound federation delivery health.
+type FederationDeliverySummary struct {
+	Total           int        `db:"total" json:"total"`
+	Pending         int        `db:"pending" json:"pending"`
+	Processing      int        `db:"processing" json:"processing"`
+	Delivered       int        `db:"delivered" json:"delivered"`
+	Failed          int        `db:"failed" json:"failed"`
+	Dead            int        `db:"dead" json:"dead"`
+	Retryable       int        `db:"retryable" json:"retryable"`
+	DueRetry        int        `db:"due_retry" json:"due_retry"`
+	HTTPFailures    int        `db:"http_failures" json:"http_failures"`
+	NetworkFailures int        `db:"network_failures" json:"network_failures"`
+	SigningFailures int        `db:"signing_failures" json:"signing_failures"`
+	SafetyFailures  int        `db:"safety_failures" json:"safety_failures"`
+	UnknownFailures int        `db:"unknown_failures" json:"unknown_failures"`
+	OldestPendingAt *time.Time `db:"oldest_pending_at" json:"oldest_pending_at,omitempty"`
+	OldestDeadAt    *time.Time `db:"oldest_dead_at" json:"oldest_dead_at,omitempty"`
+	CanRetry        bool       `db:"can_retry" json:"can_retry"`
+}

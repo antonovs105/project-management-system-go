@@ -147,6 +147,46 @@ func TestHandlerListsFederationDeliveries(t *testing.T) {
 	assert.Equal(t, statusCode, *response[0].LastStatusCode)
 }
 
+func TestHandlerGetsFederationDeliverySummary(t *testing.T) {
+	repo := &fakeRepository{
+		role: RoleAdmin,
+		summary: &FederationDeliverySummary{
+			Total:        4,
+			Pending:      1,
+			Failed:       1,
+			Dead:         1,
+			Retryable:    2,
+			HTTPFailures: 1,
+			DueRetry:     1,
+			CanRetry:     true,
+		},
+	}
+	e := newModerationHandlerEcho(repo, "admin-1")
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/federation/deliveries/summary", nil)
+	rec := httptest.NewRecorder()
+
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.True(t, repo.summaryCalled)
+	assert.JSONEq(t, `{
+		"total": 4,
+		"pending": 1,
+		"processing": 0,
+		"delivered": 0,
+		"failed": 1,
+		"dead": 1,
+		"retryable": 2,
+		"due_retry": 1,
+		"http_failures": 1,
+		"network_failures": 0,
+		"signing_failures": 0,
+		"safety_failures": 0,
+		"unknown_failures": 0,
+		"can_retry": true
+	}`, rec.Body.String())
+}
+
 func TestHandlerRetriesFederationDelivery(t *testing.T) {
 	repo := &fakeRepository{role: RoleAdmin}
 	e := newModerationHandlerEcho(repo, "admin-1")

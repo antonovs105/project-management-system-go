@@ -224,6 +224,33 @@ func TestRESTDTOsUseStableSnakeCaseFields(t *testing.T) {
 			},
 			forbidKeys: []string{"activityAPID", "actorAPID", "targetInboxURL", "canRetry"},
 		},
+		{
+			name: "federation delivery summary",
+			value: moderation.FederationDeliverySummary{
+				Total:           5,
+				Pending:         1,
+				Processing:      1,
+				Delivered:       1,
+				Failed:          1,
+				Dead:            1,
+				Retryable:       2,
+				DueRetry:        1,
+				HTTPFailures:    1,
+				NetworkFailures: 1,
+				SigningFailures: 1,
+				SafetyFailures:  1,
+				UnknownFailures: 1,
+				OldestPendingAt: &now,
+				OldestDeadAt:    &nextAttempt,
+				CanRetry:        true,
+			},
+			wantKeys: []string{
+				"total", "pending", "processing", "delivered", "failed", "dead", "retryable", "due_retry",
+				"http_failures", "network_failures", "signing_failures", "safety_failures", "unknown_failures",
+				"oldest_pending_at", "oldest_dead_at", "can_retry",
+			},
+			forbidKeys: []string{"dueRetry", "httpFailures", "oldestDeadAt", "canRetry"},
+		},
 	}
 
 	for _, tc := range cases {
