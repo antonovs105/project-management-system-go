@@ -303,7 +303,7 @@ func newSchemaIntegrationDB(t *testing.T, ctx context.Context, source, schema st
 	require.NoError(t, err)
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	_, err = db.ExecContext(ctx, "SET search_path TO "+quotedSchema+", public")
+	_, err = db.ExecContext(ctx, "SET search_path TO "+quotedSchema)
 	require.NoError(t, err)
 	runSchemaMigrations(t, ctx, db)
 	t.Cleanup(func() {

@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
@@ -12,8 +13,37 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/project"
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
 	"github.com/antonovs105/project-management-system-go/internal/user"
+	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/require"
 )
+
+func TestSchemaMigrationsStayInsideIntegrationSchema(t *testing.T) {
+	source := os.Getenv("TEST_DB_SOURCE")
+	if source == "" {
+		t.Skip("set TEST_DB_SOURCE to run integration tests against a migrated PostgreSQL database")
+	}
+
+	ctx := context.Background()
+	admin, err := sqlx.Connect("postgres", source)
+	require.NoError(t, err)
+	defer admin.Close()
+
+	_, err = admin.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS public.labels (id integer PRIMARY KEY)`)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		cleanupDB, cleanupErr := sqlx.Connect("postgres", source)
+		if cleanupErr == nil {
+			_, _ = cleanupDB.ExecContext(context.Background(), `DROP TABLE IF EXISTS public.labels`)
+			_ = cleanupDB.Close()
+		}
+	})
+
+	db := newSchemaIntegrationDB(t, ctx, source, integrationTestSchemaName(t.Name()))
+
+	var exists bool
+	require.NoError(t, db.Get(&exists, `SELECT to_regclass('public.labels') IS NOT NULL`))
+	require.True(t, exists, "integration migrations must not drop tables from the public schema")
+}
 
 func TestBackendManagementSmokeFlow(t *testing.T) {
 	db := openIntegrationDB(t)
