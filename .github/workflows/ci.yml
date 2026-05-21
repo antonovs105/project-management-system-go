@@ -37,6 +37,10 @@ jobs:
         working-directory: backend
         run: go test -count=1 ./...
 
+      - name: Vet backend
+        working-directory: backend
+        run: go vet ./...
+
       - name: Test backend integration
         working-directory: backend
         env:

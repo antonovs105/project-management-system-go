@@ -858,6 +858,20 @@ func TestServiceReceiveAcceptsProjectForwardedActivity(t *testing.T) {
 	assert.Equal(t, "https://remote.example/projects/project-1", *repo.stored.TargetAPID)
 }
 
+func TestServiceReceiveRejectsBlockedSignatureActorDomainForForwardedActivity(t *testing.T) {
+	repo := &memoryRepository{targetActorID: "target-user"}
+	service := NewService(repo, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-project",
+		ActorAPID: "https://blocked.example/projects/project-1",
+	}}, WithBlockedDomains([]string{"blocked.example"}))
+	body := []byte(`{"id":"https://remote.example/activities/forwarded-1","type":"Create","actor":"https://remote.example/users/alice","object":"https://remote.example/tickets/1","target":"https://blocked.example/projects/project-1"}`)
+
+	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/users/bob", body)
+
+	require.ErrorIs(t, err, ErrBlockedDomain)
+	assert.Nil(t, repo.stored)
+}
+
 func TestServiceReceiveRejectsBlockedActorDomainBeforeVerification(t *testing.T) {
 	repo := &memoryRepository{targetActorID: "target-actor"}
 	verifier := &countingVerifier{verified: &httpsig.VerifiedRequest{

@@ -144,6 +144,13 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 		}
 	}
 	if activity.ActorAPID != signatureActorAPID {
+		blocked, err := s.isActorDomainBlocked(ctx, signatureActorAPID)
+		if err != nil {
+			return nil, err
+		}
+		if blocked {
+			return nil, ErrBlockedDomain
+		}
 		if !isProjectForwardedActivity(signatureActorAPID, activity) {
 			return nil, ErrForbiddenActor
 		}
