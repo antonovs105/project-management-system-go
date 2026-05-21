@@ -26,6 +26,7 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/adminaudit"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
 	authMiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
+	"github.com/antonovs105/project-management-system-go/internal/observability"
 	"github.com/antonovs105/project-management-system-go/internal/project"
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
 	"github.com/antonovs105/project-management-system-go/internal/user"
@@ -79,6 +80,7 @@ type appRole string
 type ApiServer struct {
 	db                *sqlx.DB
 	redisAddr         string
+	metrics           *observability.Metrics
 	userHandler       *user.Handler
 	projectHandler    *project.Handler
 	ticketHandler     *ticket.Handler
@@ -329,6 +331,7 @@ func main() {
 	server := &ApiServer{
 		db:                db,
 		redisAddr:         redisAddr,
+		metrics:           observability.NewMetrics(),
 		userHandler:       userHandler,
 		projectHandler:    projectHandler,
 		ticketHandler:     ticketHandler,
@@ -351,7 +354,7 @@ func main() {
 
 	e := echo.New()
 
-	registerGlobalMiddleware(e, os.Stdout)
+	registerGlobalMiddleware(e, os.Stdout, server.metrics)
 
 	corsOrigins := splitCSVEnv("CORS_ALLOWED_ORIGINS")
 	if len(corsOrigins) == 0 {
@@ -367,6 +370,7 @@ func main() {
 
 	e.GET("/health", server.healthCheck)
 	e.GET("/ready", server.readinessCheck)
+	e.GET("/metrics", server.metricsHandler)
 
 	server.userHandler.RegisterRoutes(e, newRateLimiter(authRateLimitPerSecond, authRateLimitBurst))
 	server.wfHandler.RegisterRoutes(e, newRateLimiter(discoveryRateLimitPerSecond, discoveryRateLimitBurst))
@@ -428,12 +432,52 @@ func runHTTPServer(e *echo.Echo, addr string, timeout time.Duration) error {
 	return nil
 }
 
-// registerGlobalMiddleware adds request logging, request IDs, and panic recovery.
-func registerGlobalMiddleware(e *echo.Echo, logOutput io.Writer) {
+// registerGlobalMiddleware adds request logging, request IDs, panic recovery, and optional metrics.
+func registerGlobalMiddleware(e *echo.Echo, logOutput io.Writer, metrics ...*observability.Metrics) {
 	e.Use(middleware.RequestID())
 	e.Use(middleware.LoggerWithConfig(requestLoggerConfig(logOutput)))
 	e.Use(middleware.Recover())
+	if len(metrics) > 0 && metrics[0] != nil {
+		e.Use(metricsMiddleware(metrics[0]))
+	}
 	e.Use(middleware.BodyLimit(defaultRequestBodyLimit))
+}
+
+// metricsMiddleware records completed HTTP requests in Prometheus collectors.
+func metricsMiddleware(metrics *observability.Metrics) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			startedAt := time.Now()
+			metrics.IncHTTPInFlight()
+			defer metrics.DecHTTPInFlight()
+
+			err := next(c)
+			route := c.Path()
+			if route == "" {
+				route = c.Request().URL.Path
+			}
+			metrics.ObserveHTTPRequest(c.Request().Method, route, responseStatus(c, err), time.Since(startedAt))
+			return err
+		}
+	}
+}
+
+// responseStatus returns the status that Echo will write for a handler result.
+func responseStatus(c echo.Context, err error) int {
+	if err != nil {
+		var httpErr *echo.HTTPError
+		if errors.As(err, &httpErr) {
+			return httpErr.Code
+		}
+		if c.Response().Status > 0 {
+			return c.Response().Status
+		}
+		return http.StatusInternalServerError
+	}
+	if c.Response().Status > 0 {
+		return c.Response().Status
+	}
+	return http.StatusOK
 }
 
 // requestLoggerConfig builds the structured JSON request logger configuration.
@@ -535,6 +579,14 @@ func (s *ApiServer) readinessCheck(c echo.Context) error {
 		"status": status,
 		"checks": checks,
 	})
+}
+
+// metricsHandler exposes the Prometheus scrape endpoint.
+func (s *ApiServer) metricsHandler(c echo.Context) error {
+	if s.metrics == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "metrics unavailable"})
+	}
+	return echo.WrapHandler(s.metrics.Handler())(c)
 }
 
 // getProfile returns the authenticated user's basic session profile.

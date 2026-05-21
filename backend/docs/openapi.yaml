@@ -47,6 +47,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReadinessResponse"
+  /metrics:
+    get:
+      tags: [Health]
+      operationId: getMetrics
+      responses:
+        "200":
+          description: Prometheus metrics for the backend process.
+          content:
+            text/plain:
+              schema:
+                type: string
+        "503":
+          $ref: "#/components/responses/Error"
   /register:
     post:
       tags: [Auth]

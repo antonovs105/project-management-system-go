@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/antonovs105/project-management-system-go/internal/observability"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/require"
 )
@@ -123,4 +124,29 @@ func TestRateLimiterRejectsBurstExcess(t *testing.T) {
 	rec = httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+}
+
+func TestMetricsEndpointReportsHTTPRequests(t *testing.T) {
+	metrics := observability.NewMetrics()
+	server := &ApiServer{metrics: metrics}
+	e := echo.New()
+	registerGlobalMiddleware(e, nil, metrics)
+	e.GET("/ping", func(c echo.Context) error {
+		return c.NoContent(http.StatusNoContent)
+	})
+	e.GET("/metrics", server.metricsHandler)
+
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+
+	req = httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Header().Get(echo.HeaderContentType), "text/plain")
+	require.Contains(t, rec.Body.String(), "go_goroutines")
+	require.Contains(t, rec.Body.String(), `pms_http_requests_total{method="GET",route="/ping",status="204"} 1`)
 }
