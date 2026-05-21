@@ -1,13 +1,26 @@
 import axios from "axios";
 import type {
+  AdminAuditAction,
+  AdminAuditEvent,
+  AdminAuditTargetType,
+  AdminUser,
   Comment,
+  DeliveryFailureKind,
+  DeliveryState,
+  DomainBlock,
+  FederationDelivery,
+  FederationDeliverySummary,
   GraphData,
   ID,
+  InstanceRole,
   Project,
+  ProjectDelivery,
+  ProjectDeliverySummary,
   ProjectInvite,
   ProjectPermission,
   ProjectRole,
   ProjectRoleKey,
+  RemoteActorInspection,
   Ticket,
   TicketPriority,
   TicketStatus,
@@ -80,6 +93,11 @@ export interface UpdateTicketPayload {
   assignee_id?: ID | null;
 }
 
+export interface ChangePasswordPayload {
+  current_password: string;
+  new_password: string;
+}
+
 export interface AddProjectMemberPayload {
   user_id: ID;
   role_id?: ID;
@@ -96,6 +114,45 @@ export interface UpdateProjectRolePayload {
   name?: string;
   description?: string;
   permissions?: ProjectPermission[];
+}
+
+export interface AddTicketLinkPayload {
+  target_id: ID;
+  link_type: string;
+}
+
+export interface AdminUsersFilters {
+  role?: InstanceRole | "";
+  q?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface AdminAuditFilters {
+  action?: AdminAuditAction | "";
+  actor_user_id?: ID;
+  target_type?: AdminAuditTargetType | "";
+  limit?: number;
+  offset?: number;
+}
+
+export interface DeliveryFilters {
+  state?: DeliveryState | "";
+  limit?: number;
+}
+
+export interface FederationDeliveryFilters extends DeliveryFilters {
+  failure_kind?: DeliveryFailureKind | "";
+}
+
+export interface BlockDomainPayload {
+  domain: string;
+  reason?: string;
+}
+
+export interface RemoteActorFilters {
+  fetch_error?: boolean | "";
+  limit?: number;
 }
 
 interface LoginResponse {
@@ -140,6 +197,31 @@ export const api = {
     return data;
   },
 
+  async changePassword(payload: ChangePasswordPayload): Promise<void> {
+    await http.patch(`${apiPrefix}/me/password`, payload);
+  },
+
+  async listAdminUsers(filters: AdminUsersFilters = {}): Promise<AdminUser[]> {
+    const { data } = await http.get<AdminUser[] | null>(`${apiPrefix}/admin/users`, {
+      params: { limit: 100, offset: 0, ...filters },
+    });
+    return asArray(data);
+  },
+
+  async updateAdminUserRole(userId: ID, instanceRole: InstanceRole): Promise<AdminUser> {
+    const { data } = await http.patch<AdminUser>(`${apiPrefix}/admin/users/${userId}/role`, {
+      instance_role: instanceRole,
+    });
+    return data;
+  },
+
+  async listAdminAuditEvents(filters: AdminAuditFilters = {}): Promise<AdminAuditEvent[]> {
+    const { data } = await http.get<AdminAuditEvent[] | null>(`${apiPrefix}/admin/audit-events`, {
+      params: { limit: 100, offset: 0, ...filters },
+    });
+    return asArray(data);
+  },
+
   async listProjects(): Promise<Project[]> {
     const { data } = await http.get<Project[] | null>(`${apiPrefix}/projects`, {
       params: { limit: 100, offset: 0 },
@@ -167,6 +249,25 @@ export const api = {
 
   async inviteProjectMember(projectId: ID, payload: AddProjectMemberPayload): Promise<ProjectInvite> {
     const { data } = await http.post<ProjectInvite>(`${apiPrefix}/projects/${projectId}/members`, payload);
+    return data;
+  },
+
+  async removeProjectMember(projectId: ID, userId: ID): Promise<void> {
+    await http.delete(`${apiPrefix}/projects/${projectId}/members/${userId}`);
+  },
+
+  async acceptInvite(inviteId: ID): Promise<ProjectInvite> {
+    const { data } = await http.post<ProjectInvite>(`${apiPrefix}/invites/${inviteId}/accept`);
+    return data;
+  },
+
+  async rejectInvite(inviteId: ID): Promise<ProjectInvite> {
+    const { data } = await http.post<ProjectInvite>(`${apiPrefix}/invites/${inviteId}/reject`);
+    return data;
+  },
+
+  async revokeInvite(inviteId: ID): Promise<ProjectInvite> {
+    const { data } = await http.post<ProjectInvite>(`${apiPrefix}/invites/${inviteId}/revoke`);
     return data;
   },
 
@@ -214,6 +315,14 @@ export const api = {
     await http.delete(`${apiPrefix}/tickets/${ticketId}`);
   },
 
+  async addTicketLink(ticketId: ID, payload: AddTicketLinkPayload): Promise<void> {
+    await http.post(`${apiPrefix}/tickets/${ticketId}/links`, payload);
+  },
+
+  async removeTicketLink(linkId: ID): Promise<void> {
+    await http.delete(`${apiPrefix}/links/${linkId}`);
+  },
+
   async listComments(ticketId: ID): Promise<Comment[]> {
     const { data } = await http.get<Comment[] | null>(`${apiPrefix}/tickets/${ticketId}/comments`, {
       params: { limit: 100, offset: 0 },
@@ -232,6 +341,61 @@ export const api = {
 
   async getProjectGraph(projectId: ID): Promise<GraphData> {
     const { data } = await http.get<GraphData>(`${apiPrefix}/projects/${projectId}/graph`);
+    return data;
+  },
+
+  async listProjectDeliveries(projectId: ID, filters: DeliveryFilters = {}): Promise<ProjectDelivery[]> {
+    const { data } = await http.get<ProjectDelivery[] | null>(`${apiPrefix}/projects/${projectId}/deliveries`, {
+      params: { limit: 100, ...filters },
+    });
+    return asArray(data);
+  },
+
+  async getProjectDeliverySummary(projectId: ID): Promise<ProjectDeliverySummary> {
+    const { data } = await http.get<ProjectDeliverySummary>(`${apiPrefix}/projects/${projectId}/deliveries/summary`);
+    return data;
+  },
+
+  async retryProjectDelivery(projectId: ID, deliveryId: ID): Promise<ProjectDelivery> {
+    const { data } = await http.post<ProjectDelivery>(`${apiPrefix}/projects/${projectId}/deliveries/${deliveryId}/retry`);
+    return data;
+  },
+
+  async listFederationDomainBlocks(): Promise<DomainBlock[]> {
+    const { data } = await http.get<DomainBlock[] | null>(`${apiPrefix}/admin/federation/domain-blocks`);
+    return asArray(data);
+  },
+
+  async blockFederationDomain(payload: BlockDomainPayload): Promise<DomainBlock> {
+    const { data } = await http.post<DomainBlock>(`${apiPrefix}/admin/federation/domain-blocks`, payload);
+    return data;
+  },
+
+  async unblockFederationDomain(domain: string): Promise<void> {
+    await http.delete(`${apiPrefix}/admin/federation/domain-blocks/${encodeURIComponent(domain)}`);
+  },
+
+  async listFederationRemoteActors(filters: RemoteActorFilters = {}): Promise<RemoteActorInspection[]> {
+    const { data } = await http.get<RemoteActorInspection[] | null>(`${apiPrefix}/admin/federation/remote-actors`, {
+      params: { limit: 100, ...filters },
+    });
+    return asArray(data);
+  },
+
+  async listFederationDeliveries(filters: FederationDeliveryFilters = {}): Promise<FederationDelivery[]> {
+    const { data } = await http.get<FederationDelivery[] | null>(`${apiPrefix}/admin/federation/deliveries`, {
+      params: { limit: 100, ...filters },
+    });
+    return asArray(data);
+  },
+
+  async getFederationDeliverySummary(): Promise<FederationDeliverySummary> {
+    const { data } = await http.get<FederationDeliverySummary>(`${apiPrefix}/admin/federation/deliveries/summary`);
+    return data;
+  },
+
+  async retryFederationDelivery(deliveryId: ID): Promise<FederationDelivery> {
+    const { data } = await http.post<FederationDelivery>(`${apiPrefix}/admin/federation/deliveries/${deliveryId}/retry`);
     return data;
   },
 };

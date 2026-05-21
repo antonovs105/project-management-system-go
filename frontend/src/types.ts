@@ -18,6 +18,14 @@ export type ProjectPermission =
 export type TicketStatus = "open" | "in_progress" | "review" | "done";
 export type TicketPriority = "low" | "medium" | "high" | "urgent";
 export type TicketType = "epic" | "task" | "subtask";
+export type DeliveryState = "pending" | "processing" | "delivered" | "failed" | "dead";
+export type DeliveryFailureKind = "http" | "network" | "signing" | "safety" | "unknown";
+export type AdminAuditAction =
+  | "user.instance_role_updated"
+  | "federation.domain_blocked"
+  | "federation.domain_unblocked"
+  | "federation.delivery_retried";
+export type AdminAuditTargetType = "user" | "federation_domain" | "federation_delivery";
 
 export interface SessionUser {
   userId: ID;
@@ -119,6 +127,94 @@ export interface AdminUser {
   instance_role: InstanceRole;
   handle: string;
   name: string;
+  summary: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface AdminAuditEvent {
+  id: ID;
+  actor_user_id?: ID;
+  action: AdminAuditAction;
+  target_type: AdminAuditTargetType;
+  target_id: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ProjectDelivery {
+  id: ID;
+  activity_ap_id: string;
+  activity_type: string;
+  object_ap_id?: string;
+  target_ap_id?: string;
+  target_inbox_url: string;
+  state: DeliveryState;
+  attempts: number;
+  max_attempts: number;
+  next_attempt_at?: string;
+  last_error?: string;
+  last_attempt_at?: string;
+  last_failure_kind?: DeliveryFailureKind;
+  last_status_code?: number;
+  delivered_at?: string;
+  can_retry: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectDeliverySummary {
+  total: number;
+  pending: number;
+  processing: number;
+  delivered: number;
+  failed: number;
+  dead: number;
+  retryable: number;
+  can_retry: boolean;
+}
+
+export interface DomainBlock {
+  id: ID;
+  domain: string;
+  reason: string;
+  created_by?: ID;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RemoteActorInspection {
+  id: ID;
+  ap_id: string;
+  type: string;
+  preferred_username: string;
+  handle: string;
+  name: string;
+  summary: string;
+  inbox_url: string;
+  outbox_url: string;
+  followers_url?: string;
+  following_url?: string;
+  last_fetched_at?: string;
+  fetch_error?: string;
+  fetch_error_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FederationDelivery extends ProjectDelivery {
+  actor_ap_id: string;
+  project_id?: ID;
+  project_ap_id?: string;
+}
+
+export interface FederationDeliverySummary extends ProjectDeliverySummary {
+  due_retry: number;
+  http_failures: number;
+  network_failures: number;
+  signing_failures: number;
+  safety_failures: number;
+  unknown_failures: number;
+  oldest_pending_at?: string;
+  oldest_dead_at?: string;
 }

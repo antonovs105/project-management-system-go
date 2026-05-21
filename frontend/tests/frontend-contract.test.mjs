@@ -1,0 +1,65 @@
+import assert from "node:assert/strict";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+
+function read(path) {
+  return readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+}
+
+function sourceFiles(dir) {
+  return readdirSync(dir).flatMap((entry) => {
+    const path = join(dir, entry);
+    if (statSync(path).isDirectory()) {
+      return sourceFiles(path);
+    }
+    return path.endsWith(".ts") || path.endsWith(".tsx") ? [path] : [];
+  });
+}
+
+test("frontend does not expose owner bootstrap setup", () => {
+  const root = fileURLToPath(new URL("../src", import.meta.url));
+  const combined = sourceFiles(root).map((path) => readFileSync(path, "utf8")).join("\n");
+
+  assert.equal(combined.includes("/setup/admin"), false);
+  assert.equal(combined.toLowerCase().includes("owner setup"), false);
+});
+
+test("project permission labels cover every backend permission type", () => {
+  const types = read("src/types.ts");
+  const constants = read("src/lib/constants.ts");
+  const match = /export type ProjectPermission =([\s\S]*?);/.exec(types);
+
+  assert.ok(match, "ProjectPermission union must exist");
+  const permissions = [...match[1].matchAll(/"([^"]+)"/g)].map((item) => item[1]);
+
+  assert.ok(permissions.length > 0);
+  for (const permission of permissions) {
+    assert.ok(constants.includes(`id: "${permission}"`), `${permission} is missing from projectPermissionGroups`);
+  }
+});
+
+test("api client covers current backend feature routes", () => {
+  const api = read("src/lib/api.ts");
+  const requiredFragments = [
+    "/me/password",
+    "/admin/users",
+    "/admin/audit-events",
+    "/members/${userId}",
+    "/invites/${inviteId}/accept",
+    "/invites/${inviteId}/reject",
+    "/invites/${inviteId}/revoke",
+    "/tickets/${ticketId}/links",
+    "/links/${linkId}",
+    "/deliveries/summary",
+    "/deliveries/${deliveryId}/retry",
+    "/admin/federation/domain-blocks",
+    "/admin/federation/remote-actors",
+    "/admin/federation/deliveries",
+  ];
+
+  for (const fragment of requiredFragments) {
+    assert.ok(api.includes(fragment), `${fragment} is not wired in api.ts`);
+  }
+});
