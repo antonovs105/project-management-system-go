@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -101,6 +103,7 @@ type ApiServer struct {
 	db                *sqlx.DB
 	redisAddr         string
 	metrics           *observability.Metrics
+	metricsToken      string
 	userHandler       *user.Handler
 	projectHandler    *project.Handler
 	ticketHandler     *ticket.Handler
@@ -180,7 +183,7 @@ func (r appRole) runsWorker() bool {
 }
 
 // validateRuntimeConfig rejects unsafe deployment configuration before the server starts.
-func validateRuntimeConfig(production bool, jwtSecret, publicBaseURL, localDomain, adminBootstrapToken string) error {
+func validateRuntimeConfig(production bool, jwtSecret, publicBaseURL, localDomain, adminBootstrapToken, metricsToken string) error {
 	parsedBaseURL, err := url.Parse(strings.TrimSpace(publicBaseURL))
 	if err != nil || parsedBaseURL.Scheme == "" || parsedBaseURL.Host == "" {
 		return fmt.Errorf("PUBLIC_BASE_URL must be an absolute HTTP URL")
@@ -206,6 +209,9 @@ func validateRuntimeConfig(production bool, jwtSecret, publicBaseURL, localDomai
 	}
 	if adminBootstrapToken != "" && len(adminBootstrapToken) < 32 {
 		return fmt.Errorf("ADMIN_BOOTSTRAP_TOKEN must be at least 32 characters in production")
+	}
+	if len(metricsToken) < 32 {
+		return fmt.Errorf("METRICS_TOKEN must be at least 32 characters in production")
 	}
 	return nil
 }
@@ -249,14 +255,15 @@ func main() {
 	}
 	redisAddr := os.Getenv("REDIS_ADDR")
 	metricsAddr := strings.TrimSpace(os.Getenv("METRICS_ADDR"))
+	metricsToken := strings.TrimSpace(os.Getenv("METRICS_TOKEN"))
 	adminBootstrapToken := strings.TrimSpace(os.Getenv("ADMIN_BOOTSTRAP_TOKEN"))
-	if err := validateRuntimeConfig(production, jwtSecret, publicBaseURL, localDomain, adminBootstrapToken); err != nil {
+	if err := validateRuntimeConfig(production, jwtSecret, publicBaseURL, localDomain, adminBootstrapToken, metricsToken); err != nil {
 		log.Fatal(err)
 	}
 	log.Printf("backend_runtime_start app_env=%s role=%s public_base_url=%s local_domain=%s redis_configured=%t metrics_addr=%s", appEnv, role, publicBaseURL, localDomain, redisAddr != "", metricsAddr)
 	apConfig := activitypub.NewConfig(publicBaseURL, localDomain)
 	metrics := observability.NewMetrics()
-	metricsServer := startMetricsServer(metrics, metricsAddr)
+	metricsServer := startMetricsServer(metrics, metricsAddr, metricsToken)
 	defer shutdownMetricsServer(metricsServer, gracefulShutdownTimeout)
 
 	db, err := sqlx.Connect("postgres", dbSource)
@@ -357,6 +364,7 @@ func main() {
 		db:                db,
 		redisAddr:         redisAddr,
 		metrics:           metrics,
+		metricsToken:      metricsToken,
 		userHandler:       userHandler,
 		projectHandler:    projectHandler,
 		ticketHandler:     ticketHandler,
@@ -458,12 +466,12 @@ func runHTTPServer(e *echo.Echo, addr string, timeout time.Duration) error {
 }
 
 // startMetricsServer starts an optional standalone Prometheus endpoint.
-func startMetricsServer(metrics *observability.Metrics, addr string) *http.Server {
+func startMetricsServer(metrics *observability.Metrics, addr string, token string) *http.Server {
 	if strings.TrimSpace(addr) == "" {
 		return nil
 	}
 	mux := http.NewServeMux()
-	mux.Handle("/metrics", metrics.Handler())
+	mux.Handle("/metrics", metricsHTTPHandler(metrics, token))
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           mux,
@@ -488,6 +496,34 @@ func shutdownMetricsServer(server *http.Server, timeout time.Duration) {
 	if err := server.Shutdown(ctx); err != nil {
 		log.Printf("Prometheus metrics server shutdown failed: %v", err)
 	}
+}
+
+// metricsHTTPHandler wraps the Prometheus handler with optional bearer-token auth.
+func metricsHTTPHandler(metrics *observability.Metrics, token string) http.Handler {
+	handler := metrics.Handler()
+	if strings.TrimSpace(token) == "" {
+		return handler
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !validBearerToken(token, r.Header.Get(echo.HeaderAuthorization)) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="metrics"`)
+			http.Error(w, "metrics authorization required", http.StatusUnauthorized)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	})
+}
+
+// validBearerToken compares a metrics bearer token without leaking timing information.
+func validBearerToken(expected, header string) bool {
+	const prefix = "Bearer "
+	if !strings.HasPrefix(header, prefix) {
+		return false
+	}
+	actual := strings.TrimSpace(strings.TrimPrefix(header, prefix))
+	expectedHash := sha256.Sum256([]byte(expected))
+	actualHash := sha256.Sum256([]byte(actual))
+	return subtle.ConstantTimeCompare(expectedHash[:], actualHash[:]) == 1
 }
 
 // registerGlobalMiddleware adds request logging, request IDs, panic recovery, and optional metrics.
@@ -679,7 +715,7 @@ func (s *ApiServer) metricsHandler(c echo.Context) error {
 	if s.metrics == nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "metrics unavailable"})
 	}
-	return echo.WrapHandler(s.metrics.Handler())(c)
+	return echo.WrapHandler(metricsHTTPHandler(s.metrics, s.metricsToken))(c)
 }
 
 // getProfile returns the authenticated user's basic session profile.

@@ -58,6 +58,8 @@ paths:
             text/plain:
               schema:
                 type: string
+        "401":
+          $ref: "#/components/responses/Error"
         "503":
           $ref: "#/components/responses/Error"
   /register:
