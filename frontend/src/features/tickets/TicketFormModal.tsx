@@ -34,6 +34,7 @@ export function TicketFormModal({
   const [type, setType] = useState<TicketType>("task");
   const [priority, setPriority] = useState<TicketPriority>("medium");
   const [parentId, setParentId] = useState("");
+  const [assigneeId, setAssigneeId] = useState("");
 
   const parents = useMemo(() => parentCandidates(type, tickets), [tickets, type]);
 
@@ -44,6 +45,7 @@ export function TicketFormModal({
       type: TicketType;
       priority: TicketPriority;
       parent_id: ID | null;
+      assignee_id: ID | null;
     }) => api.createTicket(projectId, payload),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.tickets(projectId) });
@@ -53,6 +55,7 @@ export function TicketFormModal({
       setType("task");
       setPriority("medium");
       setParentId("");
+      setAssigneeId("");
       onClose();
     },
   });
@@ -65,6 +68,7 @@ export function TicketFormModal({
       type,
       priority,
       parent_id: parentId || null,
+      assignee_id: assigneeId.trim() || null,
     });
   }
 
@@ -119,6 +123,7 @@ export function TicketFormModal({
             ))}
           </SelectField>
         ) : null}
+        <TextField label="Assignee ID" value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)} />
         <TextAreaField
           label="Description"
           value={description}

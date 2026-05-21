@@ -39,6 +39,7 @@ function TicketEditor({
   const [priority, setPriority] = useState<TicketPriority>(ticket.priority);
   const [type, setType] = useState<TicketType>(ticket.type);
   const [parentId, setParentId] = useState(ticket.parent_id || "");
+  const [assigneeId, setAssigneeId] = useState(ticket.assignee_id || "");
 
   const parents = useMemo(() => parentCandidates(type, ticket.id, tickets), [ticket.id, tickets, type]);
 
@@ -75,6 +76,7 @@ function TicketEditor({
       priority,
       type,
       parent_id: type === "epic" ? null : parentId || null,
+      assignee_id: assigneeId.trim() || null,
     });
   }
 
@@ -120,6 +122,7 @@ function TicketEditor({
           ))}
         </SelectField>
       ) : null}
+      <TextField label="Assignee ID" value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)} />
       <TextAreaField label="Description" value={description} onChange={(event) => setDescription(event.target.value)} />
       <div className="flex justify-between gap-2">
         <Button
