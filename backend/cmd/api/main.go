@@ -37,6 +37,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/time/rate"
 )
 
 const (
@@ -44,6 +45,22 @@ const (
 	defaultHTTPAddr = ":8080"
 	// gracefulShutdownTimeout bounds HTTP and worker shutdown on container stop.
 	gracefulShutdownTimeout = 10 * time.Second
+	// defaultRequestBodyLimit is the maximum HTTP body size accepted by generic routes.
+	defaultRequestBodyLimit = "2M"
+	// defaultRequestBodyLimitBytes mirrors defaultRequestBodyLimit for tests and comments.
+	defaultRequestBodyLimitBytes = 2 << 20
+	// authRateLimitPerSecond limits public credential and registration attempts per IP.
+	authRateLimitPerSecond = 2
+	// authRateLimitBurst allows small legitimate login or setup bursts.
+	authRateLimitBurst = 10
+	// discoveryRateLimitPerSecond limits WebFinger discovery requests per IP.
+	discoveryRateLimitPerSecond = 10
+	// discoveryRateLimitBurst allows normal ActivityPub discovery fan-out bursts.
+	discoveryRateLimitBurst = 50
+	// inboxRateLimitPerSecond limits inbound federation POSTs per IP.
+	inboxRateLimitPerSecond = 20
+	// inboxRateLimitBurst allows remote servers to deliver short federation bursts.
+	inboxRateLimitBurst = 100
 )
 
 const (
@@ -350,13 +367,13 @@ func main() {
 	e.GET("/health", server.healthCheck)
 	e.GET("/ready", server.readinessCheck)
 
-	server.userHandler.RegisterRoutes(e)
-	server.wfHandler.RegisterRoutes(e)
+	server.userHandler.RegisterRoutes(e, newRateLimiter(authRateLimitPerSecond, authRateLimitBurst))
+	server.wfHandler.RegisterRoutes(e, newRateLimiter(discoveryRateLimitPerSecond, discoveryRateLimitBurst))
 
 	// Local ActivityPub JSON-LD read routes and signed remote inbox POST foundation.
 	server.apHandler.RegisterRoutes(e)
 	server.c2sHandler.RegisterRoutes(e, authMiddleware.JWTMiddleware([]byte(jwtSecret), userService))
-	server.inboxHandler.RegisterRoutes(e)
+	server.inboxHandler.RegisterRoutes(e, newRateLimiter(inboxRateLimitPerSecond, inboxRateLimitBurst))
 
 	api := e.Group("/api")
 
@@ -426,6 +443,7 @@ func registerGlobalMiddleware(e *echo.Echo, logOutput io.Writer) {
 	e.Use(middleware.RequestID())
 	e.Use(middleware.LoggerWithConfig(requestLoggerConfig(logOutput)))
 	e.Use(middleware.Recover())
+	e.Use(middleware.BodyLimit(defaultRequestBodyLimit))
 }
 
 // requestLoggerConfig builds the structured JSON request logger configuration.
@@ -440,6 +458,23 @@ func requestLoggerConfig(output io.Writer) middleware.LoggerConfig {
 			`"bytes_in":${bytes_in},"bytes_out":${bytes_out},"error":"${error}"}` + "\n",
 		Output: output,
 	}
+}
+
+// newRateLimiter returns an in-memory per-IP rate limiter for one public surface.
+func newRateLimiter(requestsPerSecond rate.Limit, burst int) echo.MiddlewareFunc {
+	return middleware.RateLimiterWithConfig(middleware.RateLimiterConfig{
+		Store: middleware.NewRateLimiterMemoryStoreWithConfig(middleware.RateLimiterMemoryStoreConfig{
+			Rate:      requestsPerSecond,
+			Burst:     burst,
+			ExpiresIn: 5 * time.Minute,
+		}),
+		IdentifierExtractor: rateLimitIdentifier,
+	})
+}
+
+// rateLimitIdentifier groups unauthenticated requests by Echo's resolved client IP.
+func rateLimitIdentifier(c echo.Context) (string, error) {
+	return c.RealIP(), nil
 }
 
 // healthCheck reports whether the API process can still reach PostgreSQL.

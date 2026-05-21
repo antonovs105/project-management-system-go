@@ -25,8 +25,8 @@ func NewHandler(service *Service) *Handler {
 }
 
 // RegisterRoutes registers the WebFinger well-known route.
-func (h *Handler) RegisterRoutes(e *echo.Echo) {
-	e.GET("/.well-known/webfinger", h.Resolve)
+func (h *Handler) RegisterRoutes(e *echo.Echo, middleware ...echo.MiddlewareFunc) {
+	e.GET("/.well-known/webfinger", h.Resolve, middleware...)
 }
 
 // Resolve handles RFC 7033 resource lookup requests.

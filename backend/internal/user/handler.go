@@ -34,10 +34,10 @@ func NewHandler(service *Service, adminBootstrapToken ...string) *Handler {
 }
 
 // RegisterRoutes registers public user routes on the root Echo router.
-func (h *Handler) RegisterRoutes(e *echo.Echo) {
-	e.POST("/setup/admin", h.BootstrapAdmin)
-	e.POST("/register", h.Register)
-	e.POST("/login", h.Login)
+func (h *Handler) RegisterRoutes(e *echo.Echo, middleware ...echo.MiddlewareFunc) {
+	e.POST("/setup/admin", h.BootstrapAdmin, middleware...)
+	e.POST("/register", h.Register, middleware...)
+	e.POST("/login", h.Login, middleware...)
 }
 
 // RegisterAdminRoutes registers authenticated admin-only user routes.

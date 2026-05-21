@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -89,4 +90,37 @@ func TestGlobalMiddlewareAddsRequestIDAndStructuredLog(t *testing.T) {
 	require.Equal(t, "/ping?check=true", entry["uri"])
 	require.Equal(t, "/ping", entry["route"])
 	require.Equal(t, float64(http.StatusNoContent), entry["status"])
+}
+
+func TestGlobalMiddlewareRejectsOversizedBody(t *testing.T) {
+	e := echo.New()
+	registerGlobalMiddleware(e, nil)
+	e.POST("/upload", func(c echo.Context) error {
+		return c.NoContent(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader("x"))
+	req.ContentLength = defaultRequestBodyLimitBytes + 1
+	rec := httptest.NewRecorder()
+
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+}
+
+func TestRateLimiterRejectsBurstExcess(t *testing.T) {
+	e := echo.New()
+	e.GET("/limited", func(c echo.Context) error {
+		return c.NoContent(http.StatusNoContent)
+	}, newRateLimiter(1, 1))
+
+	req := httptest.NewRequest(http.MethodGet, "/limited", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+
+	req = httptest.NewRequest(http.MethodGet, "/limited", nil)
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
 }

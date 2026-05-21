@@ -21,9 +21,9 @@ func NewHandler(service *Service, cfg activitypub.Config) *Handler {
 }
 
 // RegisterRoutes registers user and project inbox POST routes.
-func (h *Handler) RegisterRoutes(e *echo.Echo) {
-	e.POST("/users/:username/inbox", h.ReceiveUserInbox)
-	e.POST("/projects/:id/inbox", h.ReceiveProjectInbox)
+func (h *Handler) RegisterRoutes(e *echo.Echo, middleware ...echo.MiddlewareFunc) {
+	e.POST("/users/:username/inbox", h.ReceiveUserInbox, middleware...)
+	e.POST("/projects/:id/inbox", h.ReceiveProjectInbox, middleware...)
 }
 
 // ReceiveUserInbox accepts an inbound activity addressed to a local user actor.
