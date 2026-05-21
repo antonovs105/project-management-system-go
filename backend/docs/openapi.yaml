@@ -134,6 +134,21 @@ paths:
                     format: uuid
         "401":
           $ref: "#/components/responses/Error"
+  /api/me/password:
+    patch:
+      tags: [Auth]
+      operationId: changeCurrentUserPassword
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: "#/components/requestBodies/ChangePassword"
+      responses:
+        "204":
+          description: Password changed.
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
   /api/admin/users:
     get:
       tags: [Auth]
@@ -1132,6 +1147,20 @@ components:
                 type: string
                 format: email
               password:
+                type: string
+                format: password
+    ChangePassword:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [current_password, new_password]
+            properties:
+              current_password:
+                type: string
+                format: password
+              new_password:
                 type: string
                 format: password
     UpdateProject:

@@ -185,6 +185,65 @@ func TestService_AdminUserManagement(t *testing.T) {
 	})
 }
 
+func TestService_ChangePassword(t *testing.T) {
+	ctx := context.Background()
+	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+	userID := "11111111-1111-4111-8111-111111111111"
+	oldPassword := "password123"
+	newPassword := "newpassword123"
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(oldPassword), bcrypt.DefaultCost)
+	assert.NoError(t, err)
+
+	t.Run("Success", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, []byte("secret"), cfg)
+		mockRepo.On("GetUserByID", ctx, userID).Return(&User{ID: userID, PasswordHash: string(hashedPassword)}, nil).Once()
+		mockRepo.On("UpdatePasswordHash", ctx, userID, mock.MatchedBy(func(hash string) bool {
+			return bcrypt.CompareHashAndPassword([]byte(hash), []byte(newPassword)) == nil
+		})).Return(nil).Once()
+
+		err := service.ChangePassword(ctx, userID, oldPassword, newPassword)
+
+		assert.NoError(t, err)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("RejectsWrongCurrentPassword", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, []byte("secret"), cfg)
+		mockRepo.On("GetUserByID", ctx, userID).Return(&User{ID: userID, PasswordHash: string(hashedPassword)}, nil).Once()
+
+		err := service.ChangePassword(ctx, userID, "wrongpassword", newPassword)
+
+		assert.ErrorIs(t, err, ErrInvalidCredentials)
+		mockRepo.AssertNotCalled(t, "UpdatePasswordHash")
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("RejectsSamePassword", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, []byte("secret"), cfg)
+		mockRepo.On("GetUserByID", ctx, userID).Return(&User{ID: userID, PasswordHash: string(hashedPassword)}, nil).Once()
+
+		err := service.ChangePassword(ctx, userID, oldPassword, oldPassword)
+
+		assert.ErrorIs(t, err, ErrInvalidUserInput)
+		mockRepo.AssertNotCalled(t, "UpdatePasswordHash")
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("RejectsWeakNewPassword", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, []byte("secret"), cfg)
+
+		err := service.ChangePassword(ctx, userID, oldPassword, "short")
+
+		assert.ErrorIs(t, err, ErrInvalidUserInput)
+		mockRepo.AssertNotCalled(t, "GetUserByID")
+		mockRepo.AssertNotCalled(t, "UpdatePasswordHash")
+	})
+}
+
 func TestService_Login(t *testing.T) {
 	mockRepo := new(MockRepository)
 	service := NewService(mockRepo, []byte("secret"), activitypub.NewConfig("http://localhost:8080", "localhost:8080"))

@@ -16,6 +16,8 @@ type Repository interface {
 	CreateUser(ctx context.Context, user *User) error
 	CreateAdminIfNoAdmin(ctx context.Context, user *User) error
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
+	GetUserByID(ctx context.Context, userID string) (*User, error)
+	UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error
 	UserRole(ctx context.Context, userID string) (string, error)
 	ListUsers(ctx context.Context, options ListUsersOptions) ([]User, error)
 	UpdateUserRole(ctx context.Context, adminUserID, userID, role string) (*User, error)
@@ -176,6 +178,36 @@ func (r *PgRepository) GetUserByEmail(ctx context.Context, email string) (*User,
 	return &user, nil
 }
 
+func (r *PgRepository) GetUserByID(ctx context.Context, userID string) (*User, error) {
+	var user User
+	err := r.db.GetContext(ctx, &user, userSelectWithPasswordQuery()+`
+		WHERE u.id = $1
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *PgRepository) UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE users
+		SET password_hash = $2
+		WHERE id = $1
+	`, userID, passwordHash)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
 func (r *PgRepository) UserRole(ctx context.Context, userID string) (string, error) {
 	var role string
 	err := r.db.GetContext(ctx, &role, `SELECT role FROM users WHERE id = $1`, userID)
@@ -274,6 +306,25 @@ func userSelectQuery() string {
 			a.ap_id,
 			u.username,
 			u.email,
+			u.role,
+			a.handle,
+			a.name,
+			a.summary,
+			u.created_at,
+			u.updated_at
+		FROM users u
+		JOIN actors a ON a.id = u.id
+	`
+}
+
+func userSelectWithPasswordQuery() string {
+	return `
+		SELECT
+			u.id::text,
+			a.ap_id,
+			u.username,
+			u.email,
+			u.password_hash,
 			u.role,
 			a.handle,
 			a.name,

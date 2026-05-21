@@ -21,6 +21,7 @@ var ErrAdminAlreadyExists = errors.New("admin user already exists")
 var ErrAdminRequired = errors.New("admin role required")
 var ErrUserNotFound = errors.New("user not found")
 var ErrCannotDemoteLastAdmin = errors.New("cannot demote the last admin")
+var ErrInvalidCredentials = errors.New("invalid credentials")
 
 const (
 	RoleAdmin  = "admin"
@@ -110,6 +111,43 @@ func (s *Service) UpdateUserRole(ctx context.Context, adminUserID, targetUserID,
 	return s.repo.UpdateUserRole(ctx, adminUserID, targetUserID, role)
 }
 
+func (s *Service) ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error {
+	userID = strings.TrimSpace(userID)
+	if _, err := uuid.Parse(userID); err != nil {
+		return ErrInvalidCredentials
+	}
+	if strings.TrimSpace(currentPassword) == "" {
+		return invalidUserInput("current password is required")
+	}
+	if err := validatePassword(newPassword); err != nil {
+		return err
+	}
+
+	existingUser, err := s.repo.GetUserByID(ctx, userID)
+	if err != nil {
+		log.Printf("[DEBUG] Change password failed for user '%s'. Reason: user not found or DB error. Error: %v", userID, err)
+		return ErrInvalidCredentials
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(existingUser.PasswordHash), []byte(currentPassword)); err != nil {
+		return ErrInvalidCredentials
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(existingUser.PasswordHash), []byte(newPassword)); err == nil {
+		return invalidUserInput("new password must be different")
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.UpdatePasswordHash(ctx, userID, string(hashedPassword)); err != nil {
+		if errors.Is(err, ErrUserNotFound) {
+			return ErrInvalidCredentials
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *Service) newLocalUser(username, email, password, role string) (*User, error) {
 	username = strings.TrimSpace(username)
 	email = strings.TrimSpace(email)
@@ -160,6 +198,10 @@ func validateRegistrationInput(username, email, password string) error {
 	if _, err := mail.ParseAddress(email); err != nil {
 		return invalidUserInput("valid email is required")
 	}
+	return validatePassword(password)
+}
+
+func validatePassword(password string) error {
 	if len(password) < 8 {
 		return invalidUserInput("password must be at least 8 characters")
 	}
@@ -211,17 +253,19 @@ func invalidUserInput(message string) error {
 
 // Login checks users and returns JWT
 func (s *Service) Login(ctx context.Context, email, password string) (string, error) {
+	email = strings.TrimSpace(email)
+
 	// searching user in DB
 	user, err := s.repo.GetUserByEmail(ctx, email)
 	if err != nil {
 		log.Printf("[DEBUG] Login failed for email '%s'. Reason: user not found or DB error. Error: %v", email, err)
-		return "", errors.New("invalid credentials")
+		return "", ErrInvalidCredentials
 	}
 
 	// comparing hashes
 	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password))
 	if err != nil {
-		return "", errors.New("invalid credentials")
+		return "", ErrInvalidCredentials
 	}
 
 	// generating JWT

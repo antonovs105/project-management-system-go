@@ -311,6 +311,7 @@ func main() {
 
 	// routes that require auth
 	api.GET("/me", server.getProfile) // for test
+	server.userHandler.RegisterAccountRoutes(api)
 	server.userHandler.RegisterAdminRoutes(api)
 	server.projectHandler.RegisterRoutes(api)
 	server.ticketHandler.RegisterRoutes(api)

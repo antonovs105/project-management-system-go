@@ -2,6 +2,7 @@ package user
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestHandler_BootstrapAdmin(t *testing.T) {
@@ -113,6 +115,55 @@ func TestHandler_AdminUserRoutes(t *testing.T) {
 	})
 }
 
+func TestHandler_ChangePassword(t *testing.T) {
+	userID := "11111111-1111-4111-8111-111111111111"
+	oldPassword := "password123"
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(oldPassword), bcrypt.DefaultCost)
+	require.NoError(t, err)
+
+	t.Run("ChangesPassword", func(t *testing.T) {
+		repo := new(MockRepository)
+		repo.On("GetUserByID", mock.Anything, userID).Return(&User{ID: userID, PasswordHash: string(hashedPassword)}, nil).Once()
+		repo.On("UpdatePasswordHash", mock.Anything, userID, mock.AnythingOfType("string")).Return(nil).Once()
+		e := newAccountEcho(repo, userID)
+
+		rec := doAdminUserRequest(e, http.MethodPatch, "/api/me/password", `{"current_password":"password123","new_password":"newpassword123"}`)
+
+		require.Equal(t, http.StatusNoContent, rec.Code)
+		repo.AssertExpectations(t)
+	})
+
+	t.Run("MapsInvalidCurrentPassword", func(t *testing.T) {
+		repo := new(MockRepository)
+		repo.On("GetUserByID", mock.Anything, userID).Return(&User{ID: userID, PasswordHash: string(hashedPassword)}, nil).Once()
+		e := newAccountEcho(repo, userID)
+
+		rec := doAdminUserRequest(e, http.MethodPatch, "/api/me/password", `{"current_password":"wrongpassword","new_password":"newpassword123"}`)
+
+		require.Equal(t, http.StatusUnauthorized, rec.Code)
+		repo.AssertExpectations(t)
+	})
+
+	t.Run("RejectsWeakPassword", func(t *testing.T) {
+		e := newAccountEcho(new(MockRepository), userID)
+
+		rec := doAdminUserRequest(e, http.MethodPatch, "/api/me/password", `{"current_password":"password123","new_password":"short"}`)
+
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("HidesRepositoryError", func(t *testing.T) {
+		repo := new(MockRepository)
+		repo.On("GetUserByID", mock.Anything, userID).Return(nil, errors.New("db down")).Once()
+		e := newAccountEcho(repo, userID)
+
+		rec := doAdminUserRequest(e, http.MethodPatch, "/api/me/password", `{"current_password":"password123","new_password":"newpassword123"}`)
+
+		require.Equal(t, http.StatusUnauthorized, rec.Code)
+		repo.AssertExpectations(t)
+	})
+}
+
 func newBootstrapEcho(repo Repository, token string) *echo.Echo {
 	e := echo.New()
 	service := NewService(repo, []byte("secret"), activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
@@ -131,6 +182,20 @@ func newAdminUserEcho(repo Repository, userID string) *echo.Echo {
 	})
 	service := NewService(repo, []byte("secret"), activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
 	NewHandler(service).RegisterAdminRoutes(api)
+	return e
+}
+
+func newAccountEcho(repo Repository, userID string) *echo.Echo {
+	e := echo.New()
+	api := e.Group("/api")
+	api.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Set("userID", userID)
+			return next(c)
+		}
+	})
+	service := NewService(repo, []byte("secret"), activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+	NewHandler(service).RegisterAccountRoutes(api)
 	return e
 }
 

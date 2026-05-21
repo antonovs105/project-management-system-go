@@ -100,6 +100,33 @@ func TestAdminUserManagement(t *testing.T) {
 	assert.NotNil(t, events[0].ActorUserID)
 }
 
+func TestUserPasswordChange(t *testing.T) {
+	db := openIntegrationDB(t)
+	resetIntegrationDB(t, db)
+
+	ctx := context.Background()
+	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+	userService := user.NewService(user.NewRepository(db, cfg), []byte("integration-secret"), cfg)
+
+	createdUser, err := userService.RegisterUser(ctx, "password-user", "password-user@example.test", "password123")
+	require.NoError(t, err)
+
+	_, err = userService.Login(ctx, " password-user@example.test ", "password123")
+	require.NoError(t, err)
+
+	err = userService.ChangePassword(ctx, createdUser.ID, "wrongpassword", "newpassword123")
+	require.ErrorIs(t, err, user.ErrInvalidCredentials)
+
+	err = userService.ChangePassword(ctx, createdUser.ID, "password123", "newpassword123")
+	require.NoError(t, err)
+
+	_, err = userService.Login(ctx, createdUser.Email, "password123")
+	require.ErrorIs(t, err, user.ErrInvalidCredentials)
+
+	_, err = userService.Login(ctx, createdUser.Email, "newpassword123")
+	require.NoError(t, err)
+}
+
 func TestActivityPubFoundationFlow(t *testing.T) {
 	db := openIntegrationDB(t)
 	resetIntegrationDB(t, db)

@@ -43,6 +43,10 @@ func (h *Handler) RegisterAdminRoutes(api *echo.Group) {
 	api.PATCH("/admin/users/:userID/role", h.UpdateUserRole)
 }
 
+func (h *Handler) RegisterAccountRoutes(api *echo.Group) {
+	api.PATCH("/me/password", h.ChangePassword)
+}
+
 // parsing register request
 type RegisterRequest struct {
 	Username string `json:"username"`
@@ -58,6 +62,11 @@ type BootstrapAdminRequest struct {
 
 type UpdateUserRoleRequest struct {
 	Role string `json:"role"`
+}
+
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
 }
 
 func (h *Handler) BootstrapAdmin(c echo.Context) error {
@@ -111,6 +120,19 @@ func (h *Handler) UpdateUserRole(c echo.Context) error {
 		return writeAdminUserError(c, err)
 	}
 	return c.JSON(http.StatusOK, updated)
+}
+
+func (h *Handler) ChangePassword(c echo.Context) error {
+	var req ChangePasswordRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+
+	err := h.service.ChangePassword(c.Request().Context(), currentUserID(c), req.CurrentPassword, req.NewPassword)
+	if err != nil {
+		return writeAccountError(c, err)
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 func sameSecret(expected, actual string) bool {
@@ -177,6 +199,17 @@ func writeAdminUserError(c echo.Context, err error) error {
 		return c.JSON(http.StatusConflict, map[string]string{"error": ErrCannotDemoteLastAdmin.Error()})
 	default:
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "admin user operation failed"})
+	}
+}
+
+func writeAccountError(c echo.Context, err error) error {
+	switch {
+	case errors.Is(err, ErrInvalidUserInput):
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case errors.Is(err, ErrInvalidCredentials):
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": ErrInvalidCredentials.Error()})
+	default:
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "account operation failed"})
 	}
 }
 
