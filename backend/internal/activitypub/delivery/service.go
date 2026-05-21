@@ -34,6 +34,7 @@ func (s *Service) EnqueueWithActor(ctx context.Context, activityID string, actor
 	return s.queueDelivery(ctx, delivery)
 }
 
+// queueDelivery sends a delivery task unless the row is already terminal.
 func (s *Service) queueDelivery(ctx context.Context, delivery *Delivery) (*Delivery, error) {
 	if delivery.State != StateDelivered && delivery.State != StateDead {
 		if err := s.queue.Enqueue(ctx, delivery.ID, delivery.MaxAttempts); err != nil {
@@ -98,6 +99,7 @@ func (s *Service) EnqueueProjectTicketRecipients(ctx context.Context, projectID 
 	return s.enqueueToInboxes(ctx, inboxes, activityIDs...)
 }
 
+// enqueueToInboxes creates delivery rows for activities across remote inboxes.
 func (s *Service) enqueueToInboxes(ctx context.Context, inboxes []string, activityIDs ...string) error {
 	for _, activityID := range activityIDs {
 		if activityID == "" {

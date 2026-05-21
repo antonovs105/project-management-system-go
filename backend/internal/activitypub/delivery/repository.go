@@ -53,6 +53,7 @@ func (r *PgRepository) CreateWithActor(ctx context.Context, activityID string, a
 	return r.create(ctx, activityID, actorID, targetInboxURL, maxAttempts)
 }
 
+// create inserts or loads a delivery row for an activity and target inbox.
 func (r *PgRepository) create(ctx context.Context, activityID string, actorID string, targetInboxURL string, maxAttempts int) (*Delivery, bool, error) {
 	if maxAttempts <= 0 {
 		maxAttempts = DefaultMaxRetry
@@ -467,6 +468,7 @@ func (r *PgRepository) RemoteProjectTicketRecipientInboxes(ctx context.Context, 
 	return inboxes, err
 }
 
+// loadByActivityTarget loads the delivery row for a unique activity and inbox pair.
 func loadByActivityTarget(ctx context.Context, q sqlx.QueryerContext, activityID string, targetInboxURL string) (*Delivery, error) {
 	var delivery Delivery
 	err := sqlx.GetContext(ctx, q, &delivery, deliverySelect()+`
@@ -481,6 +483,7 @@ func loadByActivityTarget(ctx context.Context, q sqlx.QueryerContext, activityID
 	return &delivery, nil
 }
 
+// loadByID loads a delivery row by UUID.
 func loadByID(ctx context.Context, q sqlx.QueryerContext, deliveryID string) (*Delivery, error) {
 	var delivery Delivery
 	err := sqlx.GetContext(ctx, q, &delivery, deliverySelect()+`
@@ -495,6 +498,7 @@ func loadByID(ctx context.Context, q sqlx.QueryerContext, deliveryID string) (*D
 	return &delivery, nil
 }
 
+// deliverySelect returns the shared delivery projection query.
 func deliverySelect() string {
 	return `
 		SELECT
@@ -522,6 +526,7 @@ func deliverySelect() string {
 	`
 }
 
+// projectDeliveryRole resolves the user's role for delivery inspection and retry.
 func (r *PgRepository) projectDeliveryRole(ctx context.Context, q sqlx.QueryerContext, projectID string, userID string) (string, error) {
 	role, err := r.projectMemberRole(ctx, q, projectID, userID)
 	if err == nil {
@@ -554,6 +559,7 @@ func (r *PgRepository) projectDeliveryRole(ctx context.Context, q sqlx.QueryerCo
 	return "", ErrProjectAccessDenied
 }
 
+// projectMemberRole returns the user's project role or access-denied sentinel.
 func (r *PgRepository) projectMemberRole(ctx context.Context, q sqlx.QueryerContext, projectID string, userID string) (string, error) {
 	var role string
 	err := sqlx.GetContext(ctx, q, &role, `
@@ -570,6 +576,7 @@ func (r *PgRepository) projectMemberRole(ctx context.Context, q sqlx.QueryerCont
 	return role, nil
 }
 
+// canRetryProjectDeliveries reports whether a project role may retry deliveries.
 func canRetryProjectDeliveries(role string) bool {
 	return role == "owner" || role == "manager"
 }

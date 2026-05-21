@@ -12,6 +12,7 @@ import (
 	"time"
 )
 
+// maxRedirects limits remote fetch redirects before the client rejects the request.
 const maxRedirects = 5
 
 var (
@@ -21,6 +22,7 @@ var (
 	ErrTooManyRedirects = errors.New("too many remote redirects")
 )
 
+// blockedPrefixes lists globally routed ranges that are still unsafe federation targets.
 var blockedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("100.64.0.0/10"),
 	netip.MustParsePrefix("192.0.0.0/24"),
@@ -100,6 +102,7 @@ func ValidateHostname(hostname string) error {
 	return nil
 }
 
+// dialContext resolves and validates a network destination before opening a socket.
 func dialContext(ctx context.Context, dialer *net.Dialer, network, address string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
@@ -140,6 +143,7 @@ func dialContext(ctx context.Context, dialer *net.Dialer, network, address strin
 	return dialer.DialContext(ctx, network, net.JoinHostPort(selected.String(), port))
 }
 
+// validateAddr rejects loopback, private, multicast, and reserved addresses.
 func validateAddr(addr netip.Addr) error {
 	addr = addr.Unmap()
 	if !addr.IsValid() ||
@@ -155,6 +159,7 @@ func validateAddr(addr netip.Addr) error {
 	return nil
 }
 
+// isBlockedPrefix reports whether an address is in a reserved documentation range.
 func isBlockedPrefix(addr netip.Addr) bool {
 	for _, prefix := range blockedPrefixes {
 		if prefix.Contains(addr) {

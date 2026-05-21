@@ -300,6 +300,7 @@ func GenerateRSAKeyPair() (publicPEM string, privatePEM string, err error) {
 	return publicPEM, privatePEM, nil
 }
 
+// lastPath returns the final URL path segment used in generated project usernames.
 func lastPath(apID string) string {
 	idx := strings.LastIndex(apID, "/")
 	if idx == -1 || idx == len(apID)-1 {

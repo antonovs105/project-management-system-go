@@ -38,6 +38,7 @@ type RemoteActorRefresher interface {
 	RefreshIfStale(ctx context.Context, actorAPID string, maxAge time.Duration) error
 }
 
+// remoteActorInboxResolver resolves a remote actor from a target inbox URL.
 type remoteActorInboxResolver interface {
 	RemoteActorAPIDByInboxURL(ctx context.Context, inboxURL string) (string, error)
 }
@@ -161,6 +162,7 @@ func (w *Worker) HandleDeliveryTask(ctx context.Context, task *asynq.Task) error
 	return w.repo.MarkDelivered(ctx, delivery.ID)
 }
 
+// deliver signs and POSTs one stored ActivityPub activity to a remote inbox.
 func (w *Worker) deliver(ctx context.Context, delivery *Delivery) error {
 	if err := validateTargetInboxURL(delivery.TargetInboxURL); err != nil {
 		return err
@@ -202,6 +204,7 @@ func (w *Worker) deliver(ctx context.Context, delivery *Delivery) error {
 	return permanentError{err: httpStatusError{statusCode: resp.StatusCode, err: errors.New(message)}}
 }
 
+// refreshTargetActor refreshes cached metadata for the inbox owner when possible.
 func (w *Worker) refreshTargetActor(ctx context.Context, inboxURL string) {
 	if w.remoteActorRefresher == nil {
 		return
@@ -217,6 +220,7 @@ func (w *Worker) refreshTargetActor(ctx context.Context, inboxURL string) {
 	_ = w.remoteActorRefresher.RefreshIfStale(ctx, actorAPID, w.targetActorRefreshMaxAge)
 }
 
+// responseMessage captures a bounded response body snippet for delivery failures.
 func responseMessage(resp *http.Response) string {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSnippetBytes+1))
 	if len(raw) == 0 {
@@ -253,15 +257,18 @@ func BackoffDelay(attempt int) time.Duration {
 	return delay
 }
 
+// isRetryableStatus reports whether an HTTP status should be retried.
 func isRetryableStatus(status int) bool {
 	return status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500
 }
 
+// isRetryable reports whether an error should consume another worker retry attempt.
 func isRetryable(err error) bool {
 	var permanent permanentError
 	return !errors.As(err, &permanent)
 }
 
+// failureDetailsFromError extracts structured failure metadata from delivery errors.
 func failureDetailsFromError(err error) FailureDetails {
 	var httpErr httpStatusError
 	if errors.As(err, &httpErr) {
@@ -280,6 +287,7 @@ func failureDetailsFromError(err error) FailureDetails {
 	}
 }
 
+// statusCodeLogValue formats optional HTTP status codes for logs.
 func statusCodeLogValue(statusCode *int) string {
 	if statusCode == nil {
 		return ""
@@ -287,6 +295,7 @@ func statusCodeLogValue(statusCode *int) string {
 	return fmt.Sprintf("%d", *statusCode)
 }
 
+// validateTargetInboxURL rejects unsafe target inbox URLs before delivery.
 func validateTargetInboxURL(raw string) error {
 	if _, err := netguard.ValidateRemoteURL(raw); err != nil {
 		return permanentError{err: err}
@@ -294,6 +303,7 @@ func validateTargetInboxURL(raw string) error {
 	return nil
 }
 
+// sanitizeResponseSnippet strips control characters from remote error snippets.
 func sanitizeResponseSnippet(raw string) string {
 	raw = strings.ToValidUTF8(raw, "")
 	raw = strings.Map(func(r rune) rune {
@@ -308,6 +318,7 @@ func sanitizeResponseSnippet(raw string) string {
 	return strings.TrimSpace(raw)
 }
 
+// permanentError marks a delivery failure that should not be retried.
 type permanentError struct {
 	err error
 }
@@ -322,6 +333,7 @@ func (e permanentError) Unwrap() error {
 	return e.err
 }
 
+// httpStatusError carries a non-success remote response status.
 type httpStatusError struct {
 	statusCode int
 	err        error

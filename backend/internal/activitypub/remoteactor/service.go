@@ -131,6 +131,7 @@ func (s *Service) RefreshKey(ctx context.Context, keyID, expectedActorAPID strin
 	return s.fetchAndCacheKey(ctx, keyID, expectedActorAPID)
 }
 
+// fetchAndCacheKey refreshes the actor document that owns a signing key.
 func (s *Service) fetchAndCacheKey(ctx context.Context, keyID, expectedActorAPID string) error {
 	actorURL, err := actorURLFromKeyID(keyID)
 	if err != nil {
@@ -162,6 +163,7 @@ func (s *Service) fetchAndCacheKey(ctx context.Context, keyID, expectedActorAPID
 	return s.repo.UpsertRemoteActor(ctx, actor)
 }
 
+// fetchAndCacheActor fetches a remote actor document and stores its cache projection.
 func (s *Service) fetchAndCacheActor(ctx context.Context, actorURL, fallbackUsername, domain string) (*Actor, error) {
 	actor, err := s.fetchActor(ctx, actorURL, fallbackUsername, domain)
 	if err != nil {
@@ -174,6 +176,7 @@ func (s *Service) fetchAndCacheActor(ctx context.Context, actorURL, fallbackUser
 	return actor, nil
 }
 
+// recordFetchFailure stores remote actor fetch failures without masking root errors.
 func (s *Service) recordFetchFailure(ctx context.Context, actorURL string, err error) {
 	if actorURL == "" || err == nil {
 		return
@@ -182,6 +185,7 @@ func (s *Service) recordFetchFailure(ctx context.Context, actorURL string, err e
 	_ = s.repo.RecordRemoteActorFetchFailure(ctx, actorURL, err.Error())
 }
 
+// resolveWebFinger resolves an acct: resource to an ActivityPub actor URL.
 func (s *Service) resolveWebFinger(ctx context.Context, domain, resource string) (string, error) {
 	values := url.Values{}
 	values.Set("resource", resource)
@@ -218,6 +222,7 @@ func (s *Service) resolveWebFinger(ctx context.Context, domain, resource string)
 	return "", ErrInvalidWebFinger
 }
 
+// fetchActor loads and validates a remote actor ActivityPub document.
 func (s *Service) fetchActor(ctx context.Context, actorURL, fallbackUsername, domain string) (*Actor, error) {
 	actorURL = strings.TrimSpace(actorURL)
 	if _, err := parseHTTPURL(actorURL); err != nil {
@@ -300,6 +305,7 @@ func (s *Service) fetchActor(ctx context.Context, actorURL, fallbackUsername, do
 	}, nil
 }
 
+// getJSON fetches a remote JSON document into target.
 func (s *Service) getJSON(req *http.Request, target any) error {
 	raw, err := s.getRaw(req)
 	if err != nil {
@@ -311,6 +317,7 @@ func (s *Service) getJSON(req *http.Request, target any) error {
 	return nil
 }
 
+// getRaw fetches a bounded remote response body and validates the status code.
 func (s *Service) getRaw(req *http.Request) ([]byte, error) {
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -336,6 +343,7 @@ func (s *Service) getRaw(req *http.Request) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// normalizeAcctResource parses and canonicalizes an acct: WebFinger resource.
 func normalizeAcctResource(resource string) (username string, domain string, normalized string, err error) {
 	resource = strings.TrimSpace(resource)
 	if resource == "" || !strings.HasPrefix(strings.ToLower(resource), "acct:") {
@@ -356,6 +364,7 @@ func normalizeAcctResource(resource string) (username string, domain string, nor
 	return username, domain, "acct:" + username + "@" + domain, nil
 }
 
+// actorURLFromKeyID derives the actor document URL from a public key fragment URL.
 func actorURLFromKeyID(keyID string) (string, error) {
 	parsed, err := parseHTTPURL(keyID)
 	if err != nil {
@@ -368,6 +377,7 @@ func actorURLFromKeyID(keyID string) (string, error) {
 	return parsed.String(), nil
 }
 
+// fallbackIdentity derives a best-effort username and domain from an actor URL.
 func fallbackIdentity(actorURL string) (username string, domain string, err error) {
 	parsed, err := parseHTTPURL(actorURL)
 	if err != nil {
@@ -380,6 +390,7 @@ func fallbackIdentity(actorURL string) (username string, domain string, err erro
 	return username, strings.ToLower(parsed.Host), nil
 }
 
+// isActivityJSONMediaType reports whether a media type can describe an actor document.
 func isActivityJSONMediaType(raw string) bool {
 	mediaType, _, err := mime.ParseMediaType(raw)
 	if err != nil {
@@ -389,6 +400,7 @@ func isActivityJSONMediaType(raw string) bool {
 	return mediaType == "application/activity+json" || mediaType == "application/ld+json"
 }
 
+// normalizeActorType extracts a supported ActivityStreams actor type.
 func normalizeActorType(value any) (string, error) {
 	switch typed := value.(type) {
 	case string:
@@ -405,6 +417,7 @@ func normalizeActorType(value any) (string, error) {
 	return "", fmt.Errorf("%w: unsupported actor type", ErrInvalidActorDocument)
 }
 
+// isSupportedActorType reports whether an actor type is accepted for federation.
 func isSupportedActorType(value string) bool {
 	switch value {
 	case "Person", "Group", "Organization", "Application", "Service":
@@ -414,6 +427,7 @@ func isSupportedActorType(value string) bool {
 	}
 }
 
+// parsePublicKey validates the embedded ActivityPub publicKey object.
 func parsePublicKey(raw json.RawMessage, actorID string) (keyID string, publicKeyPEM string, err error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return "", "", fmt.Errorf("%w: publicKey required", ErrInvalidActorDocument)
@@ -438,6 +452,7 @@ func parsePublicKey(raw json.RawMessage, actorID string) (keyID string, publicKe
 	return key.ID, key.PublicKeyPEM, nil
 }
 
+// parseHTTPURL parses an absolute HTTP(S) URL with a path.
 func parseHTTPURL(value string) (*url.URL, error) {
 	parsed, err := url.Parse(strings.TrimSpace(value))
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
@@ -453,6 +468,7 @@ func parseHTTPURL(value string) (*url.URL, error) {
 	return parsed, nil
 }
 
+// emptyStringToNil converts empty strings to nil pointers for optional URLs.
 func emptyStringToNil(value string) *string {
 	value = strings.TrimSpace(value)
 	if value == "" {

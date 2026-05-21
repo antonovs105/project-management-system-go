@@ -264,6 +264,7 @@ func (r *PgRepository) RetryFederationDelivery(ctx context.Context, deliveryID, 
 	return retried, nil
 }
 
+// loadFederationDelivery loads a delivery row after an admin retry update.
 func loadFederationDelivery(ctx context.Context, q sqlx.QueryerContext, deliveryID string) (*delivery.Delivery, error) {
 	var row delivery.Delivery
 	if err := sqlx.GetContext(ctx, q, &row, `

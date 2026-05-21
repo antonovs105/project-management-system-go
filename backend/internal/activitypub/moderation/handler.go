@@ -15,6 +15,7 @@ type Handler struct {
 	service *Service
 }
 
+// blockDomainRequest is the admin JSON payload for creating a domain block.
 type blockDomainRequest struct {
 	Domain string `json:"domain"`
 	Reason string `json:"reason"`
@@ -101,11 +102,13 @@ func (h *Handler) RetryFederationDelivery(c echo.Context) error {
 	return c.JSON(http.StatusAccepted, retried)
 }
 
+// currentUserID extracts the authenticated user identifier from Echo context.
 func currentUserID(c echo.Context) string {
 	userID, _ := c.Get("userID").(string)
 	return userID
 }
 
+// writeModerationError maps moderation service errors to HTTP responses.
 func writeModerationError(c echo.Context, err error) error {
 	switch {
 	case errors.Is(err, ErrAdminRequired):
@@ -125,6 +128,7 @@ func writeModerationError(c echo.Context, err error) error {
 	}
 }
 
+// remoteActorListOptions parses remote actor inspection filters.
 func remoteActorListOptions(c echo.Context) (RemoteActorListOptions, error) {
 	fetchErrorOnly, err := parseOptionalBool(c.QueryParam("fetch_error"))
 	if err != nil {
@@ -137,6 +141,7 @@ func remoteActorListOptions(c echo.Context) (RemoteActorListOptions, error) {
 	return RemoteActorListOptions{FetchErrorOnly: fetchErrorOnly, Limit: limit}, nil
 }
 
+// federationDeliveryListOptions parses federation delivery inspection filters.
 func federationDeliveryListOptions(c echo.Context) (FederationDeliveryListOptions, error) {
 	limit, err := parseOptionalLimit(c.QueryParam("limit"))
 	if err != nil {
@@ -149,6 +154,7 @@ func federationDeliveryListOptions(c echo.Context) (FederationDeliveryListOption
 	}, nil
 }
 
+// parseOptionalBool parses an optional boolean query parameter.
 func parseOptionalBool(raw string) (bool, error) {
 	raw = strings.ToLower(strings.TrimSpace(raw))
 	if raw == "" {
@@ -164,6 +170,7 @@ func parseOptionalBool(raw string) (bool, error) {
 	}
 }
 
+// parseOptionalLimit parses a positive optional list limit.
 func parseOptionalLimit(raw string) (int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

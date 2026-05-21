@@ -36,6 +36,7 @@ func (h *Handler) ReceiveProjectInbox(c echo.Context) error {
 	return h.receive(c, activitypub.ProjectAPID(h.cfg, c.Param("id")))
 }
 
+// receive validates request metadata, reads the bounded body, and delegates inbox handling.
 func (h *Handler) receive(c echo.Context, targetAPID string) error {
 	if !isActivityMediaType(c.Request().Header.Get(echo.HeaderContentType)) {
 		return c.JSON(http.StatusUnsupportedMediaType, errorResponse(ErrUnsupportedMedia))
@@ -74,10 +75,12 @@ func (h *Handler) receive(c echo.Context, targetAPID string) error {
 	return c.JSON(http.StatusAccepted, accepted)
 }
 
+// errorResponse converts a service error into the common JSON error envelope.
 func errorResponse(err error) map[string]string {
 	return map[string]string{"error": err.Error()}
 }
 
+// readLimitedBody reads an inbox body while enforcing the configured size limit.
 func readLimitedBody(body io.Reader, maxBytes int64) ([]byte, error) {
 	limited := io.LimitReader(body, maxBytes+1)
 	raw, err := io.ReadAll(limited)

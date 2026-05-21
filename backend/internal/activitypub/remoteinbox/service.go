@@ -92,6 +92,7 @@ func (s *Service) MaxBodyBytes() int64 {
 	return s.maxBodyBytes
 }
 
+// isActorDomainBlocked checks configured and persisted domain blocks for an actor.
 func (s *Service) isActorDomainBlocked(ctx context.Context, actorAPID string) (bool, error) {
 	domain, err := domainblock.FromActorID(actorAPID)
 	if err != nil {
@@ -260,6 +261,7 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 	return accepted, nil
 }
 
+// isProjectInviteResponse validates Accept or Reject responses for project invites.
 func (s *Service) isProjectInviteResponse(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity, activityType string) (bool, error) {
 	if activity.Type != activityType {
 		return false, nil
@@ -287,6 +289,7 @@ func (s *Service) isProjectInviteResponse(ctx context.Context, targetActorID, ta
 	return true, nil
 }
 
+// enqueueProjectFanOut queues accepted project activities to other remote followers.
 func (s *Service) enqueueProjectFanOut(ctx context.Context, targetActorID string, activity *InboundActivity, accepted *AcceptedActivity) {
 	if s.delivery == nil || accepted == nil || accepted.Duplicate || accepted.ActivityID == "" {
 		return
@@ -306,6 +309,7 @@ func (s *Service) enqueueProjectFanOut(ctx context.Context, targetActorID string
 	}
 }
 
+// isProjectDeleteTicket validates a remote Delete activity for a project ticket.
 func (s *Service) isProjectDeleteTicket(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
 	if activity.Type != "Delete" {
 		return false, nil
@@ -329,14 +333,17 @@ func (s *Service) isProjectDeleteTicket(ctx context.Context, targetActorID, targ
 	return true, nil
 }
 
+// isProjectRemoveTicketAssignee validates a remote Remove assignee activity.
 func (s *Service) isProjectRemoveTicketAssignee(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
 	return s.isProjectTicketAssigneeActivity(ctx, targetActorID, targetAPID, activity, "Remove")
 }
 
+// isProjectAddTicketAssignee validates a remote Add assignee activity.
 func (s *Service) isProjectAddTicketAssignee(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
 	return s.isProjectTicketAssigneeActivity(ctx, targetActorID, targetAPID, activity, "Add")
 }
 
+// isProjectTicketAssigneeActivity validates shared Add and Remove ticket assignee fields.
 func (s *Service) isProjectTicketAssigneeActivity(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity, activityType string) (bool, error) {
 	if activity.Type != activityType {
 		return false, nil
@@ -361,6 +368,7 @@ func (s *Service) isProjectTicketAssigneeActivity(ctx context.Context, targetAct
 	return true, nil
 }
 
+// isProjectUpdateTicket validates a remote Update activity for a project ticket.
 func (s *Service) isProjectUpdateTicket(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
 	if activity.Type != "Update" || activity.ObjectTicket == nil {
 		return false, nil
@@ -409,6 +417,7 @@ func (s *Service) isProjectUpdateTicket(ctx context.Context, targetActorID, targ
 	return true, nil
 }
 
+// isProjectCreateTicket validates a remote Create Ticket activity for a project inbox.
 func (s *Service) isProjectCreateTicket(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
 	if activity.Type != "Create" || activity.ObjectTicket == nil {
 		return false, nil
@@ -439,6 +448,7 @@ func (s *Service) isProjectCreateTicket(ctx context.Context, targetActorID, targ
 	return true, nil
 }
 
+// validateInboundTicketIdentity checks common remote ticket identity and ownership fields.
 func validateInboundTicketIdentity(ticket *InboundTicket, actorAPID, targetAPID string) error {
 	if ticket.InvalidFieldType {
 		return fmt.Errorf("%w: ticket field type", ErrInvalidActivity)
@@ -455,6 +465,7 @@ func validateInboundTicketIdentity(ticket *InboundTicket, actorAPID, targetAPID 
 	return nil
 }
 
+// isProjectCreateNote validates a remote Create Note activity for a project ticket.
 func (s *Service) isProjectCreateNote(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
 	if activity.Type != "Create" || activity.ObjectNote == nil {
 		return false, nil
@@ -485,6 +496,7 @@ func (s *Service) isProjectCreateNote(ctx context.Context, targetActorID, target
 	return true, nil
 }
 
+// isProjectFollow validates a remote Follow activity addressed to a project actor.
 func (s *Service) isProjectFollow(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
 	if activity.Type != "Follow" {
 		return false, nil
@@ -495,6 +507,7 @@ func (s *Service) isProjectFollow(ctx context.Context, targetActorID, targetAPID
 	return s.repo.IsProjectActor(ctx, targetActorID)
 }
 
+// isProjectUndoFollow validates an Undo{Follow} activity for a project actor.
 func (s *Service) isProjectUndoFollow(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
 	if activity.Type != "Undo" {
 		return false, nil
@@ -522,6 +535,7 @@ func (s *Service) isProjectUndoFollow(ctx context.Context, targetActorID, target
 	return true, nil
 }
 
+// enqueueFollowResponse queues an Accept{Follow} response when delivery is configured.
 func (s *Service) enqueueFollowResponse(ctx context.Context, response *FollowResponse) {
 	if s.delivery == nil || response == nil || response.ActivityID == "" || response.TargetInboxURL == "" {
 		return
@@ -531,6 +545,7 @@ func (s *Service) enqueueFollowResponse(ctx context.Context, response *FollowRes
 	}
 }
 
+// parseActivity decodes an inbound ActivityStreams activity into normalized fields.
 func parseActivity(body []byte) (*InboundActivity, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(body, &raw); err != nil {
@@ -580,6 +595,7 @@ func parseActivity(body []byte) (*InboundActivity, error) {
 	return activity, nil
 }
 
+// extractActivityType returns the first supported ActivityStreams type value.
 func extractActivityType(value any) (string, error) {
 	switch typed := value.(type) {
 	case string:
@@ -596,6 +612,7 @@ func extractActivityType(value any) (string, error) {
 	return "", ErrUnsupportedActivity
 }
 
+// isSupportedActivityType reports whether an inbound activity type is implemented.
 func isSupportedActivityType(value string) bool {
 	switch value {
 	case "Create", "Update", "Delete", "Add", "Remove", "Invite", "Accept", "Reject", "Follow", "Undo":
@@ -605,6 +622,7 @@ func isSupportedActivityType(value string) bool {
 	}
 }
 
+// extractAPID extracts an ActivityPub ID from a string or embedded object.
 func extractAPID(value any) string {
 	switch typed := value.(type) {
 	case string:
@@ -617,6 +635,7 @@ func extractAPID(value any) string {
 	return ""
 }
 
+// extractEmbeddedActivity normalizes an embedded activity object such as Undo{Follow}.
 func extractEmbeddedActivity(value any) *EmbeddedActivity {
 	raw, ok := value.(map[string]any)
 	if !ok {
@@ -638,6 +657,7 @@ func extractEmbeddedActivity(value any) *EmbeddedActivity {
 	return embedded
 }
 
+// extractInboundNote normalizes an embedded Note object for comment projection.
 func extractInboundNote(value any) *InboundNote {
 	raw, ok := value.(map[string]any)
 	if !ok || !hasObjectType(raw["type"], "Note") {
@@ -656,6 +676,7 @@ func extractInboundNote(value any) *InboundNote {
 	}
 }
 
+// extractInboundTicket normalizes an embedded ForgeFed Ticket object.
 func extractInboundTicket(value any) *InboundTicket {
 	raw, ok := value.(map[string]any)
 	if !ok || !hasObjectType(raw["type"], "forge:Ticket") {
@@ -692,6 +713,7 @@ func extractInboundTicket(value any) *InboundTicket {
 	}
 }
 
+// normalizeTicketStatus validates and normalizes inbound ticket workflow status.
 func normalizeTicketStatus(value string) (string, bool) {
 	value = strings.ToLower(strings.TrimSpace(value))
 	switch value {
@@ -702,6 +724,7 @@ func normalizeTicketStatus(value string) (string, bool) {
 	}
 }
 
+// normalizeTicketPriority validates and normalizes inbound ticket priority.
 func normalizeTicketPriority(value string) (string, bool) {
 	value = strings.ToLower(strings.TrimSpace(value))
 	if value == "" {
@@ -715,6 +738,7 @@ func normalizeTicketPriority(value string) (string, bool) {
 	}
 }
 
+// normalizeTicketType validates and normalizes inbound ticket type.
 func normalizeTicketType(value string) (string, bool) {
 	value = strings.ToLower(strings.TrimSpace(value))
 	if value == "" {
@@ -728,6 +752,7 @@ func normalizeTicketType(value string) (string, bool) {
 	}
 }
 
+// hasObjectType reports whether an ActivityStreams object type contains expected.
 func hasObjectType(value any, expected string) bool {
 	switch typed := value.(type) {
 	case string:
@@ -742,6 +767,7 @@ func hasObjectType(value any, expected string) bool {
 	return false
 }
 
+// stringValue returns a string value or empty string for non-string JSON fields.
 func stringValue(value any) string {
 	if typed, ok := value.(string); ok {
 		return typed
@@ -749,6 +775,7 @@ func stringValue(value any) string {
 	return ""
 }
 
+// optionalStringValue reads an optional string field and reports type validity.
 func optionalStringValue(raw map[string]any, key string) (string, bool, bool) {
 	value, exists := raw[key]
 	if !exists {
@@ -758,6 +785,7 @@ func optionalStringValue(raw map[string]any, key string) (string, bool, bool) {
 	return typed, true, ok
 }
 
+// optionalBoolValue reads an optional boolean field and reports type validity.
 func optionalBoolValue(raw map[string]any, key string) (bool, bool, bool) {
 	value, exists := raw[key]
 	if !exists {
@@ -767,11 +795,13 @@ func optionalBoolValue(raw map[string]any, key string) (bool, bool, bool) {
 	return typed, true, ok
 }
 
+// isAbsoluteURI reports whether a value is an absolute HTTP-style URI.
 func isAbsoluteURI(value string) bool {
 	parsed, err := url.Parse(value)
 	return err == nil && parsed.Scheme != "" && parsed.Host != ""
 }
 
+// isActivityMediaType reports whether Content-Type can contain an ActivityPub body.
 func isActivityMediaType(value string) bool {
 	if value == "" {
 		return false

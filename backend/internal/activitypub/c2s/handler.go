@@ -18,6 +18,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// maxOutboxBodyBytes bounds client-to-server outbox POST bodies.
 const maxOutboxBodyBytes = int64(1 << 20)
 
 var (
@@ -57,12 +58,14 @@ type PgRepository struct {
 	db *sqlx.DB
 }
 
+// localUser is the local actor identity authenticated for C2S posting.
 type localUser struct {
 	ID       string `db:"id"`
 	Username string `db:"username"`
 	APID     string `db:"ap_id"`
 }
 
+// clientActivity is the minimal ActivityStreams envelope accepted by the C2S outbox.
 type clientActivity struct {
 	ID     string          `json:"id"`
 	Type   any             `json:"type"`
@@ -71,6 +74,7 @@ type clientActivity struct {
 	Target any             `json:"target"`
 }
 
+// createdActivity is the stored Create activity returned after projection writes.
 type createdActivity struct {
 	APID     string          `db:"ap_id"`
 	Document json.RawMessage `db:"document"`
@@ -159,6 +163,7 @@ func (h *Handler) PostUserOutbox(c echo.Context) error {
 	return c.Blob(http.StatusCreated, activitypub.ActivityJSONMediaType, created.Document)
 }
 
+// handleCreate dispatches supported Create object types to application services.
 func (h *Handler) handleCreate(ctx context.Context, user *localUser, activity clientActivity, object activityObject) (*createdActivity, error) {
 	switch {
 	case hasType(object["type"], "Note"):
@@ -170,6 +175,7 @@ func (h *Handler) handleCreate(ctx context.Context, user *localUser, activity cl
 	}
 }
 
+// createNote projects a C2S Create Note into a local ticket comment.
 func (h *Handler) createNote(ctx context.Context, user *localUser, object activityObject) (*createdActivity, error) {
 	ticketAPID := object.optionalString("inReplyTo")
 	if ticketAPID == "" {
@@ -191,6 +197,7 @@ func (h *Handler) createNote(ctx context.Context, user *localUser, object activi
 	return h.repo.CreatedActivity(ctx, user.ID, created.APID)
 }
 
+// createTicket projects a C2S Create Ticket into the project-management model.
 func (h *Handler) createTicket(ctx context.Context, user *localUser, activity clientActivity, object activityObject) (*createdActivity, error) {
 	projectAPID := object.optionalString("context")
 	if projectAPID == "" {
@@ -261,6 +268,7 @@ func (r *PgRepository) LocalTicketID(ctx context.Context, apID string) (string, 
 	return id, err
 }
 
+// optionalLocalTicketID resolves a parent ticket AP ID when a C2S object supplies one.
 func (h *Handler) optionalLocalTicketID(ctx context.Context, apID string) (*string, error) {
 	if apID == "" {
 		return nil, nil
@@ -287,6 +295,7 @@ func (r *PgRepository) LocalProjectID(ctx context.Context, apID string) (string,
 	return id, err
 }
 
+// optionalActorID resolves an optional assignee AP ID to an actor UUID.
 func (h *Handler) optionalActorID(ctx context.Context, apID string) (*string, error) {
 	if apID == "" {
 		return nil, nil
@@ -329,6 +338,7 @@ func (r *PgRepository) CreatedActivity(ctx context.Context, actorID, objectAPID 
 	return &activity, nil
 }
 
+// writeCreateError maps C2S Create failures to client-facing HTTP responses.
 func (h *Handler) writeCreateError(c echo.Context, err error) error {
 	switch {
 	case errors.Is(err, errUnsupportedActivity):
@@ -344,12 +354,15 @@ func (h *Handler) writeCreateError(c echo.Context, err error) error {
 	}
 }
 
+// invalidActivity wraps a validation message with the C2S invalid-activity sentinel.
 func invalidActivity(message string) error {
 	return fmt.Errorf("%w: %s", errInvalidActivity, message)
 }
 
+// activityObject is a decoded ActivityStreams object submitted through C2S.
 type activityObject map[string]any
 
+// decodeObject validates and decodes the Create activity object payload.
 func decodeObject(raw json.RawMessage) (activityObject, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, errors.New("activity object is required")
@@ -364,10 +377,12 @@ func decodeObject(raw json.RawMessage) (activityObject, error) {
 	return object, nil
 }
 
+// optionalString extracts the first string value for an object property.
 func (o activityObject) optionalString(key string) string {
 	return firstString(o[key])
 }
 
+// hasType reports whether an ActivityStreams type value includes expected.
 func hasType(value any, expected string) bool {
 	expected = strings.ToLower(expected)
 	for _, item := range stringValues(value) {
@@ -378,6 +393,7 @@ func hasType(value any, expected string) bool {
 	return false
 }
 
+// isSupportedContentType reports whether a request body can contain ActivityPub JSON.
 func isSupportedContentType(header string) bool {
 	if strings.TrimSpace(header) == "" {
 		return false
@@ -389,6 +405,7 @@ func isSupportedContentType(header string) bool {
 	return isSupportedActivityMediaType(mediaType)
 }
 
+// acceptsActivityJSON reports whether an Accept header permits an ActivityPub response.
 func acceptsActivityJSON(header string) bool {
 	header = strings.TrimSpace(header)
 	if header == "" {
@@ -407,11 +424,13 @@ func acceptsActivityJSON(header string) bool {
 	return false
 }
 
+// isSupportedActivityMediaType recognizes ActivityPub JSON media types for C2S.
 func isSupportedActivityMediaType(mediaType string) bool {
 	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
 	return mediaType == activitypub.ActivityJSONMediaType || mediaType == "application/ld+json"
 }
 
+// firstString returns the first non-empty string from a string or string array value.
 func firstString(value any) string {
 	values := stringValues(value)
 	if len(values) == 0 {
@@ -420,6 +439,7 @@ func firstString(value any) string {
 	return values[0]
 }
 
+// stringValues normalizes ActivityStreams string-or-array values.
 func stringValues(value any) []string {
 	switch typed := value.(type) {
 	case string:

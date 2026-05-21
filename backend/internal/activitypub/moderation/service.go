@@ -107,6 +107,7 @@ func (s *Service) RetryFederationDelivery(ctx context.Context, userID string, de
 	return delivery, nil
 }
 
+// requireAdmin verifies that a user has the global admin role.
 func (s *Service) requireAdmin(ctx context.Context, userID string) error {
 	if strings.TrimSpace(userID) == "" {
 		return ErrAdminRequired
@@ -124,6 +125,7 @@ func (s *Service) requireAdmin(ctx context.Context, userID string) error {
 	return nil
 }
 
+// normalizeLimit bounds admin federation inspection list sizes.
 func normalizeLimit(limit int) int {
 	if limit <= 0 {
 		return defaultInspectionLimit

@@ -303,6 +303,7 @@ func (r *PgRepository) StoreInboundRejectInvite(ctx context.Context, targetActor
 	return r.storeInboundInviteResponse(ctx, targetActorID, activity, InviteResponseReject)
 }
 
+// storeInboundInviteResponse stores an invite response and applies its membership effect.
 func (r *PgRepository) storeInboundInviteResponse(ctx context.Context, targetActorID string, activity *InboundActivity, response InviteResponseType) (*AcceptedActivity, error) {
 	if activity.ObjectAPID == nil {
 		return nil, ErrInvalidActivity
@@ -330,6 +331,7 @@ func (r *PgRepository) storeInboundInviteResponse(ctx context.Context, targetAct
 	return accepted, nil
 }
 
+// applyInboundInviteResponseTx accepts or rejects a pending project invite transactionally.
 func (r *PgRepository) applyInboundInviteResponseTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity, responseActivityID string, response InviteResponseType) error {
 	var invite struct {
 		ID             string `db:"id"`
@@ -386,6 +388,7 @@ func (r *PgRepository) applyInboundInviteResponseTx(ctx context.Context, tx *sql
 	return err
 }
 
+// storeInboundActivityTx stores an inbound activity and target inbox membership.
 func (r *PgRepository) storeInboundActivityTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
 	var activityID string
 	err := tx.QueryRowxContext(ctx, `
@@ -455,6 +458,7 @@ func (r *PgRepository) storeInboundActivityTx(ctx context.Context, tx *sqlx.Tx, 
 	}, nil
 }
 
+// insertRemoteNoteCommentTx projects a remote Create Note into the comments table.
 func (r *PgRepository) insertRemoteNoteCommentTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity) error {
 	note := activity.ObjectNote
 
@@ -522,6 +526,7 @@ func (r *PgRepository) insertRemoteNoteCommentTx(ctx context.Context, tx *sqlx.T
 	return err
 }
 
+// insertRemoteTicketTx projects a remote Create Ticket into the tickets table.
 func (r *PgRepository) insertRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity) error {
 	ticket := activity.ObjectTicket
 
@@ -605,6 +610,7 @@ func (r *PgRepository) insertRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, ta
 	return err
 }
 
+// updateRemoteTicketTx applies a remote Update Ticket to the local projection.
 func (r *PgRepository) updateRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity) error {
 	ticket := activity.ObjectTicket
 
@@ -726,6 +732,7 @@ func (r *PgRepository) updateRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, ta
 	return err
 }
 
+// insertRemoteTicketAssigneeTx applies a remote Add assignee activity.
 func (r *PgRepository) insertRemoteTicketAssigneeTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity) error {
 	assigneeAPID := *activity.ObjectAPID
 	ticketAPID := *activity.TargetAPID
@@ -817,6 +824,7 @@ func (r *PgRepository) insertRemoteTicketAssigneeTx(ctx context.Context, tx *sql
 	return updateTicketAssignedToDocumentTx(ctx, tx, storedTicket.ID, ticketAPID)
 }
 
+// deleteRemoteTicketAssigneeTx applies a remote Remove assignee activity.
 func (r *PgRepository) deleteRemoteTicketAssigneeTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity) error {
 	assigneeAPID := *activity.ObjectAPID
 	ticketAPID := *activity.TargetAPID
@@ -887,6 +895,7 @@ func (r *PgRepository) deleteRemoteTicketAssigneeTx(ctx context.Context, tx *sql
 	return updateTicketAssignedToDocumentTx(ctx, tx, storedTicket.ID, ticketAPID)
 }
 
+// deleteRemoteTicketTx tombstones a remote ticket projection and deletes its row.
 func (r *PgRepository) deleteRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity) error {
 	ticketAPID := *activity.ObjectAPID
 
@@ -950,6 +959,7 @@ func (r *PgRepository) deleteRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, ta
 	return nil
 }
 
+// tombstoneTicketCommentsTx tombstones all comment objects under a deleted ticket.
 func tombstoneTicketCommentsTx(ctx context.Context, tx *sqlx.Tx, ticketID string) error {
 	var commentAPIDs []string
 	if err := tx.SelectContext(ctx, &commentAPIDs, `
@@ -967,6 +977,7 @@ func tombstoneTicketCommentsTx(ctx context.Context, tx *sqlx.Tx, ticketID string
 	return nil
 }
 
+// tombstoneObjectTx replaces an ActivityPub object document with a Tombstone.
 func tombstoneObjectTx(ctx context.Context, tx *sqlx.Tx, apID string, formerType string) error {
 	rawDoc, err := json.Marshal(activitypub.TombstoneDocument(apID, formerType, time.Now().UTC()))
 	if err != nil {
@@ -984,6 +995,7 @@ func tombstoneObjectTx(ctx context.Context, tx *sqlx.Tx, apID string, formerType
 	return err
 }
 
+// updateTicketAssignedToDocumentTx rewrites forge:assignedTo in a ticket JSON-LD snapshot.
 func updateTicketAssignedToDocumentTx(ctx context.Context, tx *sqlx.Tx, ticketID, ticketAPID string) error {
 	var rawDocument []byte
 	if err := tx.GetContext(ctx, &rawDocument, `

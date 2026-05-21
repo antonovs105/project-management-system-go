@@ -88,6 +88,7 @@ func (h *Handler) RetryProjectDelivery(c echo.Context) error {
 	return c.JSON(http.StatusAccepted, delivery)
 }
 
+// projectDeliveryListOptions parses project delivery inspection query parameters.
 func projectDeliveryListOptions(c echo.Context) (ProjectDeliveryListOptions, error) {
 	options := ProjectDeliveryListOptions{
 		State: strings.TrimSpace(c.QueryParam("state")),

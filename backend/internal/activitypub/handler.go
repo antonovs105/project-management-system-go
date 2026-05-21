@@ -34,6 +34,7 @@ type Authorizer interface {
 	AuthorizeProject(ctx context.Context, req *http.Request, projectID string) error
 }
 
+// collectionPageRequest carries ActivityPub collection pagination flags.
 type collectionPageRequest struct {
 	Page   bool
 	Limit  int
@@ -192,6 +193,7 @@ func (h *Handler) ProjectTickets(c echo.Context) error {
 	return h.projectTicketsCollection(c, ProjectAPID(h.cfg, c.Param("id")))
 }
 
+// writeObject loads a stored ActivityPub object and writes its JSON-LD document.
 func (h *Handler) writeObject(c echo.Context, apID string) error {
 	var object struct {
 		Document      json.RawMessage `db:"document"`
@@ -214,6 +216,7 @@ func (h *Handler) writeObject(c echo.Context, apID string) error {
 	return c.Blob(http.StatusOK, ActivityJSONMediaType, object.Document)
 }
 
+// actorActivityCollection renders an actor inbox or outbox as an ordered collection.
 func (h *Handler) actorActivityCollection(c echo.Context, actorAPID, box string) error {
 	page, err := parseCollectionPageRequest(c)
 	if err != nil {
@@ -287,6 +290,7 @@ func (h *Handler) actorActivityCollection(c echo.Context, actorAPID, box string)
 	))
 }
 
+// followersCollection renders the accepted followers of a local actor.
 func (h *Handler) followersCollection(c echo.Context, actorAPID string) error {
 	page, err := parseCollectionPageRequest(c)
 	if err != nil {
@@ -346,6 +350,7 @@ func (h *Handler) followersCollection(c echo.Context, actorAPID string) error {
 	))
 }
 
+// projectTicketsCollection renders the ticket collection for a local project actor.
 func (h *Handler) projectTicketsCollection(c echo.Context, projectAPID string) error {
 	page, err := parseCollectionPageRequest(c)
 	if err != nil {
@@ -407,6 +412,7 @@ func (h *Handler) projectTicketsCollection(c echo.Context, projectAPID string) e
 	))
 }
 
+// authorizeObject enforces project visibility for ticket and comment documents.
 func (h *Handler) authorizeObject(c echo.Context, localRefTable, localRefID sql.NullString) error {
 	if h.authorizer == nil || !localRefTable.Valid || !localRefID.Valid {
 		return nil
@@ -438,6 +444,7 @@ func (h *Handler) authorizeObject(c echo.Context, localRefTable, localRefID sql.
 	return h.requireProjectAccess(c, projectID)
 }
 
+// objectScopeError maps missing or failed object-scope lookups to HTTP responses.
 func (h *Handler) objectScopeError(c echo.Context, err error) error {
 	if errors.Is(err, sql.ErrNoRows) {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "object not found"})
@@ -445,6 +452,7 @@ func (h *Handler) objectScopeError(c echo.Context, err error) error {
 	return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load object scope"})
 }
 
+// authorizeActorCollection chooses actor or project authorization for collections.
 func (h *Handler) authorizeActorCollection(c echo.Context, actorID, actorType string, isLocal bool) error {
 	if h.authorizer == nil {
 		return nil
@@ -458,6 +466,7 @@ func (h *Handler) authorizeActorCollection(c echo.Context, actorID, actorType st
 	return nil
 }
 
+// requireActorAccess checks whether the current request may read an actor collection.
 func (h *Handler) requireActorAccess(c echo.Context, actorID string) error {
 	if h.authorizer == nil {
 		return nil
@@ -468,6 +477,7 @@ func (h *Handler) requireActorAccess(c echo.Context, actorID string) error {
 	return nil
 }
 
+// requireProjectAccess checks whether the current request may read project-scoped data.
 func (h *Handler) requireProjectAccess(c echo.Context, projectID string) error {
 	if h.authorizer == nil {
 		return nil
@@ -478,6 +488,7 @@ func (h *Handler) requireProjectAccess(c echo.Context, projectID string) error {
 	return nil
 }
 
+// authorizationError converts authorization failures into stable HTTP responses.
 func (h *Handler) authorizationError(c echo.Context, err error) error {
 	switch {
 	case errors.Is(err, ErrMissingAuthorization), errors.Is(err, ErrInvalidAuthorization):
@@ -489,6 +500,7 @@ func (h *Handler) authorizationError(c echo.Context, err error) error {
 	}
 }
 
+// parseCollectionPageRequest parses bounded ActivityPub collection pagination.
 func parseCollectionPageRequest(c echo.Context) (collectionPageRequest, error) {
 	request := collectionPageRequest{Limit: defaultCollectionPageLimit}
 	pageParam := strings.ToLower(strings.TrimSpace(c.QueryParam("page")))
@@ -522,6 +534,7 @@ func parseCollectionPageRequest(c echo.Context) (collectionPageRequest, error) {
 	return request, nil
 }
 
+// collectionPageURL builds the canonical URL for one ordered collection page.
 func collectionPageURL(collectionID string, limit, offset int) string {
 	values := url.Values{}
 	values.Set("page", "true")
@@ -532,6 +545,7 @@ func collectionPageURL(collectionID string, limit, offset int) string {
 	return collectionID + "?" + values.Encode()
 }
 
+// collectionPageLinks returns next and previous page URLs for an ordered collection.
 func collectionPageLinks(collectionID string, totalItems, limit, offset int) (next string, prev string) {
 	if offset+limit < totalItems {
 		next = collectionPageURL(collectionID, limit, offset+limit)
@@ -546,6 +560,7 @@ func collectionPageLinks(collectionID string, totalItems, limit, offset int) (ne
 	return next, prev
 }
 
+// writeActivityJSON writes an ActivityPub JSON document with the canonical media type.
 func writeActivityJSON(c echo.Context, status int, doc any) error {
 	raw, err := json.Marshal(doc)
 	if err != nil {
@@ -554,6 +569,7 @@ func writeActivityJSON(c echo.Context, status int, doc any) error {
 	return c.Blob(status, ActivityJSONMediaType, raw)
 }
 
+// requireActivityPubAccept rejects reads that cannot accept ActivityPub JSON.
 func requireActivityPubAccept(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if !acceptsActivityPubResponse(c.Request().Header.Get(echo.HeaderAccept)) {
@@ -563,10 +579,12 @@ func requireActivityPubAccept(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
+// acceptsActivityPubResponse reports whether an Accept header allows ActivityPub JSON.
 func acceptsActivityPubResponse(header string) bool {
 	return acceptsMediaType(header, isActivityPubResponseMediaType)
 }
 
+// acceptsMediaType evaluates comma-separated Accept header entries with q-values.
 func acceptsMediaType(header string, allowed func(string) bool) bool {
 	header = strings.TrimSpace(header)
 	if header == "" {
@@ -588,6 +606,7 @@ func acceptsMediaType(header string, allowed func(string) bool) bool {
 	return false
 }
 
+// isActivityPubResponseMediaType recognizes JSON media types usable for ActivityPub reads.
 func isActivityPubResponseMediaType(mediaType string) bool {
 	return mediaType == "*/*" ||
 		mediaType == "application/*" ||
@@ -596,6 +615,7 @@ func isActivityPubResponseMediaType(mediaType string) bool {
 		mediaType == "application/ld+json"
 }
 
+// isZeroQuality reports whether an Accept q-value explicitly disables a media type.
 func isZeroQuality(raw string) bool {
 	if raw == "" {
 		return false
@@ -604,6 +624,7 @@ func isZeroQuality(raw string) bool {
 	return err == nil && value <= 0
 }
 
+// stringItems converts URI strings into ActivityStreams collection item values.
 func stringItems(values []string) []any {
 	items := make([]any, 0, len(values))
 	for _, value := range values {
@@ -612,6 +633,7 @@ func stringItems(values []string) []any {
 	return items
 }
 
+// decodeRawItems decodes stored JSON activity documents for collection pages.
 func decodeRawItems(raws []json.RawMessage) ([]any, error) {
 	items := make([]any, 0, len(raws))
 	for _, raw := range raws {

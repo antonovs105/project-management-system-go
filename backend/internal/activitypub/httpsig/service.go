@@ -255,6 +255,7 @@ func (s *Service) VerifyRequest(ctx context.Context, req *http.Request, body []b
 	}, nil
 }
 
+// verifyWithKey checks the expected algorithm and verifies the request signature.
 func (s *Service) verifyWithKey(key *ActorKey, expectedAlgorithm string, base []byte, signature []byte) (string, error) {
 	algorithm, err := key.SignatureAlgorithm()
 	if err != nil {
@@ -273,11 +274,13 @@ func (s *Service) verifyWithKey(key *ActorKey, expectedAlgorithm string, base []
 	return algorithm, nil
 }
 
+// signRSAV15SHA256 signs a signature base with RSA PKCS#1 v1.5 and SHA-256.
 func signRSAV15SHA256(key *rsa.PrivateKey, base []byte) ([]byte, error) {
 	sum := sha256.Sum256(base)
 	return rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, sum[:])
 }
 
+// verifyRSAV15SHA256 verifies an RSA PKCS#1 v1.5 SHA-256 signature.
 func verifyRSAV15SHA256(key *rsa.PublicKey, base []byte, signature []byte) error {
 	sum := sha256.Sum256(base)
 	if err := rsa.VerifyPKCS1v15(key, crypto.SHA256, sum[:], signature); err != nil {
@@ -286,6 +289,7 @@ func verifyRSAV15SHA256(key *rsa.PublicKey, base []byte, signature []byte) error
 	return nil
 }
 
+// signatureBase builds the RFC 9421 signature base from covered components.
 func signatureBase(req *http.Request, components []string, signatureParams string) (string, error) {
 	lines := make([]string, 0, len(components)+1)
 	for _, component := range components {
@@ -299,6 +303,7 @@ func signatureBase(req *http.Request, components []string, signatureParams strin
 	return strings.Join(lines, "\n"), nil
 }
 
+// componentValue returns the canonical value for a signed request component.
 func componentValue(req *http.Request, component string) (string, error) {
 	switch component {
 	case componentMethod:
@@ -346,6 +351,7 @@ func componentValue(req *http.Request, component string) (string, error) {
 	}
 }
 
+// normalizeAuthority normalizes signed Host authority values for default ports.
 func normalizeAuthority(authority, scheme string) string {
 	authority = strings.TrimSpace(authority)
 	if authority == "" {
@@ -365,6 +371,7 @@ func normalizeAuthority(authority, scheme string) string {
 	return net.JoinHostPort(host, port)
 }
 
+// signatureParamsValue renders the RFC 9421 Signature-Input parameter value.
 func signatureParamsValue(components []string, created int64, keyID, algorithm string) string {
 	quoted := make([]string, 0, len(components))
 	for _, component := range components {
@@ -373,11 +380,13 @@ func signatureParamsValue(components []string, created int64, keyID, algorithm s
 	return "(" + strings.Join(quoted, " ") + ");created=" + fmt.Sprint(created) + ";keyid=" + sfString(keyID) + ";alg=" + sfString(algorithm)
 }
 
+// contentDigest returns the SHA-256 Content-Digest header value for a body.
 func contentDigest(body []byte) string {
 	sum := sha256.Sum256(body)
 	return "sha-256=:" + base64.StdEncoding.EncodeToString(sum[:]) + ":"
 }
 
+// verifyContentDigest compares a received Content-Digest header with the body.
 func verifyContentDigest(header string, body []byte) error {
 	if header == "" {
 		return fmt.Errorf("%w: missing content-digest", ErrInvalidDigest)
@@ -388,6 +397,7 @@ func verifyContentDigest(header string, body []byte) error {
 	return nil
 }
 
+// verifyDate parses and bounds the signed Date header.
 func verifyDate(header string, now time.Time, maxAge time.Duration) error {
 	signedAt, err := http.ParseTime(header)
 	if err != nil {
@@ -402,6 +412,7 @@ func verifyDate(header string, now time.Time, maxAge time.Duration) error {
 	return nil
 }
 
+// requireComponents ensures a signature covers all required HTTP components.
 func requireComponents(components []string, required []string) error {
 	for _, component := range required {
 		if !containsComponent(components, component) {
@@ -411,6 +422,7 @@ func requireComponents(components []string, required []string) error {
 	return nil
 }
 
+// containsComponent reports whether a component list contains a specific value.
 func containsComponent(components []string, target string) bool {
 	for _, component := range components {
 		if component == target {
