@@ -385,6 +385,15 @@ func (s *Service) UpdateProjectRole(ctx context.Context, projectID, userID, role
 		if err != nil {
 			return nil, err
 		}
+		if hasPermission(role.Permissions, PermissionRolesManage) && !hasPermission(permissions, PermissionRolesManage) {
+			remainingManagers, err := s.repo.CountMembersWithPermissionExcludingRole(ctx, projectID, PermissionRolesManage, roleID)
+			if err != nil {
+				return nil, err
+			}
+			if remainingManagers == 0 {
+				return nil, errors.New("cannot remove the last project role manager")
+			}
+		}
 		role.Permissions = permissions
 	}
 	if err := s.repo.UpdateRole(ctx, role); err != nil {

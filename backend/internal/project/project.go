@@ -207,3 +207,13 @@ func IsSupportedPermission(permission string) bool {
 	}
 	return false
 }
+
+// hasPermission reports whether a permission list grants permission.
+func hasPermission(permissions []string, permission string) bool {
+	for _, candidate := range permissions {
+		if candidate == permission {
+			return true
+		}
+	}
+	return false
+}

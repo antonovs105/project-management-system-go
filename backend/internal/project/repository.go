@@ -19,6 +19,7 @@ type Repository interface {
 	GetMemberRole(ctx context.Context, userID, projectID string) (string, error)
 	HasPermission(ctx context.Context, projectID, userID, permission string) (bool, error)
 	CountMembersWithPermission(ctx context.Context, projectID, permission string) (int, error)
+	CountMembersWithPermissionExcludingRole(ctx context.Context, projectID, permission, excludedRoleID string) (int, error)
 	RoleHasPermission(ctx context.Context, roleID, permission string) (bool, error)
 	ResolveRole(ctx context.Context, projectID, roleRef string) (*ProjectRole, error)
 	ListRoles(ctx context.Context, projectID string) ([]ProjectRole, error)
@@ -300,6 +301,20 @@ func (r *PgRepository) CountMembersWithPermission(ctx context.Context, projectID
 	return count, err
 }
 
+// CountMembersWithPermissionExcludingRole counts members whose role grants permission, excluding one role.
+func (r *PgRepository) CountMembersWithPermissionExcludingRole(ctx context.Context, projectID, permission, excludedRoleID string) (int, error) {
+	var count int
+	err := r.db.GetContext(ctx, &count, `
+		SELECT count(*)
+		FROM project_members member
+		JOIN project_role_permissions permission ON permission.role_id = member.role_id
+		WHERE member.project_id = $1
+			AND permission.permission = $2
+			AND member.role_id <> $3
+	`, projectID, permission, excludedRoleID)
+	return count, err
+}
+
 // RoleHasPermission reports whether a project role grants permission.
 func (r *PgRepository) RoleHasPermission(ctx context.Context, roleID, permission string) (bool, error) {
 	var allowed bool
@@ -388,6 +403,13 @@ func (r *PgRepository) UpdateRole(ctx context.Context, role *ProjectRole) error 
 	}
 	defer tx.Rollback()
 
+	if err := lockProjectManagerBoundary(ctx, tx, role.ProjectID); err != nil {
+		return err
+	}
+	if err := preventLastRoleManagerPermissionRemoval(ctx, tx, role); err != nil {
+		return err
+	}
+
 	if err := tx.QueryRowxContext(ctx, `
 		UPDATE project_roles
 		SET name = $3,
@@ -440,6 +462,45 @@ func (r *PgRepository) RoleAssignmentCount(ctx context.Context, projectID, roleI
 			(SELECT count(*) FROM project_invites WHERE project_id = $1 AND role_id = $2 AND status = 'pending')
 	`, projectID, roleID)
 	return count, err
+}
+
+// lockProjectManagerBoundary serializes changes that could remove the final project role manager.
+func lockProjectManagerBoundary(ctx context.Context, tx *sqlx.Tx, projectID string) error {
+	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "project-manager-boundary:"+projectID)
+	return err
+}
+
+// preventLastRoleManagerPermissionRemoval protects project administration from lockout.
+func preventLastRoleManagerPermissionRemoval(ctx context.Context, tx *sqlx.Tx, role *ProjectRole) error {
+	var currentlyGrantsRoleManagement bool
+	if err := tx.GetContext(ctx, &currentlyGrantsRoleManagement, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM project_role_permissions
+			WHERE role_id = $1 AND permission = $2
+		)
+	`, role.ID, PermissionRolesManage); err != nil {
+		return err
+	}
+	if !currentlyGrantsRoleManagement || hasPermission(role.Permissions, PermissionRolesManage) {
+		return nil
+	}
+
+	var remainingManagers int
+	if err := tx.GetContext(ctx, &remainingManagers, `
+		SELECT count(*)
+		FROM project_members member
+		JOIN project_role_permissions permission ON permission.role_id = member.role_id
+		WHERE member.project_id = $1
+			AND member.role_id <> $2
+			AND permission.permission = $3
+	`, role.ProjectID, role.ID, PermissionRolesManage); err != nil {
+		return err
+	}
+	if remainingManagers == 0 {
+		return errors.New("cannot remove the last project role manager")
+	}
+	return nil
 }
 
 // IsProjectMember reports whether a user belongs to a project.
@@ -814,6 +875,10 @@ func (r *PgRepository) RemoveMember(ctx context.Context, projectID, actorID, tar
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	if err := lockProjectManagerBoundary(ctx, tx, projectID); err != nil {
+		return nil, err
+	}
 
 	var targetRole struct {
 		Key       string `db:"key"`

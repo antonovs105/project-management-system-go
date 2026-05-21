@@ -47,6 +47,11 @@ func (m *MockRepository) CountMembersWithPermission(ctx context.Context, project
 	return args.Int(0), args.Error(1)
 }
 
+func (m *MockRepository) CountMembersWithPermissionExcludingRole(ctx context.Context, projectID, permission, excludedRoleID string) (int, error) {
+	args := m.Called(ctx, projectID, permission, excludedRoleID)
+	return args.Int(0), args.Error(1)
+}
+
 func (m *MockRepository) RoleHasPermission(ctx context.Context, roleID, permission string) (bool, error) {
 	args := m.Called(ctx, roleID, permission)
 	return args.Bool(0), args.Error(1)

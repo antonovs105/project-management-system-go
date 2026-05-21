@@ -50,6 +50,8 @@ func TestBackendManagementSmokeFlow(t *testing.T) {
 	resetIntegrationDB(t, db)
 	requireMigratedTable(t, db, "actors")
 	requireMigratedTable(t, db, "activity_deliveries")
+	requireMigratedTable(t, db, "project_roles")
+	requireMigratedTable(t, db, "project_role_permissions")
 
 	ctx := context.Background()
 	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")

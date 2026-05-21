@@ -229,7 +229,7 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	revokeInvalidActivityCount := activityCount(t, db)
 	err = projectService.RevokeInvite(ctx, revokeInvite.ID, member.ID)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "only owners or managers can revoke invites")
+	require.Contains(t, err.Error(), "insufficient permissions: missing members.invite")
 	requireActivityCount(t, db, revokeInvalidActivityCount)
 
 	require.NoError(t, projectService.RevokeInvite(ctx, revokeInvite.ID, owner.ID))
@@ -397,29 +397,29 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 		Type:        "task",
 	}, project.ID, viewer.ID)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "viewers cannot create tickets")
+	require.Contains(t, err.Error(), "insufficient permissions: missing tickets.create")
 
 	memberPatch := &member.ID
 	err = ticketService.UpdateTicket(ctx, ticket.UpdateTicketRequest{AssigneeID: &memberPatch}, assignmentTarget.ID, viewer.ID)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "viewers cannot update tickets")
+	require.Contains(t, err.Error(), "insufficient permissions: missing tickets.update")
 
 	err = ticketService.DeleteTicket(ctx, assignmentTarget.ID, viewer.ID)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "only owners or managers can delete tickets")
+	require.Contains(t, err.Error(), "insufficient permissions: missing tickets.delete")
 
 	_, err = commentService.CreateComment(ctx, assignmentTarget.ID, viewer.ID, "Viewer comment should not publish.")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "viewers cannot comment")
+	require.Contains(t, err.Error(), "insufficient permissions: missing comments.create")
 
 	newProjectName := "Viewer renamed board"
 	err = projectService.UpdateProject(ctx, project.ID, viewer.ID, projectUpdateNameRequest(&newProjectName))
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "only owners or managers can update projects")
+	require.Contains(t, err.Error(), "insufficient permissions: missing project.update")
 
 	err = projectService.DeleteProject(ctx, project.ID, viewer.ID)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "only owners can delete projects")
+	require.Contains(t, err.Error(), "insufficient permissions: missing project.delete")
 	requireActivityCount(t, db, deniedActivityCount)
 
 	manager, err := userService.RegisterUser(ctx, "manager", "manager@example.test", "password123")
@@ -468,7 +468,7 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	managerDeniedRemovalCount := activityCount(t, db)
 	err = projectService.RemoveMemberFromProject(ctx, project.ID, manager.ID, owner.ID)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "managers can only remove")
+	require.Contains(t, err.Error(), "insufficient permissions: missing roles.manage")
 	requireActivityCount(t, db, managerDeniedRemovalCount)
 
 	require.NoError(t, projectService.RemoveMemberFromProject(ctx, project.ID, manager.ID, removableDev.ID))
@@ -487,7 +487,7 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	lastOwnerRemovalCount := activityCount(t, db)
 	err = projectService.RemoveMemberFromProject(ctx, project.ID, owner.ID, owner.ID)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "last project owner")
+	require.Contains(t, err.Error(), "cannot remove the last project role manager")
 	requireActivityCount(t, db, lastOwnerRemovalCount)
 
 	require.NoError(t, projectService.RemoveMemberFromProject(ctx, project.ID, viewer.ID, viewer.ID))
@@ -509,7 +509,7 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	forbiddenDeleteCount := activityCount(t, db)
 	err = projectService.DeleteProject(ctx, project.ID, manager.ID)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "only owners can delete projects")
+	require.Contains(t, err.Error(), "insufficient permissions: missing project.delete")
 	requireActivityCount(t, db, forbiddenDeleteCount)
 
 	require.NoError(t, projectService.DeleteProject(ctx, project.ID, owner.ID))
@@ -677,6 +677,8 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 			"actor_outbox_items",
 			"federation_domain_blocks",
 			"project_members",
+			"project_roles",
+			"project_role_permissions",
 			"actor_follows",
 			"project_invites",
 			"tickets",

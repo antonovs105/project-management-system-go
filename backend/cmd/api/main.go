@@ -100,6 +100,8 @@ var requiredDatabaseTables = []string{
 	"users",
 	"projects",
 	"project_members",
+	"project_roles",
+	"project_role_permissions",
 	"actor_follows",
 	"tickets",
 	"ticket_assignees",

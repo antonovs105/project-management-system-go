@@ -179,6 +179,8 @@ func TestRequiredDatabaseTablesIncludeActivityPubFoundation(t *testing.T) {
 	require.Contains(t, requiredDatabaseTables, "actor_inbox_items")
 	require.Contains(t, requiredDatabaseTables, "actor_outbox_items")
 	require.Contains(t, requiredDatabaseTables, "activity_deliveries")
+	require.Contains(t, requiredDatabaseTables, "project_roles")
+	require.Contains(t, requiredDatabaseTables, "project_role_permissions")
 }
 
 func TestGlobalMiddlewareAddsRequestIDAndStructuredLog(t *testing.T) {

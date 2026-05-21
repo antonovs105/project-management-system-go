@@ -93,3 +93,61 @@ func TestService_GetProjectByID(t *testing.T) {
 		mockRepo.AssertExpectations(t)
 	})
 }
+
+func TestService_UpdateProjectRoleRejectsRemovingLastRoleManager(t *testing.T) {
+	mockRepo := new(MockRepository)
+	service := NewService(mockRepo, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+	ctx := context.Background()
+	projectID := "project-1"
+	userID := "manager-1"
+	roleID := "role-1"
+	permissions := []string{PermissionProjectRead}
+	existingRole := &ProjectRole{
+		ID:          roleID,
+		ProjectID:   projectID,
+		Name:        "Coordinator",
+		Permissions: []string{PermissionProjectRead, PermissionRolesManage},
+	}
+
+	mockRepo.On("HasPermission", ctx, projectID, userID, PermissionRolesManage).Return(true, nil).Once()
+	mockRepo.On("GetRoleByID", ctx, projectID, roleID).Return(existingRole, nil).Once()
+	mockRepo.On("CountMembersWithPermissionExcludingRole", ctx, projectID, PermissionRolesManage, roleID).Return(0, nil).Once()
+
+	role, err := service.UpdateProjectRole(ctx, projectID, userID, roleID, UpdateProjectRoleRequest{Permissions: &permissions})
+
+	assert.Error(t, err)
+	assert.Equal(t, "cannot remove the last project role manager", err.Error())
+	assert.Nil(t, role)
+	mockRepo.AssertNotCalled(t, "UpdateRole", mock.Anything, mock.Anything)
+	mockRepo.AssertExpectations(t)
+}
+
+func TestService_UpdateProjectRoleAllowsRemovingRoleManagementWhenAnotherManagerRemains(t *testing.T) {
+	mockRepo := new(MockRepository)
+	service := NewService(mockRepo, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+	ctx := context.Background()
+	projectID := "project-1"
+	userID := "manager-1"
+	roleID := "role-1"
+	permissions := []string{PermissionProjectRead}
+	existingRole := &ProjectRole{
+		ID:          roleID,
+		ProjectID:   projectID,
+		Name:        "Coordinator",
+		Permissions: []string{PermissionProjectRead, PermissionRolesManage},
+	}
+
+	mockRepo.On("HasPermission", ctx, projectID, userID, PermissionRolesManage).Return(true, nil).Once()
+	mockRepo.On("GetRoleByID", ctx, projectID, roleID).Return(existingRole, nil).Once()
+	mockRepo.On("CountMembersWithPermissionExcludingRole", ctx, projectID, PermissionRolesManage, roleID).Return(1, nil).Once()
+	mockRepo.On("UpdateRole", ctx, mock.MatchedBy(func(role *ProjectRole) bool {
+		return role.ID == roleID && !hasPermission(role.Permissions, PermissionRolesManage)
+	})).Return(nil).Once()
+
+	role, err := service.UpdateProjectRole(ctx, projectID, userID, roleID, UpdateProjectRoleRequest{Permissions: &permissions})
+
+	assert.NoError(t, err)
+	assert.NotNil(t, role)
+	assert.False(t, hasPermission(role.Permissions, PermissionRolesManage))
+	mockRepo.AssertExpectations(t)
+}
