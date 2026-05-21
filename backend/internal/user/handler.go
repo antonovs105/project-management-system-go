@@ -12,15 +12,16 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// AdminBootstrapTokenHeader carries the one-time secret for initial admin setup.
 const AdminBootstrapTokenHeader = "X-Admin-Bootstrap-Token"
 
-// Depends on service to call business logic
+// Handler exposes user registration, login, account, and admin HTTP endpoints.
 type Handler struct {
 	service             *Service
 	adminBootstrapToken string
 }
 
-// constructor for UserHandler.
+// NewHandler creates a user HTTP handler with an optional admin bootstrap token.
 func NewHandler(service *Service, adminBootstrapToken ...string) *Handler {
 	token := ""
 	if len(adminBootstrapToken) > 0 {
@@ -32,43 +33,50 @@ func NewHandler(service *Service, adminBootstrapToken ...string) *Handler {
 	}
 }
 
+// RegisterRoutes registers public user routes on the root Echo router.
 func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/setup/admin", h.BootstrapAdmin)
 	e.POST("/register", h.Register)
 	e.POST("/login", h.Login)
 }
 
+// RegisterAdminRoutes registers authenticated admin-only user routes.
 func (h *Handler) RegisterAdminRoutes(api *echo.Group) {
 	api.GET("/admin/users", h.ListUsers)
 	api.PATCH("/admin/users/:userID/role", h.UpdateUserRole)
 }
 
+// RegisterAccountRoutes registers authenticated self-service account routes.
 func (h *Handler) RegisterAccountRoutes(api *echo.Group) {
 	api.PATCH("/me/password", h.ChangePassword)
 }
 
-// parsing register request
+// RegisterRequest is the JSON payload for local account registration.
 type RegisterRequest struct {
 	Username string `json:"username"`
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
 
+// BootstrapAdminRequest is the JSON payload for creating the first admin.
 type BootstrapAdminRequest struct {
 	Username string `json:"username"`
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
 
+// UpdateUserRoleRequest is the JSON payload for changing a user's global role.
 type UpdateUserRoleRequest struct {
 	Role string `json:"role"`
 }
 
+// ChangePasswordRequest is the JSON payload for replacing the current user's password.
 type ChangePasswordRequest struct {
 	CurrentPassword string `json:"current_password"`
 	NewPassword     string `json:"new_password"`
 }
 
+// BootstrapAdmin creates the first local admin when bootstrap is enabled.
 func (h *Handler) BootstrapAdmin(c echo.Context) error {
 	if h.adminBootstrapToken == "" {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "admin bootstrap disabled"})
@@ -97,6 +105,7 @@ func (h *Handler) BootstrapAdmin(c echo.Context) error {
 	return c.JSON(http.StatusCreated, admin)
 }
 
+// ListUsers returns an admin-filtered list of local users.
 func (h *Handler) ListUsers(c echo.Context) error {
 	options, err := listUsersOptions(c)
 	if err != nil {
@@ -109,6 +118,7 @@ func (h *Handler) ListUsers(c echo.Context) error {
 	return c.JSON(http.StatusOK, users)
 }
 
+// UpdateUserRole changes a user's global role.
 func (h *Handler) UpdateUserRole(c echo.Context) error {
 	var req UpdateUserRoleRequest
 	if err := c.Bind(&req); err != nil {
@@ -122,6 +132,7 @@ func (h *Handler) UpdateUserRole(c echo.Context) error {
 	return c.JSON(http.StatusOK, updated)
 }
 
+// ChangePassword replaces the authenticated user's password.
 func (h *Handler) ChangePassword(c echo.Context) error {
 	var req ChangePasswordRequest
 	if err := c.Bind(&req); err != nil {
@@ -213,58 +224,43 @@ func writeAccountError(c echo.Context, err error) error {
 	}
 }
 
-// Register method for POST /register.
+// Register creates a worker account from the public registration endpoint.
 func (h *Handler) Register(c echo.Context) error {
-	// Parsing and validation
 	var req RegisterRequest
-
-	// c.Bind(&req) reads HTTP query body, parses json, fills struct req fields
 	if err := c.Bind(&req); err != nil {
-		// if json incorrect sending 400 Bad Request.
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
 
-	// TODO: add field validation
-
-	// business logic calls
-	// sending data to UserService
-	// c.Request().Context() to get context.Context from query
 	newUser, err := h.service.RegisterUser(c.Request().Context(), req.Username, req.Email, req.Password)
 	if err != nil {
 		if errors.Is(err, ErrInvalidUserInput) {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
-		// if service returned error sending 500 Internal Server Error.
-		// TODO: add error types for more clarity
-		log.Printf("Error registering user: %v", err) // Logging error
+		log.Printf("Error registering user: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not register user"})
 	}
 
-	// Success respond 201 Created
 	return c.JSON(http.StatusCreated, newUser)
 }
 
-// LoginRequest - структура для парсинга JSON-запроса на логин.
+// LoginRequest is the JSON payload for password login.
 type LoginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
 
-// Login - обработчик для роута POST /login.
+// Login verifies credentials and returns a bearer JWT.
 func (h *Handler) Login(c echo.Context) error {
 	var req LoginRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
 
-	// Вызываем сервис для проверки логина и пароля.
 	token, err := h.service.Login(c.Request().Context(), req.Email, req.Password)
 	if err != nil {
-		// Если сервис вернул ошибку (неверные данные), отправляем 401 Unauthorized.
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": err.Error()})
 	}
 
-	// Если все успешно, возвращаем токен клиенту.
 	return c.JSON(http.StatusOK, map[string]string{
 		"token": token,
 	})

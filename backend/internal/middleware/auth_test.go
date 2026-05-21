@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -61,7 +63,36 @@ func TestJWTMiddlewareSetsUserID(t *testing.T) {
 	assert.JSONEq(t, `{"user_id":"user-1"}`, rec.Body.String())
 }
 
+func TestJWTMiddlewareValidatesTokenVersion(t *testing.T) {
+	secret := []byte("secret")
+	validator := &testTokenValidator{wantUserID: "user-1", wantVersion: 2}
+	rec := runJWTMiddlewareWithValidator(t, secret, "Bearer "+signedTestToken(t, secret, jwt.MapClaims{
+		"sub":           "user-1",
+		"token_version": 2,
+		"exp":           9999999999,
+	}), validator)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.True(t, validator.called)
+}
+
+func TestJWTMiddlewareRejectsStaleTokenVersion(t *testing.T) {
+	secret := []byte("secret")
+	rec := runJWTMiddlewareWithValidator(t, secret, "Bearer "+signedTestToken(t, secret, jwt.MapClaims{
+		"sub":           "user-1",
+		"token_version": 1,
+		"exp":           9999999999,
+	}), &testTokenValidator{wantUserID: "user-1", wantVersion: 2, err: errors.New("stale token")})
+
+	require.Equal(t, http.StatusUnauthorized, rec.Code, rec.Body.String())
+	assert.JSONEq(t, `{"error":"invalid token"}`, rec.Body.String())
+}
+
 func runJWTMiddleware(t *testing.T, secret []byte, authorization string) *httptest.ResponseRecorder {
+	return runJWTMiddlewareWithValidator(t, secret, authorization, nil)
+}
+
+func runJWTMiddlewareWithValidator(t *testing.T, secret []byte, authorization string, validator TokenVersionValidator) *httptest.ResponseRecorder {
 	t.Helper()
 
 	e := echo.New()
@@ -72,7 +103,7 @@ func runJWTMiddleware(t *testing.T, secret []byte, authorization string) *httpte
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	handler := JWTMiddleware(secret)(func(c echo.Context) error {
+	handler := JWTMiddleware(secret, validator)(func(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"user_id": c.Get("userID").(string)})
 	})
 	require.NoError(t, handler(c))
@@ -86,4 +117,19 @@ func signedTestToken(t *testing.T, secret []byte, claims jwt.MapClaims) string {
 	raw, err := token.SignedString(secret)
 	require.NoError(t, err)
 	return raw
+}
+
+type testTokenValidator struct {
+	wantUserID  string
+	wantVersion int
+	called      bool
+	err         error
+}
+
+func (v *testTokenValidator) ValidateTokenVersion(ctx context.Context, userID string, tokenVersion int) error {
+	v.called = true
+	if userID != v.wantUserID || tokenVersion != v.wantVersion {
+		return errors.New("unexpected token version")
+	}
+	return v.err
 }

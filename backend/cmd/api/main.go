@@ -201,7 +201,7 @@ func main() {
 	apHandler := activitypub.NewHandlerWithAuthorizer(
 		db,
 		apConfig,
-		activitypub.NewAccessAuthorizer(db, []byte(jwtSecret), signatureActorVerifier{service: sigService}),
+		activitypub.NewAccessAuthorizer(db, []byte(jwtSecret), signatureActorVerifier{service: sigService}, userService),
 	)
 
 	// ActivityPub delivery dependencies. The worker runs in-process for now; the slice can be
@@ -301,13 +301,13 @@ func main() {
 
 	// Local ActivityPub JSON-LD read routes and signed remote inbox POST foundation.
 	server.apHandler.RegisterRoutes(e)
-	server.c2sHandler.RegisterRoutes(e, authMiddleware.JWTMiddleware([]byte(jwtSecret)))
+	server.c2sHandler.RegisterRoutes(e, authMiddleware.JWTMiddleware([]byte(jwtSecret), userService))
 	server.inboxHandler.RegisterRoutes(e)
 
 	// protected routes
 	api := e.Group("/api")
 
-	api.Use(authMiddleware.JWTMiddleware([]byte(jwtSecret)))
+	api.Use(authMiddleware.JWTMiddleware([]byte(jwtSecret), userService))
 
 	// routes that require auth
 	api.GET("/me", server.getProfile) // for test

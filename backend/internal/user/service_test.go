@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"golang.org/x/crypto/bcrypt"
@@ -244,6 +245,34 @@ func TestService_ChangePassword(t *testing.T) {
 	})
 }
 
+func TestService_ValidateTokenVersion(t *testing.T) {
+	ctx := context.Background()
+	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+	userID := "11111111-1111-4111-8111-111111111111"
+
+	t.Run("CurrentVersion", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, []byte("secret"), cfg)
+		mockRepo.On("TokenVersion", ctx, userID).Return(3, nil).Once()
+
+		err := service.ValidateTokenVersion(ctx, userID, 3)
+
+		assert.NoError(t, err)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("StaleVersion", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, []byte("secret"), cfg)
+		mockRepo.On("TokenVersion", ctx, userID).Return(4, nil).Once()
+
+		err := service.ValidateTokenVersion(ctx, userID, 3)
+
+		assert.ErrorIs(t, err, ErrInvalidCredentials)
+		mockRepo.AssertExpectations(t)
+	})
+}
+
 func TestService_Login(t *testing.T) {
 	mockRepo := new(MockRepository)
 	service := NewService(mockRepo, []byte("secret"), activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
@@ -260,6 +289,7 @@ func TestService_Login(t *testing.T) {
 		Email:        email,
 		PasswordHash: string(hashedPassword),
 		Role:         "user",
+		TokenVersion: 2,
 	}
 
 	// Success case
@@ -270,6 +300,8 @@ func TestService_Login(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.NotEmpty(t, token)
+		claims := parseTokenClaims(t, token, []byte("secret"))
+		assert.Equal(t, float64(2), claims["token_version"])
 		mockRepo.AssertExpectations(t)
 	})
 
@@ -296,4 +328,16 @@ func TestService_Login(t *testing.T) {
 		assert.Equal(t, "invalid credentials", err.Error())
 		mockRepo.AssertExpectations(t)
 	})
+}
+
+func parseTokenClaims(t *testing.T, raw string, secret []byte) jwt.MapClaims {
+	t.Helper()
+
+	parsed, err := jwt.Parse(raw, func(token *jwt.Token) (any, error) {
+		return secret, nil
+	})
+	assert.NoError(t, err)
+	claims, ok := parsed.Claims.(jwt.MapClaims)
+	assert.True(t, ok)
+	return claims
 }

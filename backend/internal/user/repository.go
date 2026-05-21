@@ -10,26 +10,26 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-// Repository
-// Repository interface defines methods for user data access
+// Repository defines persistence operations for local users and account metadata.
 type Repository interface {
 	CreateUser(ctx context.Context, user *User) error
 	CreateAdminIfNoAdmin(ctx context.Context, user *User) error
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
 	GetUserByID(ctx context.Context, userID string) (*User, error)
 	UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error
+	TokenVersion(ctx context.Context, userID string) (int, error)
 	UserRole(ctx context.Context, userID string) (string, error)
 	ListUsers(ctx context.Context, options ListUsersOptions) ([]User, error)
 	UpdateUserRole(ctx context.Context, adminUserID, userID, role string) (*User, error)
 }
 
-// PgRepository implements Repository using PostgreSQL
+// PgRepository implements Repository using PostgreSQL.
 type PgRepository struct {
 	db  *sqlx.DB
 	cfg activitypub.Config
 }
 
-// NewRepository creates a new instance of PgRepository
+// NewRepository creates a PostgreSQL-backed user repository.
 func NewRepository(db *sqlx.DB, cfg activitypub.Config) Repository {
 	return &PgRepository{
 		db:  db,
@@ -37,11 +37,12 @@ func NewRepository(db *sqlx.DB, cfg activitypub.Config) Repository {
 	}
 }
 
-// Add new user
+// CreateUser stores a worker user and its ActivityPub actor graph.
 func (r *PgRepository) CreateUser(ctx context.Context, user *User) error {
 	return r.createUserInTx(ctx, user, nil)
 }
 
+// CreateAdminIfNoAdmin stores the first admin when no admin currently exists.
 func (r *PgRepository) CreateAdminIfNoAdmin(ctx context.Context, user *User) error {
 	return r.createUserInTx(ctx, user, func(tx *sqlx.Tx) error {
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('admin-bootstrap'))`); err != nil {
@@ -113,8 +114,8 @@ func (r *PgRepository) insertUserGraph(ctx context.Context, tx *sqlx.Tx, user *U
 		return err
 	}
 	if err := tx.QueryRowxContext(ctx, `
-		SELECT created_at, updated_at FROM users WHERE id = $1
-	`, user.ID).Scan(&user.CreatedAt, &user.UpdatedAt); err != nil {
+		SELECT token_version, created_at, updated_at FROM users WHERE id = $1
+	`, user.ID).Scan(&user.TokenVersion, &user.CreatedAt, &user.UpdatedAt); err != nil {
 		return err
 	}
 
@@ -147,7 +148,7 @@ func (r *PgRepository) insertUserGraph(ctx context.Context, tx *sqlx.Tx, user *U
 	return nil
 }
 
-// GetUserByEmail finds user by email
+// GetUserByEmail finds a local user by email and includes password hash data.
 func (r *PgRepository) GetUserByEmail(ctx context.Context, email string) (*User, error) {
 
 	var user User
@@ -160,6 +161,7 @@ func (r *PgRepository) GetUserByEmail(ctx context.Context, email string) (*User,
 			u.email,
 			u.password_hash,
 			u.role,
+			u.token_version,
 			a.handle,
 			a.name,
 			a.summary,
@@ -178,6 +180,7 @@ func (r *PgRepository) GetUserByEmail(ctx context.Context, email string) (*User,
 	return &user, nil
 }
 
+// GetUserByID finds a local user by UUID and includes password hash data.
 func (r *PgRepository) GetUserByID(ctx context.Context, userID string) (*User, error) {
 	var user User
 	err := r.db.GetContext(ctx, &user, userSelectWithPasswordQuery()+`
@@ -189,10 +192,12 @@ func (r *PgRepository) GetUserByID(ctx context.Context, userID string) (*User, e
 	return &user, nil
 }
 
+// UpdatePasswordHash changes a user's password hash and bumps token invalidation state.
 func (r *PgRepository) UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error {
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE users
-		SET password_hash = $2
+		SET password_hash = $2,
+			token_version = token_version + 1
 		WHERE id = $1
 	`, userID, passwordHash)
 	if err != nil {
@@ -208,12 +213,21 @@ func (r *PgRepository) UpdatePasswordHash(ctx context.Context, userID, passwordH
 	return nil
 }
 
+// TokenVersion returns the current JWT invalidation version for a local user.
+func (r *PgRepository) TokenVersion(ctx context.Context, userID string) (int, error) {
+	var tokenVersion int
+	err := r.db.GetContext(ctx, &tokenVersion, `SELECT token_version FROM users WHERE id = $1`, userID)
+	return tokenVersion, err
+}
+
+// UserRole returns the global role for a local user.
 func (r *PgRepository) UserRole(ctx context.Context, userID string) (string, error) {
 	var role string
 	err := r.db.GetContext(ctx, &role, `SELECT role FROM users WHERE id = $1`, userID)
 	return role, err
 }
 
+// ListUsers returns local users that match admin filters and pagination.
 func (r *PgRepository) ListUsers(ctx context.Context, options ListUsersOptions) ([]User, error) {
 	var users []User
 	if err := r.db.SelectContext(ctx, &users, userSelectQuery()+`
@@ -233,6 +247,7 @@ func (r *PgRepository) ListUsers(ctx context.Context, options ListUsersOptions) 
 	return users, nil
 }
 
+// UpdateUserRole updates a global user role and audits the change.
 func (r *PgRepository) UpdateUserRole(ctx context.Context, adminUserID, userID, role string) (*User, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -307,6 +322,7 @@ func userSelectQuery() string {
 			u.username,
 			u.email,
 			u.role,
+			u.token_version,
 			a.handle,
 			a.name,
 			a.summary,
@@ -326,6 +342,7 @@ func userSelectWithPasswordQuery() string {
 			u.email,
 			u.password_hash,
 			u.role,
+			u.token_version,
 			a.handle,
 			a.name,
 			a.summary,

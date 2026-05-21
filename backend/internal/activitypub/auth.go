@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 
@@ -13,25 +14,42 @@ import (
 )
 
 var (
+	// ErrMissingAuthorization reports that a protected ActivityPub read has no usable credential.
 	ErrMissingAuthorization = errors.New("missing activitypub authorization")
+	// ErrInvalidAuthorization reports that an ActivityPub read credential is malformed or rejected.
 	ErrInvalidAuthorization = errors.New("invalid activitypub authorization")
-	ErrAccessDenied         = errors.New("activitypub access denied")
+	// ErrAccessDenied reports that a valid credential is not allowed to read the target resource.
+	ErrAccessDenied = errors.New("activitypub access denied")
 )
 
+// JWTTokenValidator validates whether a bearer JWT token_version claim is current.
+type JWTTokenValidator interface {
+	ValidateTokenVersion(ctx context.Context, userID string, tokenVersion int) error
+}
+
+// RequestVerifier verifies HTTP signatures and returns the authenticated actor ID.
 type RequestVerifier interface {
 	VerifyActorID(ctx context.Context, req *http.Request) (string, error)
 }
 
+// AccessAuthorizer authorizes local JWT and remote HTTP-signature reads.
 type AccessAuthorizer struct {
-	db        *sqlx.DB
-	jwtSecret []byte
-	verifier  RequestVerifier
+	db           *sqlx.DB
+	jwtSecret    []byte
+	verifier     RequestVerifier
+	jwtValidator JWTTokenValidator
 }
 
-func NewAccessAuthorizer(db *sqlx.DB, jwtSecret []byte, verifier RequestVerifier) *AccessAuthorizer {
-	return &AccessAuthorizer{db: db, jwtSecret: jwtSecret, verifier: verifier}
+// NewAccessAuthorizer creates an ActivityPub read authorizer.
+func NewAccessAuthorizer(db *sqlx.DB, jwtSecret []byte, verifier RequestVerifier, validators ...JWTTokenValidator) *AccessAuthorizer {
+	var validator JWTTokenValidator
+	if len(validators) > 0 {
+		validator = validators[0]
+	}
+	return &AccessAuthorizer{db: db, jwtSecret: jwtSecret, verifier: verifier, jwtValidator: validator}
 }
 
+// AuthorizeActor requires the credential actor to match the requested actor.
 func (a *AccessAuthorizer) AuthorizeActor(ctx context.Context, req *http.Request, actorID string) error {
 	credentialActorID, err := a.credentialActorID(ctx, req)
 	if err != nil {
@@ -43,6 +61,7 @@ func (a *AccessAuthorizer) AuthorizeActor(ctx context.Context, req *http.Request
 	return nil
 }
 
+// AuthorizeProject requires the credential actor to belong to or follow a project.
 func (a *AccessAuthorizer) AuthorizeProject(ctx context.Context, req *http.Request, projectID string) error {
 	actorID, err := a.credentialActorID(ctx, req)
 	if err != nil {
@@ -78,7 +97,7 @@ func (a *AccessAuthorizer) credentialActorID(ctx context.Context, req *http.Requ
 	if req == nil {
 		return "", ErrMissingAuthorization
 	}
-	if actorID, ok, err := a.actorIDFromJWT(req); ok || err != nil {
+	if actorID, ok, err := a.actorIDFromJWT(ctx, req); ok || err != nil {
 		return actorID, err
 	}
 	if a.verifier != nil && strings.TrimSpace(req.Header.Get("Signature-Input")) != "" {
@@ -94,7 +113,7 @@ func (a *AccessAuthorizer) credentialActorID(ctx context.Context, req *http.Requ
 	return "", ErrMissingAuthorization
 }
 
-func (a *AccessAuthorizer) actorIDFromJWT(req *http.Request) (actorID string, ok bool, err error) {
+func (a *AccessAuthorizer) actorIDFromJWT(ctx context.Context, req *http.Request) (actorID string, ok bool, err error) {
 	if len(a.jwtSecret) == 0 {
 		return "", false, nil
 	}
@@ -124,5 +143,39 @@ func (a *AccessAuthorizer) actorIDFromJWT(req *http.Request) (actorID string, ok
 	if !ok || strings.TrimSpace(sub) == "" {
 		return "", true, ErrInvalidAuthorization
 	}
+	if a.jwtValidator != nil {
+		tokenVersion, ok := jwtTokenVersionFromClaims(claims)
+		if !ok {
+			return "", true, ErrInvalidAuthorization
+		}
+		if err := a.jwtValidator.ValidateTokenVersion(ctx, sub, tokenVersion); err != nil {
+			return "", true, ErrInvalidAuthorization
+		}
+	}
 	return sub, true, nil
+}
+
+func jwtTokenVersionFromClaims(claims jwt.MapClaims) (int, bool) {
+	raw, ok := claims["token_version"]
+	if !ok {
+		return 0, false
+	}
+	switch value := raw.(type) {
+	case float64:
+		maxInt := int(^uint(0) >> 1)
+		if value <= 0 || math.Trunc(value) != value || value > float64(maxInt) {
+			return 0, false
+		}
+		return int(value), true
+	case int:
+		return value, value > 0
+	case int64:
+		maxInt := int64(int(^uint(0) >> 1))
+		if value <= 0 || value > maxInt {
+			return 0, false
+		}
+		return int(value), true
+	default:
+		return 0, false
+	}
 }

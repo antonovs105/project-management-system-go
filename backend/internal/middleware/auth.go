@@ -1,7 +1,9 @@
 package middleware
 
 import (
+	"context"
 	"log"
+	"math"
 	"net/http"
 	"strings"
 
@@ -9,8 +11,17 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// JWTMiddleware fabric for creating middleware
-func JWTMiddleware(secret []byte) echo.MiddlewareFunc {
+// TokenVersionValidator validates whether a JWT token_version claim is still current.
+type TokenVersionValidator interface {
+	ValidateTokenVersion(ctx context.Context, userID string, tokenVersion int) error
+}
+
+// JWTMiddleware authenticates Bearer JWTs and optionally validates token versions.
+func JWTMiddleware(secret []byte, validators ...TokenVersionValidator) echo.MiddlewareFunc {
+	var validator TokenVersionValidator
+	if len(validators) > 0 {
+		validator = validators[0]
+	}
 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 
@@ -29,7 +40,7 @@ func JWTMiddleware(secret []byte) echo.MiddlewareFunc {
 
 			tokenString := headerParts[1]
 
-			// parsing and validatiing
+			// Verify the signature before trusting claims.
 			token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 					return nil, echo.NewHTTPError(http.StatusUnauthorized, "Unexpected signing method")
@@ -51,6 +62,16 @@ func JWTMiddleware(secret []byte) echo.MiddlewareFunc {
 				}
 
 				c.Set("userID", userID)
+				if validator != nil {
+					tokenVersion, ok := tokenVersionFromClaims(claims)
+					if !ok {
+						return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid token"})
+					}
+					if err := validator.ValidateTokenVersion(c.Request().Context(), userID, tokenVersion); err != nil {
+						return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid token"})
+					}
+					c.Set("tokenVersion", tokenVersion)
+				}
 
 				// next handler in pipeline
 				return next(c)
@@ -58,5 +79,30 @@ func JWTMiddleware(secret []byte) echo.MiddlewareFunc {
 
 			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid token claims"})
 		}
+	}
+}
+
+func tokenVersionFromClaims(claims jwt.MapClaims) (int, bool) {
+	raw, ok := claims["token_version"]
+	if !ok {
+		return 0, false
+	}
+	switch value := raw.(type) {
+	case float64:
+		maxInt := int(^uint(0) >> 1)
+		if value <= 0 || math.Trunc(value) != value || value > float64(maxInt) {
+			return 0, false
+		}
+		return int(value), true
+	case int:
+		return value, value > 0
+	case int64:
+		maxInt := int64(int(^uint(0) >> 1))
+		if value <= 0 || value > maxInt {
+			return 0, false
+		}
+		return int(value), true
+	default:
+		return 0, false
 	}
 }

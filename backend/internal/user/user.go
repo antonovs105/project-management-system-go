@@ -2,6 +2,7 @@ package user
 
 import "time"
 
+// User is a local ActivityPub Person account used for authentication and app access.
 type User struct {
 	ID            string    `db:"id" json:"id"`
 	APID          string    `db:"ap_id" json:"ap_id"`
@@ -14,10 +15,12 @@ type User struct {
 	Summary       string    `db:"summary" json:"summary"`
 	PublicKeyPEM  string    `db:"public_key_pem" json:"-"`
 	PrivateKeyPEM string    `db:"private_key_pem" json:"-"`
+	TokenVersion  int       `db:"token_version" json:"-"`
 	CreatedAt     time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt     time.Time `db:"updated_at" json:"updated_at"`
 }
 
+// ListUsersOptions contains admin filters and pagination for local user listing.
 type ListUsersOptions struct {
 	Role   string
 	Query  string

@@ -23,6 +23,7 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteinbox"
 	"github.com/antonovs105/project-management-system-go/internal/adminaudit"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
+	authmiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
 	"github.com/antonovs105/project-management-system-go/internal/project"
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
 	"github.com/antonovs105/project-management-system-go/internal/user"
@@ -111,20 +112,23 @@ func TestUserPasswordChange(t *testing.T) {
 	createdUser, err := userService.RegisterUser(ctx, "password-user", "password-user@example.test", "password123")
 	require.NoError(t, err)
 
-	_, err = userService.Login(ctx, " password-user@example.test ", "password123")
+	oldToken, err := userService.Login(ctx, " password-user@example.test ", "password123")
 	require.NoError(t, err)
+	requireProtectedStatus(t, oldToken, userService, http.StatusOK)
 
 	err = userService.ChangePassword(ctx, createdUser.ID, "wrongpassword", "newpassword123")
 	require.ErrorIs(t, err, user.ErrInvalidCredentials)
 
 	err = userService.ChangePassword(ctx, createdUser.ID, "password123", "newpassword123")
 	require.NoError(t, err)
+	requireProtectedStatus(t, oldToken, userService, http.StatusUnauthorized)
 
 	_, err = userService.Login(ctx, createdUser.Email, "password123")
 	require.ErrorIs(t, err, user.ErrInvalidCredentials)
 
-	_, err = userService.Login(ctx, createdUser.Email, "newpassword123")
+	newToken, err := userService.Login(ctx, createdUser.Email, "newpassword123")
 	require.NoError(t, err)
+	requireProtectedStatus(t, newToken, userService, http.StatusOK)
 }
 
 func TestActivityPubFoundationFlow(t *testing.T) {
@@ -2105,6 +2109,24 @@ func (q *recordingDeliveryQueue) Enqueue(ctx context.Context, deliveryID string,
 
 func (q *recordingDeliveryQueue) Close() error {
 	return nil
+}
+
+func requireProtectedStatus(t *testing.T, token string, validator authmiddleware.TokenVersionValidator, expectedStatus int) {
+	t.Helper()
+
+	e := echo.New()
+	api := e.Group("/api")
+	api.Use(authmiddleware.JWTMiddleware([]byte("integration-secret"), validator))
+	api.GET("/me", func(c echo.Context) error {
+		return c.NoContent(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+	rec := httptest.NewRecorder()
+
+	e.ServeHTTP(rec, req)
+	require.Equal(t, expectedStatus, rec.Code, rec.Body.String())
 }
 
 func (r singleKeyRepo) ActivePrivateKey(ctx context.Context, actorID string) (*httpsig.ActorKey, error) {
