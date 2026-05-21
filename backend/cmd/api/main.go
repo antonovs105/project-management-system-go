@@ -254,6 +254,37 @@ func validateCORSConfig(production bool, origins []string) error {
 	return nil
 }
 
+// configureIPExtractor chooses how Echo resolves client IPs for logs and rate limits.
+func configureIPExtractor(e *echo.Echo, trustedProxyCIDRs []string) error {
+	extractor, err := trustedProxyIPExtractor(trustedProxyCIDRs)
+	if err != nil {
+		return err
+	}
+	e.IPExtractor = extractor
+	return nil
+}
+
+// trustedProxyIPExtractor trusts forwarded IP headers only from configured proxies.
+func trustedProxyIPExtractor(trustedProxyCIDRs []string) (echo.IPExtractor, error) {
+	if len(trustedProxyCIDRs) == 0 {
+		return echo.ExtractIPDirect(), nil
+	}
+
+	options := []echo.TrustOption{
+		echo.TrustLoopback(false),
+		echo.TrustLinkLocal(false),
+		echo.TrustPrivateNet(false),
+	}
+	for _, cidr := range trustedProxyCIDRs {
+		_, network, err := net.ParseCIDR(cidr)
+		if err != nil {
+			return nil, fmt.Errorf("TRUSTED_PROXY_CIDRS must contain CIDR ranges")
+		}
+		options = append(options, echo.TrustIPRange(network))
+	}
+	return echo.ExtractIPFromXFFHeader(options...), nil
+}
+
 // isLocalHost reports whether host points to the loopback development host.
 func isLocalHost(host string) bool {
 	host = strings.TrimSpace(host)
@@ -427,6 +458,9 @@ func main() {
 	}
 
 	e := echo.New()
+	if err := configureIPExtractor(e, splitCSVEnv("TRUSTED_PROXY_CIDRS")); err != nil {
+		log.Fatal(err)
+	}
 
 	registerGlobalMiddleware(e, os.Stdout, server.metrics)
 

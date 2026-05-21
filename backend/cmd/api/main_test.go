@@ -119,6 +119,33 @@ func TestValidateCORSConfigRejectsUnsafeProductionOrigins(t *testing.T) {
 	}
 }
 
+func TestTrustedProxyIPExtractorDefaultsToDirectRemoteAddress(t *testing.T) {
+	extractor, err := trustedProxyIPExtractor(nil)
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	req.RemoteAddr = "203.0.113.10:54321"
+	req.Header.Set(echo.HeaderXForwardedFor, "198.51.100.20")
+
+	require.Equal(t, "203.0.113.10", extractor(req))
+}
+
+func TestTrustedProxyIPExtractorUsesForwardedForFromTrustedProxy(t *testing.T) {
+	extractor, err := trustedProxyIPExtractor([]string{"192.0.2.0/24"})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	req.RemoteAddr = "192.0.2.10:54321"
+	req.Header.Set(echo.HeaderXForwardedFor, "198.51.100.20")
+
+	require.Equal(t, "198.51.100.20", extractor(req))
+}
+
+func TestTrustedProxyIPExtractorRejectsInvalidCIDR(t *testing.T) {
+	_, err := trustedProxyIPExtractor([]string{"192.0.2.10"})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "TRUSTED_PROXY_CIDRS")
+}
+
 func TestRequiredDatabaseTablesIncludeActivityPubFoundation(t *testing.T) {
 	require.Contains(t, requiredDatabaseTables, "actors")
 	require.Contains(t, requiredDatabaseTables, "ap_activities")
