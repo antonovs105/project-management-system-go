@@ -19,8 +19,8 @@ const ProjectGraph = lazy(() =>
 
 function tabClass(active: boolean): string {
   return [
-    "focus-ring inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium",
-    active ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100 hover:text-slate-950",
+    "focus-ring inline-flex h-9 items-center gap-2 rounded-full px-4 text-sm font-medium transition",
+    active ? "bg-zinc-950 text-white shadow-sm" : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950",
   ].join(" ");
 }
 
@@ -122,12 +122,14 @@ export function ProjectWorkspace() {
 
       {project.data ? (
         <>
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div className="flex flex-col gap-4 rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0">
-              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-cyan-700">{project.data.handle}</div>
-              <h1 className="truncate text-2xl font-semibold text-slate-950">{project.data.name}</h1>
-              <p className="mt-1 max-w-3xl text-sm text-slate-500">{project.data.description || "No description"}</p>
-              <p className="mt-2 text-xs text-slate-400">Updated {relativeDate(project.data.updated_at)}</p>
+              <div className="mb-2 inline-flex rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-medium text-zinc-500">
+                {project.data.handle}
+              </div>
+              <h1 className="truncate text-2xl font-semibold tracking-tight text-zinc-950">{project.data.name}</h1>
+              <p className="mt-1 max-w-3xl text-sm text-zinc-500">{project.data.description || "No description"}</p>
+              <p className="mt-2 text-xs text-zinc-400">Updated {relativeDate(project.data.updated_at)}</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button onClick={() => tickets.refetch()} disabled={tickets.isFetching}>
@@ -145,8 +147,8 @@ export function ProjectWorkspace() {
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 border-b border-slate-200 pb-3 md:flex-row md:items-center md:justify-between">
-            <div className="flex rounded-lg bg-white p-1 shadow-sm ring-1 ring-slate-200">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex w-fit rounded-full border border-zinc-200 bg-white p-1 shadow-sm">
               <Link to={`/projects/${activeProjectId}`} className={tabClass(view === "board")}>
                 Board
               </Link>
@@ -155,7 +157,9 @@ export function ProjectWorkspace() {
                 Graph
               </Link>
             </div>
-            <div className="text-sm text-slate-500">{tickets.data?.length || 0} tickets</div>
+            <div className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-sm text-zinc-500 shadow-sm">
+              {tickets.data?.length || 0} tickets
+            </div>
           </div>
 
           {tickets.isLoading ? <LoadingState label="Loading tickets" /> : null}

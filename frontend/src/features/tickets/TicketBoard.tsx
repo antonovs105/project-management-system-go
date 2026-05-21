@@ -36,21 +36,21 @@ function TicketCard({ ticket, onOpen }: { ticket: Ticket; onOpen: (ticketId: ID)
         transition,
         opacity: isDragging ? 0.45 : 1,
       }}
-      className="focus-ring w-full rounded-lg text-left"
+      className="focus-ring w-full rounded-2xl text-left"
       onClick={() => onOpen(ticket.id)}
     >
-      <Panel className="p-3 shadow-sm transition hover:border-cyan-300">
+      <Panel className="group p-3 transition hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-md">
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
             <div className="mb-2 flex flex-wrap gap-1.5">
               <StatusBadge value={ticket.type} kind="type" />
               <StatusBadge value={ticket.priority} kind="priority" />
             </div>
-            <h3 className="line-clamp-2 text-sm font-semibold leading-5 text-slate-950">{ticket.title}</h3>
-            {ticket.description ? <p className="mt-2 line-clamp-2 text-xs text-slate-500">{ticket.description}</p> : null}
+            <h3 className="line-clamp-2 text-sm font-semibold leading-5 text-zinc-950">{ticket.title}</h3>
+            {ticket.description ? <p className="mt-2 line-clamp-2 text-xs text-zinc-500">{ticket.description}</p> : null}
           </div>
           <span
-            className="flex h-7 w-7 shrink-0 touch-none items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"
+            className="flex h-7 w-7 shrink-0 touch-none items-center justify-center rounded-xl text-zinc-300 transition group-hover:text-zinc-500 hover:bg-zinc-100"
             {...attributes}
             {...listeners}
             aria-label="Drag ticket"
@@ -75,16 +75,18 @@ function BoardColumn({
   const { setNodeRef, isOver } = useDroppable({ id: status });
 
   return (
-    <section className="flex min-h-[520px] min-w-[280px] flex-1 flex-col rounded-lg border border-slate-200 bg-slate-100/70">
-      <div className="flex items-center justify-between border-b border-slate-200 px-3 py-3">
-        <div className="font-semibold text-slate-800">{columnTitle(status)}</div>
-        <span className="rounded bg-white px-2 py-0.5 text-xs font-semibold text-slate-500">{tickets.length}</span>
+    <section className="flex min-h-[520px] min-w-[290px] flex-1 flex-col rounded-3xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur">
+      <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
+        <div className="font-semibold text-zinc-900">{columnTitle(status)}</div>
+        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs font-semibold text-zinc-500">
+          {tickets.length}
+        </span>
       </div>
       <div
         ref={setNodeRef}
         className={[
-          "flex-1 space-y-2 overflow-y-auto p-2 transition",
-          isOver ? "bg-cyan-50" : "",
+          "flex-1 space-y-2 overflow-y-auto rounded-b-3xl p-2 transition",
+          isOver ? "bg-zinc-100" : "",
         ].join(" ")}
       >
         <SortableContext items={tickets.map((ticket) => ticket.id)} strategy={verticalListSortingStrategy}>
@@ -93,7 +95,7 @@ function BoardColumn({
           ))}
         </SortableContext>
         {tickets.length === 0 ? (
-          <div className="flex h-24 items-center justify-center rounded-md border border-dashed border-slate-300 text-xs text-slate-400">
+          <div className="flex h-24 items-center justify-center rounded-2xl border border-dashed border-zinc-300 text-xs text-zinc-400">
             Empty
           </div>
         ) : null}
@@ -150,15 +152,15 @@ export function TicketBoard({
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <div className="flex gap-3 overflow-x-auto pb-3">
+      <div className="flex gap-4 overflow-x-auto pb-3">
         {ticketStatuses.map((status) => (
           <BoardColumn key={status.id} status={status.id} tickets={grouped.get(status.id) || []} onOpen={onOpenTicket} />
         ))}
       </div>
       <DragOverlay>
         {activeTicket ? (
-          <div className="w-[280px]">
-            <Panel className="p-3 shadow-lg">
+          <div className="w-[290px]">
+            <Panel className="p-3 shadow-2xl">
               <div className="mb-2 flex gap-1.5">
                 <StatusBadge value={activeTicket.type} kind="type" />
                 <StatusBadge value={activeTicket.priority} kind="priority" />

@@ -4,37 +4,37 @@ import { Badge } from "./ui";
 function statusClass(status: TicketStatus): string {
   switch (status) {
     case "done":
-      return "bg-emerald-100 text-emerald-800";
+      return "border-zinc-300 bg-zinc-950 text-white";
     case "review":
-      return "bg-indigo-100 text-indigo-800";
+      return "border-zinc-300 bg-zinc-200 text-zinc-900";
     case "in_progress":
-      return "bg-cyan-100 text-cyan-800";
+      return "border-zinc-300 bg-white text-zinc-900";
     default:
-      return "bg-slate-100 text-slate-700";
+      return "border-zinc-200 bg-zinc-50 text-zinc-600";
   }
 }
 
 function priorityClass(priority: TicketPriority): string {
   switch (priority) {
     case "urgent":
-      return "bg-red-100 text-red-800";
+      return "border-zinc-950 bg-zinc-950 text-white";
     case "high":
-      return "bg-orange-100 text-orange-800";
+      return "border-zinc-300 bg-zinc-200 text-zinc-950";
     case "medium":
-      return "bg-amber-100 text-amber-800";
+      return "border-zinc-200 bg-white text-zinc-700";
     default:
-      return "bg-slate-100 text-slate-700";
+      return "border-zinc-200 bg-zinc-50 text-zinc-500";
   }
 }
 
 function typeClass(type: TicketType): string {
   switch (type) {
     case "epic":
-      return "bg-violet-100 text-violet-800";
+      return "border-zinc-950 bg-zinc-950 text-white";
     case "subtask":
-      return "bg-slate-200 text-slate-700";
+      return "border-zinc-200 bg-zinc-100 text-zinc-600";
     default:
-      return "bg-blue-100 text-blue-800";
+      return "border-zinc-200 bg-white text-zinc-900";
   }
 }
 
