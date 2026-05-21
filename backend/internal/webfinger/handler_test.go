@@ -3,6 +3,7 @@ package webfinger
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
@@ -33,6 +34,8 @@ func TestHandlerResolveNegotiatesJRDResponse(t *testing.T) {
 
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 			assert.Contains(t, rec.Header().Get(echo.HeaderContentType), jrdMediaType)
+			assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+			assertVaryContains(t, rec.Header(), echo.HeaderAccept)
 		})
 	}
 
@@ -61,4 +64,17 @@ func resolveWebFinger(t *testing.T, service *Service, accept string) *httptest.R
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 	return rec
+}
+
+func assertVaryContains(t *testing.T, header http.Header, expected string) {
+	t.Helper()
+
+	for _, value := range header.Values(echo.HeaderVary) {
+		for _, item := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(item), expected) {
+				return
+			}
+		}
+	}
+	require.Failf(t, "missing Vary value", "expected Vary to contain %s, got %v", expected, header.Values(echo.HeaderVary))
 }

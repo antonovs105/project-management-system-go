@@ -31,6 +31,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo, middleware ...echo.MiddlewareFunc
 
 // Resolve handles RFC 7033 resource lookup requests.
 func (h *Handler) Resolve(c echo.Context) error {
+	setJRDResponseHeaders(c)
 	if !acceptsJRDResponse(c.Request().Header.Get(echo.HeaderAccept)) {
 		return c.JSON(http.StatusNotAcceptable, map[string]string{"error": "accept header must allow webfinger json"})
 	}
@@ -52,6 +53,25 @@ func (h *Handler) Resolve(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to encode webfinger response"})
 	}
 	return c.Blob(http.StatusOK, jrdMediaType, raw)
+}
+
+// setJRDResponseHeaders marks negotiated WebFinger JSON as non-sniffable.
+func setJRDResponseHeaders(c echo.Context) {
+	header := c.Response().Header()
+	addVary(header, echo.HeaderAccept)
+	header.Set("X-Content-Type-Options", "nosniff")
+}
+
+// addVary appends a Vary value unless the response already carries it.
+func addVary(header http.Header, name string) {
+	for _, value := range header.Values(echo.HeaderVary) {
+		for _, item := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(item), name) {
+				return
+			}
+		}
+	}
+	header.Add(echo.HeaderVary, name)
 }
 
 // acceptsJRDResponse reports whether an Accept header allows WebFinger JSON.

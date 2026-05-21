@@ -568,17 +568,40 @@ func writeActivityJSON(c echo.Context, status int, doc any) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to encode activitypub document"})
 	}
+	setActivityPubResponseHeaders(c)
 	return c.Blob(status, ActivityJSONMediaType, raw)
 }
 
 // requireActivityPubAccept rejects reads that cannot accept ActivityPub JSON.
 func requireActivityPubAccept(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
+		setActivityPubResponseHeaders(c)
 		if !acceptsActivityPubResponse(c.Request().Header.Get(echo.HeaderAccept)) {
 			return c.JSON(http.StatusNotAcceptable, map[string]string{"error": "accept header must allow activitypub json"})
 		}
 		return next(c)
 	}
+}
+
+// setActivityPubResponseHeaders marks negotiated JSON-LD responses as non-sniffable.
+func setActivityPubResponseHeaders(c echo.Context) {
+	header := c.Response().Header()
+	addVary(header, echo.HeaderAccept)
+	addVary(header, echo.HeaderAuthorization)
+	addVary(header, "Signature-Input")
+	header.Set("X-Content-Type-Options", "nosniff")
+}
+
+// addVary appends a Vary value unless the response already carries it.
+func addVary(header http.Header, name string) {
+	for _, value := range header.Values(echo.HeaderVary) {
+		for _, item := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(item), name) {
+				return
+			}
+		}
+	}
+	header.Add(echo.HeaderVary, name)
 }
 
 // acceptsActivityPubResponse reports whether an Accept header allows ActivityPub JSON.

@@ -37,6 +37,7 @@ func TestHandlerReceiveUserInbox(t *testing.T) {
 
 	require.Equal(t, http.StatusAccepted, rec.Code)
 	assert.Contains(t, rec.Header().Get(echo.HeaderContentType), "application/json")
+	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
 	require.NotNil(t, repo.stored)
 	assert.Equal(t, "Follow", repo.stored.Type)
 	assert.Equal(t, "https://remote.example/activities/1", jsonField(t, rec.Body.String(), "activity_ap_id"))

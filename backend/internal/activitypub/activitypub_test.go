@@ -1,9 +1,13 @@
 package activitypub
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -118,4 +122,35 @@ func TestAcceptsActivityPubResponse(t *testing.T) {
 			assert.False(t, acceptsActivityPubResponse(header))
 		})
 	}
+}
+
+func TestActivityPubNegotiatedResponsesSetSecurityHeaders(t *testing.T) {
+	e := echo.New()
+	e.GET("/actor", func(c echo.Context) error {
+		return writeActivityJSON(c, http.StatusOK, ActorDocument("Person", "https://example.test/users/alice", "alice", "Alice", "", "public-key"))
+	}, requireActivityPubAccept)
+	req := httptest.NewRequest(http.MethodGet, "/actor", nil)
+	req.Header.Set(echo.HeaderAccept, ActivityJSONMediaType)
+	rec := httptest.NewRecorder()
+
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+	assertVaryContains(t, rec.Header(), echo.HeaderAccept)
+	assertVaryContains(t, rec.Header(), echo.HeaderAuthorization)
+	assertVaryContains(t, rec.Header(), "Signature-Input")
+}
+
+func assertVaryContains(t *testing.T, header http.Header, expected string) {
+	t.Helper()
+
+	for _, value := range header.Values(echo.HeaderVary) {
+		for _, item := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(item), expected) {
+				return
+			}
+		}
+	}
+	require.Failf(t, "missing Vary value", "expected Vary to contain %s, got %v", expected, header.Values(echo.HeaderVary))
 }

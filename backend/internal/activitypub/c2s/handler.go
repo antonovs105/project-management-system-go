@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
@@ -105,6 +106,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo, middleware ...echo.MiddlewareFunc
 
 // PostUserOutbox accepts supported local Create activities from an authenticated user.
 func (h *Handler) PostUserOutbox(c echo.Context) error {
+	setOutboxResponseHeaders(c)
 	if !isSupportedContentType(c.Request().Header.Get(echo.HeaderContentType)) {
 		return c.JSON(http.StatusUnsupportedMediaType, map[string]string{"error": "content type must be application/activity+json or application/ld+json"})
 	}
@@ -164,6 +166,25 @@ func (h *Handler) PostUserOutbox(c echo.Context) error {
 
 	c.Response().Header().Set(echo.HeaderLocation, created.APID)
 	return c.Blob(http.StatusCreated, activitypub.ActivityJSONMediaType, created.Document)
+}
+
+// setOutboxResponseHeaders marks negotiated C2S JSON-LD responses as non-sniffable.
+func setOutboxResponseHeaders(c echo.Context) {
+	header := c.Response().Header()
+	addVary(header, echo.HeaderAccept)
+	header.Set("X-Content-Type-Options", "nosniff")
+}
+
+// addVary appends a Vary value unless the response already carries it.
+func addVary(header http.Header, name string) {
+	for _, value := range header.Values(echo.HeaderVary) {
+		for _, item := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(item), name) {
+				return
+			}
+		}
+	}
+	header.Add(echo.HeaderVary, name)
 }
 
 // handleCreate dispatches supported Create object types to application services.
@@ -415,9 +436,13 @@ func acceptsActivityJSON(header string) bool {
 		return true
 	}
 	for _, part := range strings.Split(header, ",") {
-		mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(part))
+		mediaType, params, err := mime.ParseMediaType(strings.TrimSpace(part))
 		if err != nil {
 			mediaType = strings.TrimSpace(strings.Split(part, ";")[0])
+			params = nil
+		}
+		if isZeroQuality(params["q"]) {
+			continue
 		}
 		mediaType = strings.ToLower(mediaType)
 		if mediaType == "*/*" || mediaType == "application/*" || mediaType == "application/json" || isSupportedActivityMediaType(mediaType) {
@@ -431,6 +456,15 @@ func acceptsActivityJSON(header string) bool {
 func isSupportedActivityMediaType(mediaType string) bool {
 	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
 	return mediaType == activitypub.ActivityJSONMediaType || mediaType == "application/ld+json"
+}
+
+// isZeroQuality reports whether an Accept entry explicitly forbids a media type.
+func isZeroQuality(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	return err == nil && value <= 0
 }
 
 // firstString returns the first non-empty string from a string or string array value.

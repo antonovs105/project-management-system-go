@@ -38,6 +38,7 @@ func (h *Handler) ReceiveProjectInbox(c echo.Context) error {
 
 // receive validates request metadata, reads the bounded body, and delegates inbox handling.
 func (h *Handler) receive(c echo.Context, targetAPID string) error {
+	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
 	if !isActivityMediaType(c.Request().Header.Get(echo.HeaderContentType)) {
 		return c.JSON(http.StatusUnsupportedMediaType, errorResponse(ErrUnsupportedMedia))
 	}

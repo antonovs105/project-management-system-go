@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,6 +45,8 @@ func TestPostUserOutboxCreatesNote(t *testing.T) {
 
 	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
 	assert.Equal(t, "https://local.test/activities/create-note-1", rec.Header().Get(echo.HeaderLocation))
+	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+	assertVaryContains(t, rec.Header(), echo.HeaderAccept)
 	assert.Equal(t, "ticket-1", comments.ticketID)
 	assert.Equal(t, repo.user.ID, comments.authorID)
 	assert.Equal(t, "Ready for review", comments.content)
@@ -93,6 +96,14 @@ func TestPostUserOutboxRejectsNotAcceptable(t *testing.T) {
 	handler := NewHandlerWithRepository(newFakeRepository(), &fakeTicketCreator{}, &fakeCommentCreator{})
 
 	rec := postOutbox(t, handler, validNoteBody(), activitypub.ActivityJSONMediaType, "application/xml")
+
+	require.Equal(t, http.StatusNotAcceptable, rec.Code, rec.Body.String())
+}
+
+func TestPostUserOutboxRejectsZeroQualityActivityAccept(t *testing.T) {
+	handler := NewHandlerWithRepository(newFakeRepository(), &fakeTicketCreator{}, &fakeCommentCreator{})
+
+	rec := postOutbox(t, handler, validNoteBody(), activitypub.ActivityJSONMediaType, "application/activity+json;q=0")
 
 	require.Equal(t, http.StatusNotAcceptable, rec.Code, rec.Body.String())
 }
@@ -301,6 +312,19 @@ func signedTestToken(t *testing.T, secret []byte, subject string) string {
 	raw, err := token.SignedString(secret)
 	require.NoError(t, err)
 	return raw
+}
+
+func assertVaryContains(t *testing.T, header http.Header, expected string) {
+	t.Helper()
+
+	for _, value := range header.Values(echo.HeaderVary) {
+		for _, item := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(item), expected) {
+				return
+			}
+		}
+	}
+	require.Failf(t, "missing Vary value", "expected Vary to contain %s, got %v", expected, header.Values(echo.HeaderVary))
 }
 
 type fakeRepository struct {
