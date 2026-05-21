@@ -108,7 +108,7 @@ paths:
         $ref: "#/components/requestBodies/BootstrapAdmin"
       responses:
         "201":
-          description: First local admin actor created.
+          description: First local owner actor created.
           content:
             application/json:
               schema:
@@ -124,7 +124,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "409":
-          description: A local admin user already exists.
+          description: A local owner user already exists.
           content:
             application/json:
               schema:
@@ -176,7 +176,7 @@ paths:
         - name: role
           in: query
           schema:
-            $ref: "#/components/schemas/UserRole"
+            $ref: "#/components/schemas/InstanceRole"
         - name: q
           in: query
           schema:
@@ -208,14 +208,14 @@ paths:
       - $ref: "#/components/parameters/UserID"
     patch:
       tags: [Auth]
-      operationId: updateAdminUserRole
+      operationId: updateAdminUserInstanceRole
       security:
         - bearerAuth: []
       requestBody:
-        $ref: "#/components/requestBodies/UpdateUserRole"
+        $ref: "#/components/requestBodies/UpdateInstanceRole"
       responses:
         "200":
-          description: User role updated.
+          description: User instance role updated.
           content:
             application/json:
               schema:
@@ -373,6 +373,83 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProjectInvite"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/projects/{projectID}/roles:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [Projects]
+      operationId: listProjectRoles
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Project-local roles and permissions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProjectRole"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [Projects]
+      operationId: createProjectRole
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: "#/components/requestBodies/CreateProjectRole"
+      responses:
+        "201":
+          description: Project role created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectRole"
+        "400":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+  /api/projects/{projectID}/roles/{roleID}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/RoleID"
+    patch:
+      tags: [Projects]
+      operationId: updateProjectRole
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: "#/components/requestBodies/UpdateProjectRole"
+      responses:
+        "200":
+          description: Project role updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectRole"
+        "400":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [Projects]
+      operationId: deleteProjectRole
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Project role deleted.
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
   /api/projects/{projectID}/members/{userID}:
@@ -856,6 +933,10 @@ paths:
     $ref: "#/paths/~1api~1projects~1{projectID}"
   /api/v1/projects/{projectID}/members:
     $ref: "#/paths/~1api~1projects~1{projectID}~1members"
+  /api/v1/projects/{projectID}/roles:
+    $ref: "#/paths/~1api~1projects~1{projectID}~1roles"
+  /api/v1/projects/{projectID}/roles/{roleID}:
+    $ref: "#/paths/~1api~1projects~1{projectID}~1roles~1{roleID}"
   /api/v1/projects/{projectID}/members/{userID}:
     $ref: "#/paths/~1api~1projects~1{projectID}~1members~1{userID}"
   /api/v1/invites/{inviteID}/accept:
@@ -1129,6 +1210,13 @@ components:
       schema:
         type: string
         format: uuid
+    RoleID:
+      name: roleID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     TicketID:
       name: ticketID
       in: path
@@ -1165,13 +1253,16 @@ components:
         application/json:
           schema:
             type: object
-            required: [user_id, role]
+            required: [user_id]
             properties:
               user_id:
                 type: string
                 format: uuid
+              role_id:
+                type: string
+                format: uuid
               role:
-                $ref: "#/components/schemas/ProjectRole"
+                $ref: "#/components/schemas/ProjectRoleKey"
     AddTicketLink:
       required: true
       content:
@@ -1316,16 +1407,47 @@ components:
                 type: string
               description:
                 type: string
-    UpdateUserRole:
+    CreateProjectRole:
       required: true
       content:
         application/json:
           schema:
             type: object
-            required: [role]
+            required: [name, permissions]
             properties:
-              role:
-                $ref: "#/components/schemas/UserRole"
+              name:
+                type: string
+              description:
+                type: string
+              permissions:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProjectPermission"
+    UpdateProjectRole:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+              permissions:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProjectPermission"
+    UpdateInstanceRole:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [instance_role]
+            properties:
+              instance_role:
+                $ref: "#/components/schemas/InstanceRole"
     UpdateTicket:
       required: true
       content:
@@ -1373,7 +1495,7 @@ components:
     AdminAuditAction:
       type: string
       enum:
-        - user.role_updated
+        - user.instance_role_updated
         - federation.domain_blocked
         - federation.domain_unblocked
         - federation.delivery_retried
@@ -1788,7 +1910,7 @@ components:
           format: date-time
     ProjectInvite:
       type: object
-      required: [id, ap_id, project_id, inviter_actor_id, invitee_actor_id, role, status, created_at, updated_at]
+      required: [id, ap_id, project_id, inviter_actor_id, invitee_actor_id, role_id, role, status, created_at, updated_at]
       properties:
         id:
           type: string
@@ -1805,8 +1927,11 @@ components:
         invitee_actor_id:
           type: string
           format: uuid
+        role_id:
+          type: string
+          format: uuid
         role:
-          $ref: "#/components/schemas/ProjectRole"
+          $ref: "#/components/schemas/ProjectRoleKey"
         status:
           type: string
           enum: [pending, accepted, rejected, revoked]
@@ -1817,8 +1942,53 @@ components:
           type: string
           format: date-time
     ProjectRole:
+      type: object
+      required: [id, project_id, key, name, description, is_system, position, permissions, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        key:
+          $ref: "#/components/schemas/ProjectRoleKey"
+        name:
+          type: string
+        description:
+          type: string
+        is_system:
+          type: boolean
+        position:
+          type: integer
+        permissions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectPermission"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProjectRoleKey:
       type: string
-      enum: [owner, manager, developer, viewer]
+      description: Project-local role key. Default keys are owner, manager, developer, and viewer.
+    ProjectPermission:
+      type: string
+      enum:
+        - project.read
+        - project.update
+        - project.delete
+        - members.invite
+        - members.remove
+        - roles.manage
+        - tickets.create
+        - tickets.update
+        - tickets.delete
+        - comments.create
+        - comments.moderate
+        - federation.delivery.retry
     ReadinessResponse:
       type: object
       required: [status, checks]
@@ -1890,7 +2060,7 @@ components:
       enum: [epic, task, subtask]
     User:
       type: object
-      required: [id, ap_id, username, email, role, handle, name, summary, created_at, updated_at]
+      required: [id, ap_id, username, email, instance_role, handle, name, summary, created_at, updated_at]
       properties:
         id:
           type: string
@@ -1903,8 +2073,8 @@ components:
         email:
           type: string
           format: email
-        role:
-          $ref: "#/components/schemas/UserRole"
+        instance_role:
+          $ref: "#/components/schemas/InstanceRole"
         handle:
           type: string
         name:
@@ -1917,9 +2087,9 @@ components:
         updated_at:
           type: string
           format: date-time
-    UserRole:
+    InstanceRole:
       type: string
-      enum: [admin, worker]
+      enum: [owner, admin, user]
     WebFingerResource:
       type: object
       required: [subject, links]

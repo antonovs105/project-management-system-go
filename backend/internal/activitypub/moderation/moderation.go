@@ -5,8 +5,14 @@ import (
 	"time"
 )
 
-// RoleAdmin is the global role required for federation moderation.
-const RoleAdmin = "admin"
+const (
+	// InstanceRoleOwner can perform all federation moderation actions.
+	InstanceRoleOwner = "owner"
+	// InstanceRoleAdmin can perform federation moderation actions.
+	InstanceRoleAdmin = "admin"
+	// InstanceRoleUser has no federation moderation privileges.
+	InstanceRoleUser = "user"
+)
 
 var (
 	// ErrAdminRequired reports a non-admin moderation request.

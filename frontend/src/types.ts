@@ -1,14 +1,27 @@
 export type ID = string;
 
-export type UserRole = "admin" | "worker";
-export type ProjectRole = "owner" | "manager" | "developer" | "viewer";
+export type InstanceRole = "owner" | "admin" | "user";
+export type ProjectRoleKey = string;
+export type ProjectPermission =
+  | "project.read"
+  | "project.update"
+  | "project.delete"
+  | "members.invite"
+  | "members.remove"
+  | "roles.manage"
+  | "tickets.create"
+  | "tickets.update"
+  | "tickets.delete"
+  | "comments.create"
+  | "comments.moderate"
+  | "federation.delivery.retry";
 export type TicketStatus = "open" | "in_progress" | "review" | "done";
 export type TicketPriority = "low" | "medium" | "high" | "urgent";
 export type TicketType = "epic" | "task" | "subtask";
 
 export interface SessionUser {
   userId: ID;
-  role: UserRole;
+  instanceRole: InstanceRole;
   email?: string;
 }
 
@@ -29,8 +42,22 @@ export interface ProjectInvite {
   project_id: ID;
   inviter_actor_id: ID;
   invitee_actor_id: ID;
-  role: ProjectRole;
+  role_id: ID;
+  role: ProjectRoleKey;
   status: "pending" | "accepted" | "rejected" | "revoked";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectRole {
+  id: ID;
+  project_id: ID;
+  key: ProjectRoleKey;
+  name: string;
+  description: string;
+  is_system: boolean;
+  position: number;
+  permissions: ProjectPermission[];
   created_at: string;
   updated_at: string;
 }
@@ -89,7 +116,7 @@ export interface AdminUser {
   ap_id: string;
   username: string;
   email: string;
-  role: UserRole;
+  instance_role: InstanceRole;
   handle: string;
   name: string;
   created_at: string;

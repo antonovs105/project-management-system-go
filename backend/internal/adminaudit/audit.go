@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	// ActionUserRoleUpdated records a user role change by an admin.
-	ActionUserRoleUpdated = "user.role_updated"
+	// ActionUserInstanceRoleUpdated records a user instance-role change by an admin.
+	ActionUserInstanceRoleUpdated = "user.instance_role_updated"
 	// ActionFederationDomainBlocked records a domain moderation block.
 	ActionFederationDomainBlocked = "federation.domain_blocked"
 	// ActionFederationDomainUnblock records removal of a domain moderation block.
@@ -23,13 +23,15 @@ const (
 	// TargetTypeFederationDelivery identifies a federation delivery audit target.
 	TargetTypeFederationDelivery = "federation_delivery"
 
-	// roleAdmin is the stored user role required for audit inspection.
-	roleAdmin = "admin"
+	// instanceRoleOwner can inspect audit events.
+	instanceRoleOwner = "owner"
+	// instanceRoleAdmin can inspect audit events.
+	instanceRoleAdmin = "admin"
 )
 
 var (
 	// ErrAdminRequired reports that the current user is not an admin.
-	ErrAdminRequired = errors.New("admin role required")
+	ErrAdminRequired = errors.New("admin privileges required")
 	// ErrInvalidFilter reports malformed audit listing filters.
 	ErrInvalidFilter = errors.New("invalid admin audit filter")
 )
@@ -66,7 +68,7 @@ type ListOptions struct {
 // IsAction reports whether value is a supported audit action.
 func IsAction(value string) bool {
 	switch value {
-	case ActionUserRoleUpdated, ActionFederationDomainBlocked, ActionFederationDomainUnblock, ActionFederationDeliveryRetry:
+	case ActionUserInstanceRoleUpdated, ActionFederationDomainBlocked, ActionFederationDomainUnblock, ActionFederationDeliveryRetry:
 		return true
 	default:
 		return false

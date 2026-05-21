@@ -16,7 +16,7 @@ type fakeRepository struct {
 	events  []Event
 }
 
-func (r *fakeRepository) UserRole(ctx context.Context, userID string) (string, error) {
+func (r *fakeRepository) InstanceRole(ctx context.Context, userID string) (string, error) {
 	if r.roleErr != nil {
 		return "", r.roleErr
 	}
@@ -29,7 +29,7 @@ func (r *fakeRepository) ListEvents(ctx context.Context, options ListOptions) ([
 }
 
 func TestServiceListEventsRequiresAdmin(t *testing.T) {
-	service := NewService(&fakeRepository{role: "worker"})
+	service := NewService(&fakeRepository{role: "user"})
 
 	events, err := service.ListEvents(context.Background(), "user-1", ListOptions{})
 
@@ -47,7 +47,7 @@ func TestServiceListEventsTreatsMissingUserAsForbidden(t *testing.T) {
 }
 
 func TestServiceListEventsValidatesFilters(t *testing.T) {
-	repo := &fakeRepository{role: roleAdmin}
+	repo := &fakeRepository{role: instanceRoleAdmin}
 	service := NewService(repo)
 
 	events, err := service.ListEvents(context.Background(), "admin-1", ListOptions{

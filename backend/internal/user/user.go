@@ -9,7 +9,7 @@ type User struct {
 	Username      string    `db:"username" json:"username"`
 	Email         string    `db:"email" json:"email"`
 	PasswordHash  string    `db:"password_hash" json:"-"`
-	Role          string    `db:"role" json:"role"`
+	InstanceRole  string    `db:"instance_role" json:"instance_role"`
 	Handle        string    `db:"handle" json:"handle"`
 	Name          string    `db:"name" json:"name"`
 	Summary       string    `db:"summary" json:"summary"`
@@ -22,8 +22,8 @@ type User struct {
 
 // ListUsersOptions contains admin filters and pagination for local user listing.
 type ListUsersOptions struct {
-	Role   string
-	Query  string
-	Limit  int
-	Offset int
+	InstanceRole string
+	Query        string
+	Limit        int
+	Offset       int
 }

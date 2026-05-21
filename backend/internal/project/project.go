@@ -3,15 +3,122 @@ package project
 import "time"
 
 const (
-	// RoleOwner allows full control over a project and its membership.
+	// RoleOwner is the default full-control project role key.
 	RoleOwner = "owner"
-	// RoleManager allows project updates, member management, and ticket moderation.
+	// RoleManager is the default project-management role key.
 	RoleManager = "manager"
-	// RoleDeveloper allows ticket and comment work without member management.
+	// RoleDeveloper is the default ticket-work role key.
 	RoleDeveloper = "developer"
-	// RoleViewer allows read-only access to project resources.
+	// RoleViewer is the default read-only project role key.
 	RoleViewer = "viewer"
 )
+
+const (
+	// PermissionProjectRead allows reading project resources.
+	PermissionProjectRead = "project.read"
+	// PermissionProjectUpdate allows updating project metadata.
+	PermissionProjectUpdate = "project.update"
+	// PermissionProjectDelete allows deleting a project.
+	PermissionProjectDelete = "project.delete"
+	// PermissionMembersInvite allows inviting new project members.
+	PermissionMembersInvite = "members.invite"
+	// PermissionMembersRemove allows removing project members.
+	PermissionMembersRemove = "members.remove"
+	// PermissionRolesManage allows creating and changing project roles.
+	PermissionRolesManage = "roles.manage"
+	// PermissionTicketsCreate allows creating tickets.
+	PermissionTicketsCreate = "tickets.create"
+	// PermissionTicketsUpdate allows updating tickets and ticket links.
+	PermissionTicketsUpdate = "tickets.update"
+	// PermissionTicketsDelete allows deleting tickets.
+	PermissionTicketsDelete = "tickets.delete"
+	// PermissionCommentsCreate allows creating comments and deleting your own comments.
+	PermissionCommentsCreate = "comments.create"
+	// PermissionCommentsModerate allows deleting comments by other people.
+	PermissionCommentsModerate = "comments.moderate"
+	// PermissionFederationDeliveryRetry allows retrying failed project delivery jobs.
+	PermissionFederationDeliveryRetry = "federation.delivery.retry"
+)
+
+// SupportedProjectPermissions is the allow-list for configurable project permissions.
+var SupportedProjectPermissions = []string{
+	PermissionProjectRead,
+	PermissionProjectUpdate,
+	PermissionProjectDelete,
+	PermissionMembersInvite,
+	PermissionMembersRemove,
+	PermissionRolesManage,
+	PermissionTicketsCreate,
+	PermissionTicketsUpdate,
+	PermissionTicketsDelete,
+	PermissionCommentsCreate,
+	PermissionCommentsModerate,
+	PermissionFederationDeliveryRetry,
+}
+
+// DefaultProjectRoles seeds the initial permission model for each new project.
+var DefaultProjectRoles = []ProjectRole{
+	{
+		Key:         RoleOwner,
+		Name:        "Owner",
+		Description: "Full project control, including roles and destructive actions.",
+		IsSystem:    true,
+		Position:    10,
+		Permissions: []string{
+			PermissionProjectRead,
+			PermissionProjectUpdate,
+			PermissionProjectDelete,
+			PermissionMembersInvite,
+			PermissionMembersRemove,
+			PermissionRolesManage,
+			PermissionTicketsCreate,
+			PermissionTicketsUpdate,
+			PermissionTicketsDelete,
+			PermissionCommentsCreate,
+			PermissionCommentsModerate,
+			PermissionFederationDeliveryRetry,
+		},
+	},
+	{
+		Key:         RoleManager,
+		Name:        "Manager",
+		Description: "Can manage project work and membership without deleting the project.",
+		Position:    20,
+		Permissions: []string{
+			PermissionProjectRead,
+			PermissionProjectUpdate,
+			PermissionMembersInvite,
+			PermissionMembersRemove,
+			PermissionTicketsCreate,
+			PermissionTicketsUpdate,
+			PermissionTicketsDelete,
+			PermissionCommentsCreate,
+			PermissionCommentsModerate,
+			PermissionFederationDeliveryRetry,
+		},
+	},
+	{
+		Key:         RoleDeveloper,
+		Name:        "Developer",
+		Description: "Can work with tickets and comments.",
+		Position:    30,
+		Permissions: []string{
+			PermissionProjectRead,
+			PermissionTicketsCreate,
+			PermissionTicketsUpdate,
+			PermissionCommentsCreate,
+		},
+	},
+	{
+		Key:         RoleViewer,
+		Name:        "Viewer",
+		Description: "Can read project content only.",
+		Position:    40,
+		Permissions: []string{
+			PermissionProjectRead,
+		},
+	},
+}
 
 // Project is a local ActivityPub Group actor used as a project board.
 type Project struct {
@@ -34,6 +141,7 @@ type ProjectInvite struct {
 	ProjectID      string    `db:"project_id" json:"project_id"`
 	InviterActorID string    `db:"inviter_actor_id" json:"inviter_actor_id"`
 	InviteeActorID string    `db:"invitee_actor_id" json:"invitee_actor_id"`
+	RoleID         string    `db:"role_id" json:"role_id"`
 	Role           string    `db:"role" json:"role"`
 	Status         string    `db:"status" json:"status"`
 	CreatedAt      time.Time `db:"created_at" json:"created_at"`
@@ -44,8 +152,23 @@ type ProjectInvite struct {
 type ProjectMember struct {
 	UserID    string    `db:"user_id" json:"user_id"`
 	ProjectID string    `db:"project_id" json:"project_id"`
+	RoleID    string    `db:"role_id" json:"role_id"`
 	Role      string    `db:"role" json:"role"`
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
+// ProjectRole is a configurable project-local role with explicit permissions.
+type ProjectRole struct {
+	ID          string    `db:"id" json:"id"`
+	ProjectID   string    `db:"project_id" json:"project_id"`
+	Key         string    `db:"key" json:"key"`
+	Name        string    `db:"name" json:"name"`
+	Description string    `db:"description" json:"description"`
+	IsSystem    bool      `db:"is_system" json:"is_system"`
+	Position    int       `db:"position" json:"position"`
+	Permissions []string  `db:"-" json:"permissions"`
+	CreatedAt   time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
 }
 
 // ProjectListOptions contains pagination for project list responses.
@@ -75,42 +198,12 @@ type MembershipResult struct {
 	RecipientInboxes []string
 }
 
-// IsValidRole reports whether role is a supported project role.
-func IsValidRole(role string) bool {
-	switch role {
-	case RoleOwner, RoleManager, RoleDeveloper, RoleViewer:
-		return true
-	default:
-		return false
+// IsSupportedPermission reports whether permission can be assigned to a project role.
+func IsSupportedPermission(permission string) bool {
+	for _, supported := range SupportedProjectPermissions {
+		if permission == supported {
+			return true
+		}
 	}
-}
-
-// CanManageProject reports whether role can edit project metadata.
-func CanManageProject(role string) bool {
-	return role == RoleOwner || role == RoleManager
-}
-
-// CanDeleteProject reports whether role can delete a project.
-func CanDeleteProject(role string) bool {
-	return role == RoleOwner
-}
-
-// CanManageMembers reports whether role can invite or remove project members.
-func CanManageMembers(role string) bool {
-	return role == RoleOwner || role == RoleManager
-}
-
-// CanWriteTickets reports whether role can create and edit tickets or comments.
-func CanWriteTickets(role string) bool {
-	return role == RoleOwner || role == RoleManager || role == RoleDeveloper
-}
-
-// CanDeleteTickets reports whether role can delete tickets.
-func CanDeleteTickets(role string) bool {
-	return role == RoleOwner || role == RoleManager
-}
-
-// CanModerateComments reports whether role can delete comments written by others.
-func CanModerateComments(role string) bool {
-	return role == RoleOwner || role == RoleManager
+	return false
 }

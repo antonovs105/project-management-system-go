@@ -28,7 +28,7 @@ func TestService_CreateTicket(t *testing.T) {
 	}
 
 	t.Run("Success", func(t *testing.T) {
-		mockProject.On("GetProjectRole", ctx, projectID, reporterID).Return(project.RoleDeveloper, nil).Once()
+		mockProject.On("HasProjectPermission", ctx, projectID, reporterID, project.PermissionTicketsCreate).Return(true, nil).Once()
 		mockRepo.On("Create", ctx, mock.AnythingOfType("*ticket.Ticket")).Return([]string{"activity-1"}, nil).Run(func(args mock.Arguments) {
 			ticket := args.Get(1).(*Ticket)
 			ticket.ID = "ticket-1"
@@ -44,7 +44,7 @@ func TestService_CreateTicket(t *testing.T) {
 	})
 
 	t.Run("InvalidType", func(t *testing.T) {
-		mockProject.On("GetProjectRole", ctx, projectID, reporterID).Return(project.RoleDeveloper, nil).Once()
+		mockProject.On("HasProjectPermission", ctx, projectID, reporterID, project.PermissionTicketsCreate).Return(true, nil).Once()
 		invalidReq := req
 		invalidReq.Type = "invalid"
 
@@ -57,7 +57,7 @@ func TestService_CreateTicket(t *testing.T) {
 	})
 
 	t.Run("InvalidTitle", func(t *testing.T) {
-		mockProject.On("GetProjectRole", ctx, projectID, reporterID).Return(project.RoleDeveloper, nil).Once()
+		mockProject.On("HasProjectPermission", ctx, projectID, reporterID, project.PermissionTicketsCreate).Return(true, nil).Once()
 		invalidReq := req
 		invalidReq.Title = "   "
 
@@ -69,7 +69,7 @@ func TestService_CreateTicket(t *testing.T) {
 	})
 
 	t.Run("InvalidPriority", func(t *testing.T) {
-		mockProject.On("GetProjectRole", ctx, projectID, reporterID).Return(project.RoleDeveloper, nil).Once()
+		mockProject.On("HasProjectPermission", ctx, projectID, reporterID, project.PermissionTicketsCreate).Return(true, nil).Once()
 		invalidReq := req
 		invalidReq.Priority = "eventually"
 
@@ -142,7 +142,7 @@ func TestService_UpdateTicketValidatesFields(t *testing.T) {
 
 	mockRepo.On("GetByID", ctx, ticketID).Return(storedTicket, nil).Once()
 	mockProject.On("GetProjectByID", ctx, projectID, actorID).Return(&project.Project{ID: projectID}, nil).Once()
-	mockProject.On("GetProjectRole", ctx, projectID, actorID).Return(project.RoleDeveloper, nil).Once()
+	mockProject.On("HasProjectPermission", ctx, projectID, actorID, project.PermissionTicketsUpdate).Return(true, nil).Once()
 
 	err := service.UpdateTicket(ctx, UpdateTicketRequest{Title: &blankTitle}, ticketID, actorID)
 
@@ -176,7 +176,7 @@ func TestService_UpdateTicketUsesActingUser(t *testing.T) {
 
 	mockRepo.On("GetByID", ctx, ticketID).Return(storedTicket, nil).Once()
 	mockProject.On("GetProjectByID", ctx, projectID, actorID).Return(&project.Project{ID: projectID}, nil).Once()
-	mockProject.On("GetProjectRole", ctx, projectID, actorID).Return(project.RoleDeveloper, nil).Once()
+	mockProject.On("HasProjectPermission", ctx, projectID, actorID, project.PermissionTicketsUpdate).Return(true, nil).Once()
 	mockRepo.On("Update", ctx, mock.MatchedBy(func(t *Ticket) bool {
 		return t.ID == ticketID && t.Status == status && t.ReporterID == reporterID
 	}), actorID).Return([]string{"activity-1"}, nil).Once()
@@ -210,7 +210,7 @@ func TestService_AddTicketLink(t *testing.T) {
 
 		mockRepo.On("GetByID", ctx, targetID).Return(targetTicket, nil).Once()
 		mockProject.On("GetProjectByID", ctx, projectID, userID).Return(&project.Project{}, nil).Once()
-		mockProject.On("GetProjectRole", ctx, projectID, userID).Return(project.RoleDeveloper, nil).Once()
+		mockProject.On("HasProjectPermission", ctx, projectID, userID, project.PermissionTicketsUpdate).Return(true, nil).Once()
 
 		// Mock GetLinksByProjectID for cycle check (empty list = no cycle)
 		mockRepo.On("GetLinksByProjectID", ctx, projectID).Return([]TicketLink{}, nil).Once()
@@ -236,7 +236,7 @@ func TestService_AddTicketLink(t *testing.T) {
 
 		mockRepo.On("GetByID", ctx, "ticket-100").Return(tktA, nil).Once()
 		mockProject.On("GetProjectByID", ctx, projectID, userID).Return(&project.Project{}, nil).Once()
-		mockProject.On("GetProjectRole", ctx, projectID, userID).Return(project.RoleDeveloper, nil).Once()
+		mockProject.On("HasProjectPermission", ctx, projectID, userID, project.PermissionTicketsUpdate).Return(true, nil).Once()
 
 		// Existing links: A->B
 		existingLink := TicketLink{SourceID: "ticket-100", TargetID: "ticket-101", LinkType: "blocks"}

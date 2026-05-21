@@ -54,20 +54,20 @@ func (s *Service) ListEvents(ctx context.Context, adminUserID string, options Li
 	return s.repo.ListEvents(ctx, options)
 }
 
-// requireAdmin verifies that the current user has the global admin role.
+// requireAdmin verifies that the current user has instance admin privileges.
 func (s *Service) requireAdmin(ctx context.Context, userID string) error {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return ErrAdminRequired
 	}
-	role, err := s.repo.UserRole(ctx, userID)
+	role, err := s.repo.InstanceRole(ctx, userID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return ErrAdminRequired
 		}
 		return err
 	}
-	if role != roleAdmin {
+	if role != instanceRoleOwner && role != instanceRoleAdmin {
 		return ErrAdminRequired
 	}
 	return nil

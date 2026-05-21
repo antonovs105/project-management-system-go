@@ -16,6 +16,7 @@ import (
 type ProjectChecker interface {
 	GetProjectByID(ctx context.Context, projectID, userID string) (*project.Project, error)
 	GetProjectRole(ctx context.Context, projectID, userID string) (string, error)
+	HasProjectPermission(ctx context.Context, projectID, userID, permission string) (bool, error)
 }
 
 // Service contains ticket, assignment, and dependency workflows.
@@ -50,6 +51,11 @@ func (s *Service) SetDelivery(delivery DeliveryEnqueuer) {
 // GetProjectRole returns a user's role in a project through the project service.
 func (s *Service) GetProjectRole(ctx context.Context, projectID, userID string) (string, error) {
 	return s.projectService.GetProjectRole(ctx, projectID, userID)
+}
+
+// HasProjectPermission returns a user's project permission through the project service.
+func (s *Service) HasProjectPermission(ctx context.Context, projectID, userID, permission string) (bool, error) {
+	return s.projectService.HasProjectPermission(ctx, projectID, userID, permission)
 }
 
 // CreateTicketRequest contains fields for creating a ticket.
@@ -98,7 +104,7 @@ var (
 
 // CreateTicket creates a ticket and records its ActivityPub Create activity.
 func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, projectID, reporterID string) (*Ticket, error) {
-	if err := s.requireProjectPermission(ctx, projectID, reporterID, project.CanWriteTickets, "insufficient permissions: viewers cannot create tickets"); err != nil {
+	if err := s.requireProjectPermission(ctx, projectID, reporterID, project.PermissionTicketsCreate, "insufficient permissions: missing tickets.create"); err != nil {
 		return nil, err
 	}
 
@@ -219,7 +225,7 @@ func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, tic
 	if err != nil {
 		return err
 	}
-	if err := s.requireProjectPermission(ctx, ticketToUpdate.ProjectID, userID, project.CanWriteTickets, "insufficient permissions: viewers cannot update tickets"); err != nil {
+	if err := s.requireProjectPermission(ctx, ticketToUpdate.ProjectID, userID, project.PermissionTicketsUpdate, "insufficient permissions: missing tickets.update"); err != nil {
 		return err
 	}
 
@@ -341,7 +347,7 @@ func (s *Service) DeleteTicket(ctx context.Context, ticketID, userID string) err
 	if err != nil {
 		return err
 	}
-	if err := s.requireProjectPermission(ctx, ticket.ProjectID, userID, project.CanDeleteTickets, "insufficient permissions: only owners or managers can delete tickets"); err != nil {
+	if err := s.requireProjectPermission(ctx, ticket.ProjectID, userID, project.PermissionTicketsDelete, "insufficient permissions: missing tickets.delete"); err != nil {
 		return err
 	}
 
@@ -376,7 +382,7 @@ func (s *Service) AddTicketLink(ctx context.Context, sourceID, targetID string, 
 	if source.ProjectID != target.ProjectID {
 		return invalidTicketInput("cannot link tickets from different projects")
 	}
-	if err := s.requireProjectPermission(ctx, source.ProjectID, userID, project.CanWriteTickets, "insufficient permissions: viewers cannot update ticket links"); err != nil {
+	if err := s.requireProjectPermission(ctx, source.ProjectID, userID, project.PermissionTicketsUpdate, "insufficient permissions: missing tickets.update"); err != nil {
 		return err
 	}
 
@@ -482,7 +488,7 @@ func (s *Service) RemoveTicketLink(ctx context.Context, linkID, projectID, userI
 	if err != nil {
 		return err
 	}
-	if err := s.requireProjectPermission(ctx, source.ProjectID, userID, project.CanWriteTickets, "insufficient permissions: viewers cannot update ticket links"); err != nil {
+	if err := s.requireProjectPermission(ctx, source.ProjectID, userID, project.PermissionTicketsUpdate, "insufficient permissions: missing tickets.update"); err != nil {
 		return err
 	}
 	return s.repo.DeleteLink(ctx, linkID)
@@ -564,13 +570,13 @@ func (s *Service) GetTicketGraph(ctx context.Context, projectID, userID string) 
 	return response, nil
 }
 
-// requireProjectPermission checks a project role predicate and normalizes denial errors.
-func (s *Service) requireProjectPermission(ctx context.Context, projectID, userID string, allowed func(string) bool, deniedMessage string) error {
-	role, err := s.projectService.GetProjectRole(ctx, projectID, userID)
+// requireProjectPermission checks a project permission and normalizes denial errors.
+func (s *Service) requireProjectPermission(ctx context.Context, projectID, userID string, permission string, deniedMessage string) error {
+	allowed, err := s.projectService.HasProjectPermission(ctx, projectID, userID, permission)
 	if err != nil {
 		return errors.New("project not found or access denied")
 	}
-	if !allowed(role) {
+	if !allowed {
 		return errors.New(deniedMessage)
 	}
 	return nil

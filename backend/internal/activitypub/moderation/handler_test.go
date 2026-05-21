@@ -19,7 +19,7 @@ const testFederationDeliveryID = "44444444-4444-4444-8444-444444444444"
 func TestHandlerListsDomainBlocks(t *testing.T) {
 	creator := "admin-1"
 	repo := &fakeRepository{
-		role: RoleAdmin,
+		role: InstanceRoleAdmin,
 		blocks: []DomainBlock{
 			{
 				ID:        "block-1",
@@ -45,7 +45,7 @@ func TestHandlerListsDomainBlocks(t *testing.T) {
 }
 
 func TestHandlerBlocksDomain(t *testing.T) {
-	repo := &fakeRepository{role: RoleAdmin}
+	repo := &fakeRepository{role: InstanceRoleAdmin}
 	e := newModerationHandlerEcho(repo, "admin-1")
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/federation/domain-blocks", strings.NewReader(`{"domain":"Remote.Example","reason":"spam"}`))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -59,7 +59,7 @@ func TestHandlerBlocksDomain(t *testing.T) {
 }
 
 func TestHandlerRejectsNonAdmin(t *testing.T) {
-	e := newModerationHandlerEcho(&fakeRepository{role: "worker"}, "user-1")
+	e := newModerationHandlerEcho(&fakeRepository{role: InstanceRoleUser}, "user-1")
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/federation/domain-blocks", nil)
 	rec := httptest.NewRecorder()
 
@@ -70,7 +70,7 @@ func TestHandlerRejectsNonAdmin(t *testing.T) {
 }
 
 func TestHandlerUnblocksDomain(t *testing.T) {
-	repo := &fakeRepository{role: RoleAdmin}
+	repo := &fakeRepository{role: InstanceRoleAdmin}
 	e := newModerationHandlerEcho(repo, "admin-1")
 	req := httptest.NewRequest(http.MethodDelete, "/api/admin/federation/domain-blocks/Remote.Example", nil)
 	rec := httptest.NewRecorder()
@@ -84,7 +84,7 @@ func TestHandlerUnblocksDomain(t *testing.T) {
 func TestHandlerListsRemoteActors(t *testing.T) {
 	fetchError := "invalid actor document"
 	repo := &fakeRepository{
-		role: RoleAdmin,
+		role: InstanceRoleAdmin,
 		actors: []RemoteActorInspection{
 			{
 				ID:           "actor-1",
@@ -117,7 +117,7 @@ func TestHandlerListsRemoteActors(t *testing.T) {
 func TestHandlerListsFederationDeliveries(t *testing.T) {
 	statusCode := http.StatusServiceUnavailable
 	repo := &fakeRepository{
-		role: RoleAdmin,
+		role: InstanceRoleAdmin,
 		deliveries: []FederationDeliveryInspection{
 			{
 				ID:              "delivery-1",
@@ -151,7 +151,7 @@ func TestHandlerListsFederationDeliveries(t *testing.T) {
 
 func TestHandlerGetsFederationDeliverySummary(t *testing.T) {
 	repo := &fakeRepository{
-		role: RoleAdmin,
+		role: InstanceRoleAdmin,
 		summary: &FederationDeliverySummary{
 			Total:        4,
 			Pending:      1,
@@ -190,7 +190,7 @@ func TestHandlerGetsFederationDeliverySummary(t *testing.T) {
 }
 
 func TestHandlerRetriesFederationDelivery(t *testing.T) {
-	repo := &fakeRepository{role: RoleAdmin}
+	repo := &fakeRepository{role: InstanceRoleAdmin}
 	e := newModerationHandlerEcho(repo, "admin-1")
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/federation/deliveries/"+testFederationDeliveryID+"/retry", nil)
 	rec := httptest.NewRecorder()
@@ -206,7 +206,7 @@ func TestHandlerRetriesFederationDelivery(t *testing.T) {
 }
 
 func TestHandlerMapsFederationDeliveryRetryErrors(t *testing.T) {
-	e := newModerationHandlerEcho(&fakeRepository{role: RoleAdmin, retryErr: delivery.ErrDeliveryRetryUnavailable}, "admin-1")
+	e := newModerationHandlerEcho(&fakeRepository{role: InstanceRoleAdmin, retryErr: delivery.ErrDeliveryRetryUnavailable}, "admin-1")
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/federation/deliveries/"+testFederationDeliveryID+"/retry", nil)
 	rec := httptest.NewRecorder()
 
@@ -217,7 +217,7 @@ func TestHandlerMapsFederationDeliveryRetryErrors(t *testing.T) {
 }
 
 func TestHandlerRejectsInvalidInspectionFilters(t *testing.T) {
-	e := newModerationHandlerEcho(&fakeRepository{role: RoleAdmin}, "admin-1")
+	e := newModerationHandlerEcho(&fakeRepository{role: InstanceRoleAdmin}, "admin-1")
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/federation/remote-actors?fetch_error=sometimes", nil)
 	rec := httptest.NewRecorder()
 

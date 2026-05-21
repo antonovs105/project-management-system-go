@@ -72,7 +72,7 @@ func TestService_GetProjectByID(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		mockRepo.On("GetByID", ctx, projectID).Return(expectedProject, nil).Once()
-		mockRepo.On("GetUserRole", ctx, userID, projectID).Return("owner", nil).Once()
+		mockRepo.On("HasPermission", ctx, projectID, userID, PermissionProjectRead).Return(true, nil).Once()
 
 		p, err := service.GetProjectByID(ctx, projectID, userID)
 
@@ -83,7 +83,7 @@ func TestService_GetProjectByID(t *testing.T) {
 
 	t.Run("AccessDenied", func(t *testing.T) {
 		mockRepo.On("GetByID", ctx, projectID).Return(expectedProject, nil).Once()
-		mockRepo.On("GetUserRole", ctx, userID, projectID).Return("", errors.New("not a member")).Once()
+		mockRepo.On("HasPermission", ctx, projectID, userID, PermissionProjectRead).Return(false, nil).Once()
 
 		p, err := service.GetProjectByID(ctx, projectID, userID)
 

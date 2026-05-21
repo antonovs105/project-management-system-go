@@ -93,7 +93,7 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
               {mode === "login" ? "Sign in" : "Create account"}
             </h2>
             <p className="mt-1 text-sm text-zinc-500">
-              {mode === "login" ? "Open your workspace." : "Create a worker account."}
+              {mode === "login" ? "Open your workspace." : "Create a regular account."}
             </p>
           </div>
 

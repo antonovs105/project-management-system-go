@@ -5,7 +5,9 @@ import type {
   ID,
   Project,
   ProjectInvite,
+  ProjectPermission,
   ProjectRole,
+  ProjectRoleKey,
   Ticket,
   TicketPriority,
   TicketStatus,
@@ -80,7 +82,20 @@ export interface UpdateTicketPayload {
 
 export interface AddProjectMemberPayload {
   user_id: ID;
-  role: ProjectRole;
+  role_id?: ID;
+  role?: ProjectRoleKey;
+}
+
+export interface CreateProjectRolePayload {
+  name: string;
+  description?: string;
+  permissions: ProjectPermission[];
+}
+
+export interface UpdateProjectRolePayload {
+  name?: string;
+  description?: string;
+  permissions?: ProjectPermission[];
 }
 
 interface LoginResponse {
@@ -153,6 +168,25 @@ export const api = {
   async inviteProjectMember(projectId: ID, payload: AddProjectMemberPayload): Promise<ProjectInvite> {
     const { data } = await http.post<ProjectInvite>(`${apiPrefix}/projects/${projectId}/members`, payload);
     return data;
+  },
+
+  async listProjectRoles(projectId: ID): Promise<ProjectRole[]> {
+    const { data } = await http.get<ProjectRole[] | null>(`${apiPrefix}/projects/${projectId}/roles`);
+    return asArray(data);
+  },
+
+  async createProjectRole(projectId: ID, payload: CreateProjectRolePayload): Promise<ProjectRole> {
+    const { data } = await http.post<ProjectRole>(`${apiPrefix}/projects/${projectId}/roles`, payload);
+    return data;
+  },
+
+  async updateProjectRole(projectId: ID, roleId: ID, payload: UpdateProjectRolePayload): Promise<ProjectRole> {
+    const { data } = await http.patch<ProjectRole>(`${apiPrefix}/projects/${projectId}/roles/${roleId}`, payload);
+    return data;
+  },
+
+  async deleteProjectRole(projectId: ID, roleId: ID): Promise<void> {
+    await http.delete(`${apiPrefix}/projects/${projectId}/roles/${roleId}`);
   },
 
   async listTickets(projectId: ID): Promise<Ticket[]> {

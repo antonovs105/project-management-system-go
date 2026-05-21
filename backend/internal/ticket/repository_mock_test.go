@@ -95,3 +95,8 @@ func (m *MockProjectChecker) GetProjectRole(ctx context.Context, projectID, user
 	args := m.Called(ctx, projectID, userID)
 	return args.String(0), args.Error(1)
 }
+
+func (m *MockProjectChecker) HasProjectPermission(ctx context.Context, projectID, userID, permission string) (bool, error) {
+	args := m.Called(ctx, projectID, userID, permission)
+	return args.Bool(0), args.Error(1)
+}

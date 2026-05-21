@@ -47,7 +47,7 @@ func (m *MockRepository) TokenVersion(ctx context.Context, userID string) (int, 
 	return args.Int(0), args.Error(1)
 }
 
-func (m *MockRepository) UserRole(ctx context.Context, userID string) (string, error) {
+func (m *MockRepository) InstanceRole(ctx context.Context, userID string) (string, error) {
 	args := m.Called(ctx, userID)
 	return args.String(0), args.Error(1)
 }
@@ -60,7 +60,7 @@ func (m *MockRepository) ListUsers(ctx context.Context, options ListUsersOptions
 	return args.Get(0).([]User), args.Error(1)
 }
 
-func (m *MockRepository) UpdateUserRole(ctx context.Context, adminUserID, userID, role string) (*User, error) {
+func (m *MockRepository) UpdateInstanceRole(ctx context.Context, adminUserID, userID, role string) (*User, error) {
 	args := m.Called(ctx, adminUserID, userID, role)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)

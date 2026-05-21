@@ -235,11 +235,10 @@ func (r *PgRepository) ProjectDeliveries(ctx context.Context, projectID string, 
 		return nil, err
 	}
 
-	role, err := r.projectDeliveryRole(ctx, r.db, projectID, userID)
+	canRetry, err := r.canRetryProjectDeliveries(ctx, r.db, projectID, userID)
 	if err != nil {
 		return nil, err
 	}
-	canRetry := canRetryProjectDeliveries(role)
 
 	deliveries := make([]ProjectDelivery, 0)
 	err = r.db.SelectContext(ctx, &deliveries, `
@@ -281,7 +280,7 @@ func (r *PgRepository) ProjectDeliveries(ctx context.Context, projectID string, 
 
 // ProjectDeliverySummary returns aggregate delivery state counts for a project.
 func (r *PgRepository) ProjectDeliverySummary(ctx context.Context, projectID string, userID string) (*ProjectDeliverySummary, error) {
-	role, err := r.projectDeliveryRole(ctx, r.db, projectID, userID)
+	canRetry, err := r.canRetryProjectDeliveries(ctx, r.db, projectID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +309,7 @@ func (r *PgRepository) ProjectDeliverySummary(ctx context.Context, projectID str
 			COUNT(*) FILTER (WHERE state IN ('failed', 'dead'))::int AS retryable,
 			$2 AS can_retry
 		FROM scoped_deliveries
-	`, projectID, canRetryProjectDeliveries(role))
+	`, projectID, canRetry)
 	if err != nil {
 		return nil, err
 	}
@@ -325,11 +324,11 @@ func (r *PgRepository) RetryProjectDelivery(ctx context.Context, projectID strin
 	}
 	defer tx.Rollback()
 
-	role, err := r.projectDeliveryRole(ctx, tx, projectID, userID)
+	canRetry, err := r.canRetryProjectDeliveries(ctx, tx, projectID, userID)
 	if err != nil {
 		return nil, err
 	}
-	if !canRetryProjectDeliveries(role) {
+	if !canRetry {
 		return nil, ErrDeliveryRetryDenied
 	}
 
@@ -526,14 +525,14 @@ func deliverySelect() string {
 	`
 }
 
-// projectDeliveryRole resolves the user's role for delivery inspection and retry.
-func (r *PgRepository) projectDeliveryRole(ctx context.Context, q sqlx.QueryerContext, projectID string, userID string) (string, error) {
-	role, err := r.projectMemberRole(ctx, q, projectID, userID)
+// canRetryProjectDeliveries resolves whether a user can inspect and retry project deliveries.
+func (r *PgRepository) canRetryProjectDeliveries(ctx context.Context, q sqlx.QueryerContext, projectID string, userID string) (bool, error) {
+	canRetry, err := r.projectMemberCanRetry(ctx, q, projectID, userID)
 	if err == nil {
-		return role, nil
+		return canRetry, nil
 	}
 	if !errors.Is(err, ErrProjectAccessDenied) {
-		return "", err
+		return false, err
 	}
 
 	var deletedByUser bool
@@ -551,32 +550,47 @@ func (r *PgRepository) projectDeliveryRole(ctx context.Context, q sqlx.QueryerCo
 				AND project_actor.is_local = true
 		)
 	`, projectID, userID); err != nil {
-		return "", err
+		return false, err
 	}
 	if deletedByUser {
-		return "owner", nil
+		return true, nil
 	}
-	return "", ErrProjectAccessDenied
+	return false, ErrProjectAccessDenied
 }
 
-// projectMemberRole returns the user's project role or access-denied sentinel.
-func (r *PgRepository) projectMemberRole(ctx context.Context, q sqlx.QueryerContext, projectID string, userID string) (string, error) {
-	var role string
-	err := sqlx.GetContext(ctx, q, &role, `
-		SELECT role
-		FROM project_members
-		WHERE project_id = $1 AND user_id = $2
+// projectMemberCanRetry returns the user's retry permission or access-denied sentinel.
+func (r *PgRepository) projectMemberCanRetry(ctx context.Context, q sqlx.QueryerContext, projectID string, userID string) (bool, error) {
+	var canRetry bool
+	err := sqlx.GetContext(ctx, q, &canRetry, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM project_members member
+			JOIN project_role_permissions permission ON permission.role_id = member.role_id
+			WHERE member.project_id = $1
+				AND member.user_id = $2
+				AND permission.permission = 'federation.delivery.retry'
+		)
 	`, projectID, userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", ErrProjectAccessDenied
+			return false, ErrProjectAccessDenied
 		}
-		return "", err
+		return false, err
 	}
-	return role, nil
-}
-
-// canRetryProjectDeliveries reports whether a project role may retry deliveries.
-func canRetryProjectDeliveries(role string) bool {
-	return role == "owner" || role == "manager"
+	if !canRetry {
+		var member bool
+		if err := sqlx.GetContext(ctx, q, &member, `
+			SELECT EXISTS(
+				SELECT 1
+				FROM project_members
+				WHERE project_id = $1 AND user_id = $2
+			)
+		`, projectID, userID); err != nil {
+			return false, err
+		}
+		if !member {
+			return false, ErrProjectAccessDenied
+		}
+	}
+	return canRetry, nil
 }

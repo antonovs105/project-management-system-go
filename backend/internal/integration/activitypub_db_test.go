@@ -44,7 +44,7 @@ func TestAdminBootstrapCreatesOnlyOneAdmin(t *testing.T) {
 
 	admin, err := userService.BootstrapAdmin(ctx, "admin", "admin@example.test", "password123")
 	require.NoError(t, err)
-	assert.Equal(t, user.RoleAdmin, admin.Role)
+	assert.Equal(t, user.InstanceRoleOwner, admin.InstanceRole)
 	assert.Empty(t, admin.PasswordHash)
 	requireObjectType(t, db, admin.APID, "Person")
 	requireRowCount(t, db, "actors", 1)
@@ -52,8 +52,8 @@ func TestAdminBootstrapCreatesOnlyOneAdmin(t *testing.T) {
 	requireRowCount(t, db, "ap_objects", 1)
 
 	var storedRole string
-	require.NoError(t, db.GetContext(ctx, &storedRole, `SELECT role FROM users WHERE id = $1`, admin.ID))
-	assert.Equal(t, user.RoleAdmin, storedRole)
+	require.NoError(t, db.GetContext(ctx, &storedRole, `SELECT instance_role FROM users WHERE id = $1`, admin.ID))
+	assert.Equal(t, user.InstanceRoleOwner, storedRole)
 
 	duplicate, err := userService.BootstrapAdmin(ctx, "second-admin", "second-admin@example.test", "password123")
 	require.ErrorIs(t, err, user.ErrAdminAlreadyExists)
@@ -77,26 +77,29 @@ func TestAdminUserManagement(t *testing.T) {
 	_, err = userService.ListUsers(ctx, worker.ID, user.ListUsersOptions{})
 	require.ErrorIs(t, err, user.ErrAdminRequired)
 
-	users, err := userService.ListUsers(ctx, admin.ID, user.ListUsersOptions{Role: user.RoleWorker, Query: "work", Limit: 1})
+	users, err := userService.ListUsers(ctx, admin.ID, user.ListUsersOptions{InstanceRole: user.InstanceRoleUser, Query: "work", Limit: 1})
 	require.NoError(t, err)
 	require.Len(t, users, 1)
 	assert.Equal(t, worker.ID, users[0].ID)
 
-	promoted, err := userService.UpdateUserRole(ctx, admin.ID, worker.ID, user.RoleAdmin)
+	promoted, err := userService.UpdateInstanceRole(ctx, admin.ID, worker.ID, user.InstanceRoleAdmin)
 	require.NoError(t, err)
-	assert.Equal(t, user.RoleAdmin, promoted.Role)
+	assert.Equal(t, user.InstanceRoleAdmin, promoted.InstanceRole)
 
-	demoted, err := userService.UpdateUserRole(ctx, worker.ID, admin.ID, user.RoleWorker)
+	_, err = userService.UpdateInstanceRole(ctx, worker.ID, admin.ID, user.InstanceRoleUser)
+	require.ErrorIs(t, err, user.ErrOwnerRequired)
+
+	demoted, err := userService.UpdateInstanceRole(ctx, admin.ID, worker.ID, user.InstanceRoleUser)
 	require.NoError(t, err)
-	assert.Equal(t, user.RoleWorker, demoted.Role)
+	assert.Equal(t, user.InstanceRoleUser, demoted.InstanceRole)
 
-	_, err = userService.UpdateUserRole(ctx, worker.ID, worker.ID, user.RoleWorker)
+	_, err = userService.UpdateInstanceRole(ctx, admin.ID, admin.ID, user.InstanceRoleUser)
 	require.ErrorIs(t, err, user.ErrCannotDemoteLastAdmin)
 
 	auditService := adminaudit.NewService(adminaudit.NewRepository(db))
-	events, err := auditService.ListEvents(ctx, worker.ID, adminaudit.ListOptions{Action: adminaudit.ActionUserRoleUpdated, Limit: 1, Offset: 1})
+	events, err := auditService.ListEvents(ctx, admin.ID, adminaudit.ListOptions{Action: adminaudit.ActionUserInstanceRoleUpdated, Limit: 2})
 	require.NoError(t, err)
-	require.Len(t, events, 1)
+	require.Len(t, events, 2)
 	assert.Equal(t, adminaudit.TargetTypeUser, events[0].TargetType)
 	assert.NotNil(t, events[0].ActorUserID)
 }
@@ -705,8 +708,8 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		require.Error(t, err)
 	})
 
-	t.Run("invalid user role fails", func(t *testing.T) {
-		_, err := db.ExecContext(ctx, `UPDATE users SET role = 'owner' WHERE id = $1`, owner.ID)
+	t.Run("invalid instance role fails", func(t *testing.T) {
+		_, err := db.ExecContext(ctx, `UPDATE users SET instance_role = 'root' WHERE id = $1`, owner.ID)
 		require.Error(t, err)
 	})
 
@@ -1311,8 +1314,12 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 		viewer, err := userService.RegisterUser(ctx, "retry-viewer", "retry-viewer@example.test", "password123")
 		require.NoError(t, err)
 		_, err = db.ExecContext(ctx, `
-			INSERT INTO project_members (user_id, project_id, role)
-			VALUES ($1, $2, 'viewer')
+			INSERT INTO project_members (user_id, project_id, role_id)
+			VALUES (
+				$1,
+				$2,
+				(SELECT id FROM project_roles WHERE project_id = $2 AND key = 'viewer')
+			)
 		`, viewer.ID, project.ID)
 		require.NoError(t, err)
 
@@ -2352,9 +2359,10 @@ func requireProjectRole(t *testing.T, db *sqlx.DB, userID, projectID, expectedRo
 
 	var role string
 	err := db.Get(&role, `
-		SELECT role
-		FROM project_members
-		WHERE user_id = $1 AND project_id = $2
+		SELECT project_role.key
+		FROM project_members member
+		JOIN project_roles project_role ON project_role.id = member.role_id
+		WHERE member.user_id = $1 AND member.project_id = $2
 	`, userID, projectID)
 	require.NoError(t, err)
 	require.Equal(t, expectedRole, role)

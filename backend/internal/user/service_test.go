@@ -31,7 +31,7 @@ func TestService_RegisterUser(t *testing.T) {
 		assert.NotNil(t, user)
 		assert.Equal(t, username, user.Username)
 		assert.Equal(t, email, user.Email)
-		assert.Equal(t, RoleWorker, user.Role)
+		assert.Equal(t, InstanceRoleUser, user.InstanceRole)
 		assert.Empty(t, user.PasswordHash) // Password hash should be cleared
 		mockRepo.AssertExpectations(t)
 	})
@@ -71,7 +71,7 @@ func TestService_BootstrapAdmin(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, admin)
 		assert.Equal(t, "admin", admin.Username)
-		assert.Equal(t, RoleAdmin, admin.Role)
+		assert.Equal(t, InstanceRoleOwner, admin.InstanceRole)
 		assert.Empty(t, admin.PasswordHash)
 		assert.NotEmpty(t, admin.PublicKeyPEM)
 		assert.NotEmpty(t, admin.PrivateKeyPEM)
@@ -111,20 +111,20 @@ func TestService_AdminUserManagement(t *testing.T) {
 	t.Run("ListUsers", func(t *testing.T) {
 		mockRepo := new(MockRepository)
 		service := NewService(mockRepo, []byte("secret"), cfg)
-		users := []User{{ID: adminID, Role: RoleAdmin}, {ID: targetID, Role: RoleWorker}}
-		mockRepo.On("UserRole", ctx, adminID).Return(RoleAdmin, nil).Once()
+		users := []User{{ID: adminID, InstanceRole: InstanceRoleAdmin}, {ID: targetID, InstanceRole: InstanceRoleUser}}
+		mockRepo.On("InstanceRole", ctx, adminID).Return(InstanceRoleAdmin, nil).Once()
 		mockRepo.On("ListUsers", ctx, ListUsersOptions{
-			Role:   RoleAdmin,
-			Query:  "adm",
-			Limit:  maxAdminListLimit,
-			Offset: 25,
+			InstanceRole: InstanceRoleAdmin,
+			Query:        "adm",
+			Limit:        maxAdminListLimit,
+			Offset:       25,
 		}).Return(users, nil).Once()
 
 		got, err := service.ListUsers(ctx, adminID, ListUsersOptions{
-			Role:   " ADMIN ",
-			Query:  " adm ",
-			Limit:  1000,
-			Offset: 25,
+			InstanceRole: " ADMIN ",
+			Query:        " adm ",
+			Limit:        1000,
+			Offset:       25,
 		})
 
 		assert.NoError(t, err)
@@ -135,7 +135,7 @@ func TestService_AdminUserManagement(t *testing.T) {
 	t.Run("RequiresAdmin", func(t *testing.T) {
 		mockRepo := new(MockRepository)
 		service := NewService(mockRepo, []byte("secret"), cfg)
-		mockRepo.On("UserRole", ctx, targetID).Return(RoleWorker, nil).Once()
+		mockRepo.On("InstanceRole", ctx, targetID).Return(InstanceRoleUser, nil).Once()
 
 		got, err := service.ListUsers(ctx, targetID, ListUsersOptions{})
 
@@ -148,9 +148,9 @@ func TestService_AdminUserManagement(t *testing.T) {
 	t.Run("RejectsInvalidListFilter", func(t *testing.T) {
 		mockRepo := new(MockRepository)
 		service := NewService(mockRepo, []byte("secret"), cfg)
-		mockRepo.On("UserRole", ctx, adminID).Return(RoleAdmin, nil).Once()
+		mockRepo.On("InstanceRole", ctx, adminID).Return(InstanceRoleAdmin, nil).Once()
 
-		got, err := service.ListUsers(ctx, adminID, ListUsersOptions{Role: "owner"})
+		got, err := service.ListUsers(ctx, adminID, ListUsersOptions{InstanceRole: "root"})
 
 		assert.ErrorIs(t, err, ErrInvalidUserInput)
 		assert.Nil(t, got)
@@ -161,11 +161,11 @@ func TestService_AdminUserManagement(t *testing.T) {
 	t.Run("UpdateRole", func(t *testing.T) {
 		mockRepo := new(MockRepository)
 		service := NewService(mockRepo, []byte("secret"), cfg)
-		updated := &User{ID: targetID, Role: RoleAdmin}
-		mockRepo.On("UserRole", ctx, adminID).Return(RoleAdmin, nil).Once()
-		mockRepo.On("UpdateUserRole", ctx, adminID, targetID, RoleAdmin).Return(updated, nil).Once()
+		updated := &User{ID: targetID, InstanceRole: InstanceRoleAdmin}
+		mockRepo.On("InstanceRole", ctx, adminID).Return(InstanceRoleAdmin, nil).Once()
+		mockRepo.On("UpdateInstanceRole", ctx, adminID, targetID, InstanceRoleAdmin).Return(updated, nil).Once()
 
-		got, err := service.UpdateUserRole(ctx, adminID, targetID, " ADMIN ")
+		got, err := service.UpdateInstanceRole(ctx, adminID, targetID, " ADMIN ")
 
 		assert.NoError(t, err)
 		assert.Equal(t, updated, got)
@@ -175,13 +175,13 @@ func TestService_AdminUserManagement(t *testing.T) {
 	t.Run("RejectsInvalidInput", func(t *testing.T) {
 		mockRepo := new(MockRepository)
 		service := NewService(mockRepo, []byte("secret"), cfg)
-		mockRepo.On("UserRole", ctx, adminID).Return(RoleAdmin, nil).Once()
+		mockRepo.On("InstanceRole", ctx, adminID).Return(InstanceRoleAdmin, nil).Once()
 
-		got, err := service.UpdateUserRole(ctx, adminID, targetID, "owner")
+		got, err := service.UpdateInstanceRole(ctx, adminID, targetID, "root")
 
 		assert.ErrorIs(t, err, ErrInvalidUserInput)
 		assert.Nil(t, got)
-		mockRepo.AssertNotCalled(t, "UpdateUserRole")
+		mockRepo.AssertNotCalled(t, "UpdateInstanceRole")
 		mockRepo.AssertExpectations(t)
 	})
 }
@@ -288,7 +288,7 @@ func TestService_Login(t *testing.T) {
 		Username:     "testuser",
 		Email:        email,
 		PasswordHash: string(hashedPassword),
-		Role:         "user",
+		InstanceRole: InstanceRoleUser,
 		TokenVersion: 2,
 	}
 
@@ -302,6 +302,7 @@ func TestService_Login(t *testing.T) {
 		assert.NotEmpty(t, token)
 		claims := parseTokenClaims(t, token, []byte("secret"))
 		assert.Equal(t, float64(2), claims["token_version"])
+		assert.Equal(t, InstanceRoleUser, claims["instance_role"])
 		mockRepo.AssertExpectations(t)
 	})
 

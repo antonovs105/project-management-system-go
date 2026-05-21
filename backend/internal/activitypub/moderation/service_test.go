@@ -33,7 +33,7 @@ type fakeRepository struct {
 	retryErr        error
 }
 
-func (r *fakeRepository) UserRole(ctx context.Context, userID string) (string, error) {
+func (r *fakeRepository) InstanceRole(ctx context.Context, userID string) (string, error) {
 	if r.roleErr != nil {
 		return "", r.roleErr
 	}
@@ -111,7 +111,7 @@ func (q *fakeQueue) Close() error {
 }
 
 func TestServiceBlockDomainRequiresAdmin(t *testing.T) {
-	repo := &fakeRepository{role: "worker"}
+	repo := &fakeRepository{role: InstanceRoleUser}
 	service := NewService(repo)
 
 	_, err := service.BlockDomain(context.Background(), "user-1", "remote.example", "")
@@ -121,7 +121,7 @@ func TestServiceBlockDomainRequiresAdmin(t *testing.T) {
 }
 
 func TestServiceBlockDomainNormalizesDomain(t *testing.T) {
-	repo := &fakeRepository{role: RoleAdmin}
+	repo := &fakeRepository{role: InstanceRoleAdmin}
 	service := NewService(repo)
 
 	block, err := service.BlockDomain(context.Background(), "admin-1", "HTTPS://Remote.Example/users/alice", " spam ")
@@ -134,7 +134,7 @@ func TestServiceBlockDomainNormalizesDomain(t *testing.T) {
 }
 
 func TestServiceRejectsInvalidDomain(t *testing.T) {
-	service := NewService(&fakeRepository{role: RoleAdmin})
+	service := NewService(&fakeRepository{role: InstanceRoleAdmin})
 
 	_, err := service.BlockDomain(context.Background(), "admin-1", "bad/domain", "")
 
@@ -142,7 +142,7 @@ func TestServiceRejectsInvalidDomain(t *testing.T) {
 }
 
 func TestServiceUnblockMapsMissingDomain(t *testing.T) {
-	service := NewService(&fakeRepository{role: RoleAdmin, deleteErr: sql.ErrNoRows})
+	service := NewService(&fakeRepository{role: InstanceRoleAdmin, deleteErr: sql.ErrNoRows})
 
 	err := service.UnblockDomain(context.Background(), "admin-1", "remote.example")
 
@@ -150,7 +150,7 @@ func TestServiceUnblockMapsMissingDomain(t *testing.T) {
 }
 
 func TestServiceUnblockDomainRecordsAdmin(t *testing.T) {
-	repo := &fakeRepository{role: RoleAdmin}
+	repo := &fakeRepository{role: InstanceRoleAdmin}
 	service := NewService(repo)
 
 	err := service.UnblockDomain(context.Background(), "admin-1", "remote.example")
@@ -161,7 +161,7 @@ func TestServiceUnblockDomainRecordsAdmin(t *testing.T) {
 }
 
 func TestServiceListRemoteActorsUsesAdminAndOptions(t *testing.T) {
-	repo := &fakeRepository{role: RoleAdmin}
+	repo := &fakeRepository{role: InstanceRoleAdmin}
 	service := NewService(repo)
 
 	_, err := service.ListRemoteActors(context.Background(), "admin-1", RemoteActorListOptions{
@@ -175,7 +175,7 @@ func TestServiceListRemoteActorsUsesAdminAndOptions(t *testing.T) {
 }
 
 func TestServiceListFederationDeliveriesValidatesFilters(t *testing.T) {
-	repo := &fakeRepository{role: RoleAdmin}
+	repo := &fakeRepository{role: InstanceRoleAdmin}
 	service := NewService(repo)
 
 	_, err := service.ListFederationDeliveries(context.Background(), "admin-1", FederationDeliveryListOptions{
@@ -194,7 +194,7 @@ func TestServiceListFederationDeliveriesValidatesFilters(t *testing.T) {
 }
 
 func TestServiceGetsFederationDeliverySummaryForAdmin(t *testing.T) {
-	repo := &fakeRepository{role: RoleAdmin, summary: &FederationDeliverySummary{Total: 3, Dead: 1, Retryable: 1, CanRetry: true}}
+	repo := &fakeRepository{role: InstanceRoleAdmin, summary: &FederationDeliverySummary{Total: 3, Dead: 1, Retryable: 1, CanRetry: true}}
 	service := NewService(repo)
 
 	summary, err := service.GetFederationDeliverySummary(context.Background(), "admin-1")
@@ -207,7 +207,7 @@ func TestServiceGetsFederationDeliverySummaryForAdmin(t *testing.T) {
 }
 
 func TestServiceFederationDeliverySummaryRequiresAdmin(t *testing.T) {
-	repo := &fakeRepository{role: "worker"}
+	repo := &fakeRepository{role: InstanceRoleUser}
 	service := NewService(repo)
 
 	_, err := service.GetFederationDeliverySummary(context.Background(), "user-1")
@@ -217,7 +217,7 @@ func TestServiceFederationDeliverySummaryRequiresAdmin(t *testing.T) {
 }
 
 func TestServiceRetryFederationDeliveryQueuesTask(t *testing.T) {
-	repo := &fakeRepository{role: RoleAdmin}
+	repo := &fakeRepository{role: InstanceRoleAdmin}
 	queue := &fakeQueue{}
 	service := NewService(repo, queue)
 
@@ -232,7 +232,7 @@ func TestServiceRetryFederationDeliveryQueuesTask(t *testing.T) {
 }
 
 func TestServiceRetryFederationDeliveryRequiresAdmin(t *testing.T) {
-	repo := &fakeRepository{role: "worker"}
+	repo := &fakeRepository{role: InstanceRoleUser}
 	queue := &fakeQueue{}
 	service := NewService(repo, queue)
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"unicode"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
@@ -86,7 +87,7 @@ func (s *Service) GetProjectByID(ctx context.Context, projectID, userID string) 
 		return nil, err
 	}
 
-	if _, err := s.GetProjectRole(ctx, projectID, userID); err != nil {
+	if err := s.RequireProjectPermission(ctx, projectID, userID, PermissionProjectRead, "project not found or access denied"); err != nil {
 		return nil, errors.New("project not found or access denied")
 	}
 
@@ -95,7 +96,27 @@ func (s *Service) GetProjectByID(ctx context.Context, projectID, userID string) 
 
 // GetProjectRole returns the user's role in a project.
 func (s *Service) GetProjectRole(ctx context.Context, projectID, userID string) (string, error) {
-	return s.repo.GetUserRole(ctx, userID, projectID)
+	return s.repo.GetMemberRole(ctx, userID, projectID)
+}
+
+// HasProjectPermission reports whether userID has permission in projectID.
+func (s *Service) HasProjectPermission(ctx context.Context, projectID, userID, permission string) (bool, error) {
+	if !IsSupportedPermission(permission) {
+		return false, invalidProjectInput("invalid project permission")
+	}
+	return s.repo.HasPermission(ctx, projectID, userID, permission)
+}
+
+// RequireProjectPermission returns a consistent access error when a project permission is missing.
+func (s *Service) RequireProjectPermission(ctx context.Context, projectID, userID, permission, deniedMessage string) error {
+	allowed, err := s.HasProjectPermission(ctx, projectID, userID, permission)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return errors.New(deniedMessage)
+	}
+	return nil
 }
 
 // ListUserProjects returns projects where the user is a member.
@@ -117,12 +138,8 @@ func (s *Service) UpdateProject(ctx context.Context, projectID, userID string, r
 	if err != nil {
 		return err
 	}
-	role, err := s.GetProjectRole(ctx, projectID, userID)
-	if err != nil {
-		return errors.New("project not found or access denied")
-	}
-	if !CanManageProject(role) {
-		return errors.New("insufficient permissions: only owners or managers can update projects")
+	if err := s.RequireProjectPermission(ctx, projectID, userID, PermissionProjectUpdate, "insufficient permissions: missing project.update"); err != nil {
+		return err
 	}
 
 	if req.Name != nil {
@@ -150,12 +167,8 @@ func (s *Service) DeleteProject(ctx context.Context, projectID, userID string) e
 	if _, err := s.GetProjectByID(ctx, projectID, userID); err != nil {
 		return err
 	}
-	role, err := s.GetProjectRole(ctx, projectID, userID)
-	if err != nil {
-		return errors.New("project not found or access denied")
-	}
-	if !CanDeleteProject(role) {
-		return errors.New("insufficient permissions: only owners can delete projects")
+	if err := s.RequireProjectPermission(ctx, projectID, userID, PermissionProjectDelete, "insufficient permissions: missing project.delete"); err != nil {
+		return err
 	}
 	deleteResult, err := s.repo.Delete(ctx, projectID, userID)
 	if err != nil {
@@ -194,54 +207,68 @@ func (s *Service) removeMember(ctx context.Context, projectID, actorID, targetUs
 
 // RemoveMemberFromProject removes a member when the acting user is allowed to do so.
 func (s *Service) RemoveMemberFromProject(ctx context.Context, projectID, actorID, targetUserID string) error {
-	actorRole, err := s.repo.GetUserRole(ctx, actorID, projectID)
-	if err != nil {
-		return errors.New("access denied: you are not a member of this project")
+	if actorID == targetUserID {
+		canManage, err := s.repo.HasPermission(ctx, projectID, targetUserID, PermissionRolesManage)
+		if err != nil {
+			return err
+		}
+		if canManage {
+			managers, err := s.repo.CountMembersWithPermission(ctx, projectID, PermissionRolesManage)
+			if err != nil {
+				return err
+			}
+			if managers <= 1 {
+				return errors.New("cannot remove the last project role manager")
+			}
+		}
+		return s.removeMember(ctx, projectID, actorID, targetUserID)
 	}
-	targetRole, err := s.repo.GetUserRole(ctx, targetUserID, projectID)
+
+	if err := s.RequireProjectPermission(ctx, projectID, actorID, PermissionMembersRemove, "insufficient permissions: missing members.remove"); err != nil {
+		return err
+	}
+
+	targetCanManage, err := s.repo.HasPermission(ctx, projectID, targetUserID, PermissionRolesManage)
 	if err != nil {
 		return errors.New("target user is not a project member")
 	}
-
-	if actorID == targetUserID {
-		return s.removeMember(ctx, projectID, actorID, targetUserID)
-	}
-
-	switch actorRole {
-	case RoleOwner:
-		return s.removeMember(ctx, projectID, actorID, targetUserID)
-	case RoleManager:
-		if targetRole == RoleDeveloper || targetRole == RoleViewer {
-			return s.removeMember(ctx, projectID, actorID, targetUserID)
+	if targetCanManage {
+		if err := s.RequireProjectPermission(ctx, projectID, actorID, PermissionRolesManage, "insufficient permissions: missing roles.manage"); err != nil {
+			return err
 		}
-		return errors.New("insufficient permissions: managers can only remove developers or viewers")
-	default:
-		return errors.New("insufficient permissions: only owners or managers can remove members")
+		managers, err := s.repo.CountMembersWithPermission(ctx, projectID, PermissionRolesManage)
+		if err != nil {
+			return err
+		}
+		if managers <= 1 {
+			return errors.New("cannot remove the last project role manager")
+		}
 	}
+
+	return s.removeMember(ctx, projectID, actorID, targetUserID)
 }
 
 // AddMemberToProject creates a pending project invite for a local user.
-func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUserID, newUserID string, role string) (*ProjectInvite, error) {
+func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUserID, newUserID string, roleRef string) (*ProjectInvite, error) {
 	if strings.TrimSpace(newUserID) == "" {
 		return nil, invalidProjectInput("user_id is required")
 	}
-	currentUserRole, err := s.repo.GetUserRole(ctx, currentUserID, projectID)
+	if err := s.RequireProjectPermission(ctx, projectID, currentUserID, PermissionMembersInvite, "insufficient permissions: missing members.invite"); err != nil {
+		return nil, err
+	}
+
+	roleRef = strings.TrimSpace(roleRef)
+	if roleRef == "" {
+		roleRef = RoleViewer
+	}
+	role, err := s.repo.ResolveRole(ctx, projectID, roleRef)
 	if err != nil {
-		return nil, errors.New("access denied: you are not a member of this project")
-	}
-
-	if !CanManageMembers(currentUserRole) {
-		return nil, errors.New("insufficient permissions: only owners or managers can invite new members")
-	}
-
-	if role == "" {
-		role = RoleViewer
-	}
-	if !IsValidRole(role) {
 		return nil, invalidProjectInput("invalid project role")
 	}
-	if role == RoleOwner && currentUserRole != RoleOwner {
-		return nil, errors.New("insufficient permissions: only owners can invite owners")
+	if grantsSensitiveProjectAccess(role) {
+		if err := s.RequireProjectPermission(ctx, projectID, currentUserID, PermissionRolesManage, "insufficient permissions: missing roles.manage"); err != nil {
+			return nil, err
+		}
 	}
 	member, err := s.repo.IsProjectMember(ctx, projectID, newUserID)
 	if err != nil {
@@ -267,7 +294,8 @@ func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUser
 		ProjectID:      projectID,
 		InviterActorID: currentUserID,
 		InviteeActorID: newUserID,
-		Role:           role,
+		RoleID:         role.ID,
+		Role:           role.Key,
 		Status:         "pending",
 	}
 	result, err := s.repo.CreateInvite(ctx, invite)
@@ -278,6 +306,168 @@ func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUser
 		s.enqueueActivityRecipientInboxes(ctx, result.ProjectID, result.ActivityID, result.RecipientInboxes)
 	}
 	return invite, nil
+}
+
+// CreateProjectRoleRequest contains a project-local role definition.
+type CreateProjectRoleRequest struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Permissions []string `json:"permissions"`
+}
+
+// UpdateProjectRoleRequest contains nullable project role updates.
+type UpdateProjectRoleRequest struct {
+	Name        *string   `json:"name"`
+	Description *string   `json:"description"`
+	Permissions *[]string `json:"permissions"`
+}
+
+// ListProjectRoles returns the project's configurable roles.
+func (s *Service) ListProjectRoles(ctx context.Context, projectID, userID string) ([]ProjectRole, error) {
+	if err := s.RequireProjectPermission(ctx, projectID, userID, PermissionProjectRead, "project not found or access denied"); err != nil {
+		return nil, err
+	}
+	return s.repo.ListRoles(ctx, projectID)
+}
+
+// CreateProjectRole creates a project-local role controlled by a project role manager.
+func (s *Service) CreateProjectRole(ctx context.Context, projectID, userID string, req CreateProjectRoleRequest) (*ProjectRole, error) {
+	if err := s.RequireProjectPermission(ctx, projectID, userID, PermissionRolesManage, "insufficient permissions: missing roles.manage"); err != nil {
+		return nil, err
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return nil, invalidProjectInput("role name is required")
+	}
+	permissions, err := normalizePermissions(req.Permissions)
+	if err != nil {
+		return nil, err
+	}
+	role := &ProjectRole{
+		ProjectID:   projectID,
+		Key:         normalizeRoleKey(name),
+		Name:        name,
+		Description: strings.TrimSpace(req.Description),
+		Permissions: permissions,
+	}
+	if err := s.repo.CreateRole(ctx, role); err != nil {
+		return nil, err
+	}
+	return role, nil
+}
+
+// UpdateProjectRole updates a project-local role controlled by a project role manager.
+func (s *Service) UpdateProjectRole(ctx context.Context, projectID, userID, roleID string, req UpdateProjectRoleRequest) (*ProjectRole, error) {
+	if err := s.RequireProjectPermission(ctx, projectID, userID, PermissionRolesManage, "insufficient permissions: missing roles.manage"); err != nil {
+		return nil, err
+	}
+	role, err := s.repo.GetRoleByID(ctx, projectID, roleID)
+	if err != nil {
+		return nil, errors.New("project role not found")
+	}
+	if role.IsSystem {
+		if req.Name != nil || req.Permissions != nil {
+			return nil, errors.New("protected project role cannot be renamed or have permissions changed")
+		}
+	}
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			return nil, invalidProjectInput("role name is required")
+		}
+		role.Name = name
+	}
+	if req.Description != nil {
+		role.Description = strings.TrimSpace(*req.Description)
+	}
+	if req.Permissions != nil {
+		permissions, err := normalizePermissions(*req.Permissions)
+		if err != nil {
+			return nil, err
+		}
+		role.Permissions = permissions
+	}
+	if err := s.repo.UpdateRole(ctx, role); err != nil {
+		return nil, err
+	}
+	return role, nil
+}
+
+// DeleteProjectRole removes an unused custom project role.
+func (s *Service) DeleteProjectRole(ctx context.Context, projectID, userID, roleID string) error {
+	if err := s.RequireProjectPermission(ctx, projectID, userID, PermissionRolesManage, "insufficient permissions: missing roles.manage"); err != nil {
+		return err
+	}
+	role, err := s.repo.GetRoleByID(ctx, projectID, roleID)
+	if err != nil {
+		return errors.New("project role not found")
+	}
+	if role.IsSystem || grantsSensitiveProjectAccess(role) {
+		return errors.New("protected project role cannot be deleted")
+	}
+	assignments, err := s.repo.RoleAssignmentCount(ctx, projectID, roleID)
+	if err != nil {
+		return err
+	}
+	if assignments > 0 {
+		return errors.New("project role is still assigned")
+	}
+	return s.repo.DeleteRole(ctx, projectID, roleID)
+}
+
+// grantsSensitiveProjectAccess reports whether a role can control project power boundaries.
+func grantsSensitiveProjectAccess(role *ProjectRole) bool {
+	for _, permission := range role.Permissions {
+		if permission == PermissionRolesManage || permission == PermissionProjectDelete {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizePermissions validates and de-duplicates project role permissions.
+func normalizePermissions(raw []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(raw))
+	for _, permission := range raw {
+		permission = strings.TrimSpace(permission)
+		if permission == "" {
+			continue
+		}
+		if !IsSupportedPermission(permission) {
+			return nil, invalidProjectInput("invalid project permission")
+		}
+		seen[permission] = struct{}{}
+	}
+	permissions := make([]string, 0, len(seen))
+	for _, permission := range SupportedProjectPermissions {
+		if _, ok := seen[permission]; ok {
+			permissions = append(permissions, permission)
+		}
+	}
+	return permissions, nil
+}
+
+// normalizeRoleKey derives a stable project role key from a display name.
+func normalizeRoleKey(name string) string {
+	var builder strings.Builder
+	lastUnderscore := false
+	for _, r := range strings.ToLower(name) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			builder.WriteRune(r)
+			lastUnderscore = false
+		case unicode.IsSpace(r) || unicode.IsPunct(r) || unicode.IsSymbol(r):
+			if builder.Len() > 0 && !lastUnderscore {
+				builder.WriteByte('_')
+				lastUnderscore = true
+			}
+		}
+	}
+	key := strings.Trim(builder.String(), "_")
+	if key == "" {
+		return "custom_role"
+	}
+	return key
 }
 
 // invalidProjectInput wraps a validation message with the project input sentinel.
@@ -334,15 +524,17 @@ func (s *Service) RevokeInvite(ctx context.Context, inviteID, userID string) err
 	if err != nil {
 		return err
 	}
-	role, err := s.repo.GetUserRole(ctx, userID, invite.ProjectID)
+	if err := s.RequireProjectPermission(ctx, invite.ProjectID, userID, PermissionMembersInvite, "insufficient permissions: missing members.invite"); err != nil {
+		return err
+	}
+	targetRole, err := s.repo.GetRoleByID(ctx, invite.ProjectID, invite.RoleID)
 	if err != nil {
-		return errors.New("access denied: you are not a member of this project")
+		return errors.New("project role not found")
 	}
-	if !CanManageMembers(role) {
-		return errors.New("insufficient permissions: only owners or managers can revoke invites")
-	}
-	if invite.Role == RoleOwner && role != RoleOwner {
-		return errors.New("insufficient permissions: only owners can revoke owner invites")
+	if grantsSensitiveProjectAccess(targetRole) {
+		if err := s.RequireProjectPermission(ctx, invite.ProjectID, userID, PermissionRolesManage, "insufficient permissions: missing roles.manage"); err != nil {
+			return err
+		}
 	}
 	result, err := s.repo.RevokeInvite(ctx, inviteID, userID)
 	if err != nil {

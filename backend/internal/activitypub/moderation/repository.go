@@ -11,7 +11,7 @@ import (
 
 // Repository defines persistence operations for federation moderation.
 type Repository interface {
-	UserRole(ctx context.Context, userID string) (string, error)
+	InstanceRole(ctx context.Context, userID string) (string, error)
 	ListDomainBlocks(ctx context.Context) ([]DomainBlock, error)
 	UpsertDomainBlock(ctx context.Context, domain, reason, userID string) (*DomainBlock, error)
 	DeleteDomainBlock(ctx context.Context, domain, userID string) error
@@ -31,10 +31,10 @@ func NewRepository(db *sqlx.DB) Repository {
 	return &PgRepository{db: db}
 }
 
-// UserRole returns a user's global role.
-func (r *PgRepository) UserRole(ctx context.Context, userID string) (string, error) {
+// InstanceRole returns a user's instance role.
+func (r *PgRepository) InstanceRole(ctx context.Context, userID string) (string, error) {
 	var role string
-	err := r.db.GetContext(ctx, &role, `SELECT role FROM users WHERE id = $1`, userID)
+	err := r.db.GetContext(ctx, &role, `SELECT instance_role FROM users WHERE id = $1`, userID)
 	return role, err
 }
 

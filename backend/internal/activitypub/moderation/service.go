@@ -117,19 +117,19 @@ func (s *Service) RetryFederationDelivery(ctx context.Context, userID string, de
 	return delivery, nil
 }
 
-// requireAdmin verifies that a user has the global admin role.
+// requireAdmin verifies that a user has instance admin privileges.
 func (s *Service) requireAdmin(ctx context.Context, userID string) error {
 	if strings.TrimSpace(userID) == "" {
 		return ErrAdminRequired
 	}
-	role, err := s.repo.UserRole(ctx, userID)
+	role, err := s.repo.InstanceRole(ctx, userID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return ErrAdminRequired
 		}
 		return err
 	}
-	if role != RoleAdmin {
+	if role != InstanceRoleOwner && role != InstanceRoleAdmin {
 		return ErrAdminRequired
 	}
 	return nil

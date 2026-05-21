@@ -17,8 +17,8 @@ func TestServiceCreateCommentWritesNoteAndQueuesRecipients(t *testing.T) {
 	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
 	repo := &fakeCommentRepository{createActivityID: "activity-create"}
 	tickets := &fakeTicketChecker{
-		ticket: &ticket.Ticket{ID: "ticket-1", ProjectID: "project-1"},
-		roles:  map[string]string{"project-1:user-1": project.RoleDeveloper},
+		ticket:      &ticket.Ticket{ID: "ticket-1", ProjectID: "project-1"},
+		permissions: map[string]bool{"project-1:user-1:" + project.PermissionCommentsCreate: true},
 	}
 	delivery := &fakeCommentDelivery{}
 	service := NewService(repo, tickets, cfg)
@@ -45,8 +45,8 @@ func TestServiceCreateCommentRejectsViewer(t *testing.T) {
 	ctx := context.Background()
 	repo := &fakeCommentRepository{createActivityID: "activity-create"}
 	tickets := &fakeTicketChecker{
-		ticket: &ticket.Ticket{ID: "ticket-1", ProjectID: "project-1"},
-		roles:  map[string]string{"project-1:viewer-1": project.RoleViewer},
+		ticket:      &ticket.Ticket{ID: "ticket-1", ProjectID: "project-1"},
+		permissions: map[string]bool{},
 	}
 	service := NewService(repo, tickets, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
 
@@ -54,7 +54,7 @@ func TestServiceCreateCommentRejectsViewer(t *testing.T) {
 
 	require.Error(t, err)
 	require.Nil(t, created)
-	require.Contains(t, err.Error(), "viewers cannot comment")
+	require.Contains(t, err.Error(), "comments.create")
 	require.Empty(t, repo.created)
 }
 
@@ -84,8 +84,8 @@ func TestServiceDeleteCommentAllowsManagerToModerateAndQueuesInboxes(t *testing.
 		},
 	}
 	tickets := &fakeTicketChecker{
-		ticket: &ticket.Ticket{ID: "ticket-1", ProjectID: "project-1"},
-		roles:  map[string]string{"project-1:manager-1": project.RoleManager},
+		ticket:      &ticket.Ticket{ID: "ticket-1", ProjectID: "project-1"},
+		permissions: map[string]bool{"project-1:manager-1:" + project.PermissionCommentsModerate: true},
 	}
 	delivery := &fakeCommentDelivery{}
 	service := NewService(repo, tickets, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
@@ -111,8 +111,8 @@ func TestServiceDeleteCommentRejectsOtherDeveloper(t *testing.T) {
 		deleteResult: &DeleteResult{ActivityID: "activity-delete", ProjectID: "project-1"},
 	}
 	tickets := &fakeTicketChecker{
-		ticket: &ticket.Ticket{ID: "ticket-1", ProjectID: "project-1"},
-		roles:  map[string]string{"project-1:dev-1": project.RoleDeveloper},
+		ticket:      &ticket.Ticket{ID: "ticket-1", ProjectID: "project-1"},
+		permissions: map[string]bool{"project-1:dev-1:" + project.PermissionCommentsCreate: true},
 	}
 	delivery := &fakeCommentDelivery{}
 	service := NewService(repo, tickets, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
@@ -121,7 +121,7 @@ func TestServiceDeleteCommentRejectsOtherDeveloper(t *testing.T) {
 	err := service.DeleteComment(ctx, "comment-1", "dev-1")
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "only owners or managers")
+	require.Contains(t, err.Error(), "comments.moderate")
 	require.Empty(t, repo.deletedCommentID)
 	require.Empty(t, delivery.inboxDeliveries)
 }
@@ -182,10 +182,10 @@ func (f *fakeCommentRepository) Delete(ctx context.Context, commentID string, ac
 }
 
 type fakeTicketChecker struct {
-	ticket    *ticket.Ticket
-	ticketErr error
-	roles     map[string]string
-	roleErr   error
+	ticket      *ticket.Ticket
+	ticketErr   error
+	permissions map[string]bool
+	roleErr     error
 }
 
 func (f *fakeTicketChecker) GetTicketByID(ctx context.Context, ticketID, userID string) (*ticket.Ticket, error) {
@@ -196,11 +196,11 @@ func (f *fakeTicketChecker) GetTicketByID(ctx context.Context, ticketID, userID 
 	return &copied, nil
 }
 
-func (f *fakeTicketChecker) GetProjectRole(ctx context.Context, projectID, userID string) (string, error) {
+func (f *fakeTicketChecker) HasProjectPermission(ctx context.Context, projectID, userID, permission string) (bool, error) {
 	if f.roleErr != nil {
-		return "", f.roleErr
+		return false, f.roleErr
 	}
-	return f.roles[projectID+":"+userID], nil
+	return f.permissions[projectID+":"+userID+":"+permission], nil
 }
 
 type fakeCommentDelivery struct {

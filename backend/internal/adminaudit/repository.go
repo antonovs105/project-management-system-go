@@ -9,7 +9,7 @@ import (
 
 // Repository defines persistence operations for administrative audit events.
 type Repository interface {
-	UserRole(ctx context.Context, userID string) (string, error)
+	InstanceRole(ctx context.Context, userID string) (string, error)
 	ListEvents(ctx context.Context, options ListOptions) ([]Event, error)
 }
 
@@ -28,10 +28,10 @@ func NewRepository(db *sqlx.DB) Repository {
 	return &PgRepository{db: db}
 }
 
-// UserRole returns the global role for a local user.
-func (r *PgRepository) UserRole(ctx context.Context, userID string) (string, error) {
+// InstanceRole returns the instance role for a local user.
+func (r *PgRepository) InstanceRole(ctx context.Context, userID string) (string, error) {
 	var role string
-	err := r.db.GetContext(ctx, &role, `SELECT role FROM users WHERE id = $1`, userID)
+	err := r.db.GetContext(ctx, &role, `SELECT instance_role FROM users WHERE id = $1`, userID)
 	return role, err
 }
 

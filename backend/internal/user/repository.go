@@ -19,9 +19,9 @@ type Repository interface {
 	GetUserByID(ctx context.Context, userID string) (*User, error)
 	UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error
 	TokenVersion(ctx context.Context, userID string) (int, error)
-	UserRole(ctx context.Context, userID string) (string, error)
+	InstanceRole(ctx context.Context, userID string) (string, error)
 	ListUsers(ctx context.Context, options ListUsersOptions) ([]User, error)
-	UpdateUserRole(ctx context.Context, adminUserID, userID, role string) (*User, error)
+	UpdateInstanceRole(ctx context.Context, adminUserID, userID, role string) (*User, error)
 }
 
 // PgRepository implements Repository using PostgreSQL.
@@ -44,12 +44,12 @@ func NewRepository(db *sqlx.DB, cfg activitypub.Config, codecs ...secrets.Privat
 	}
 }
 
-// CreateUser stores a worker user and its ActivityPub actor graph.
+// CreateUser stores a regular user and its ActivityPub actor graph.
 func (r *PgRepository) CreateUser(ctx context.Context, user *User) error {
 	return r.createUserInTx(ctx, user, nil)
 }
 
-// CreateAdminIfNoAdmin stores the first admin when no admin currently exists.
+// CreateAdminIfNoAdmin stores the first owner when no owner currently exists.
 func (r *PgRepository) CreateAdminIfNoAdmin(ctx context.Context, user *User) error {
 	return r.createUserInTx(ctx, user, func(tx *sqlx.Tx) error {
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('admin-bootstrap'))`); err != nil {
@@ -57,7 +57,7 @@ func (r *PgRepository) CreateAdminIfNoAdmin(ctx context.Context, user *User) err
 		}
 
 		var exists bool
-		if err := tx.GetContext(ctx, &exists, `SELECT EXISTS (SELECT 1 FROM users WHERE role = $1)`, RoleAdmin); err != nil {
+		if err := tx.GetContext(ctx, &exists, `SELECT EXISTS (SELECT 1 FROM users WHERE instance_role = $1)`, InstanceRoleOwner); err != nil {
 			return err
 		}
 		if exists {
@@ -116,8 +116,8 @@ func (r *PgRepository) insertUserGraph(ctx context.Context, tx *sqlx.Tx, user *U
 	}
 
 	userQuery := `
-		INSERT INTO users (id, username, email, password_hash, role)
-		VALUES (:id, :username, :email, :password_hash, :role)
+		INSERT INTO users (id, username, email, password_hash, instance_role)
+		VALUES (:id, :username, :email, :password_hash, :instance_role)
 	`
 	if _, err := tx.NamedExecContext(ctx, userQuery, user); err != nil {
 		return err
@@ -173,7 +173,7 @@ func (r *PgRepository) GetUserByEmail(ctx context.Context, email string) (*User,
 			u.username,
 			u.email,
 			u.password_hash,
-			u.role,
+			u.instance_role,
 			u.token_version,
 			a.handle,
 			a.name,
@@ -233,10 +233,10 @@ func (r *PgRepository) TokenVersion(ctx context.Context, userID string) (int, er
 	return tokenVersion, err
 }
 
-// UserRole returns the global role for a local user.
-func (r *PgRepository) UserRole(ctx context.Context, userID string) (string, error) {
+// InstanceRole returns the instance role for a local user.
+func (r *PgRepository) InstanceRole(ctx context.Context, userID string) (string, error) {
 	var role string
-	err := r.db.GetContext(ctx, &role, `SELECT role FROM users WHERE id = $1`, userID)
+	err := r.db.GetContext(ctx, &role, `SELECT instance_role FROM users WHERE id = $1`, userID)
 	return role, err
 }
 
@@ -244,7 +244,7 @@ func (r *PgRepository) UserRole(ctx context.Context, userID string) (string, err
 func (r *PgRepository) ListUsers(ctx context.Context, options ListUsersOptions) ([]User, error) {
 	users := make([]User, 0)
 	if err := r.db.SelectContext(ctx, &users, userSelectQuery()+`
-		WHERE ($1 = '' OR u.role = $1)
+		WHERE ($1 = '' OR u.instance_role = $1)
 			AND (
 				$2 = ''
 				OR u.username ILIKE '%' || $2 || '%'
@@ -254,14 +254,14 @@ func (r *PgRepository) ListUsers(ctx context.Context, options ListUsersOptions) 
 			)
 		ORDER BY u.created_at DESC, lower(u.username) ASC
 		LIMIT $3 OFFSET $4
-	`, options.Role, options.Query, options.Limit, options.Offset); err != nil {
+	`, options.InstanceRole, options.Query, options.Limit, options.Offset); err != nil {
 		return nil, err
 	}
 	return users, nil
 }
 
-// UpdateUserRole updates a global user role and audits the change.
-func (r *PgRepository) UpdateUserRole(ctx context.Context, adminUserID, userID, role string) (*User, error) {
+// UpdateInstanceRole updates an instance user role and audits the change.
+func (r *PgRepository) UpdateInstanceRole(ctx context.Context, adminUserID, userID, role string) (*User, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -269,16 +269,27 @@ func (r *PgRepository) UpdateUserRole(ctx context.Context, adminUserID, userID, 
 	defer tx.Rollback()
 
 	var currentRole string
-	if err := tx.GetContext(ctx, &currentRole, `SELECT role FROM users WHERE id = $1 FOR UPDATE`, userID); err != nil {
+	if err := tx.GetContext(ctx, &currentRole, `SELECT instance_role FROM users WHERE id = $1 FOR UPDATE`, userID); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrUserNotFound
 		}
 		return nil, err
 	}
+	var actorRole string
+	if err := tx.GetContext(ctx, &actorRole, `SELECT instance_role FROM users WHERE id = $1`, adminUserID); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrAdminRequired
+		}
+		return nil, err
+	}
 
-	if currentRole == RoleAdmin && role != RoleAdmin {
+	if actorRole != InstanceRoleOwner && (currentRole == InstanceRoleOwner || role == InstanceRoleOwner) {
+		return nil, ErrOwnerRequired
+	}
+
+	if currentRole == InstanceRoleOwner && role != InstanceRoleOwner {
 		var adminCount int
-		if err := tx.GetContext(ctx, &adminCount, `SELECT count(*) FROM users WHERE role = $1`, RoleAdmin); err != nil {
+		if err := tx.GetContext(ctx, &adminCount, `SELECT count(*) FROM users WHERE instance_role = $1`, InstanceRoleOwner); err != nil {
 			return nil, err
 		}
 		if adminCount <= 1 {
@@ -286,18 +297,18 @@ func (r *PgRepository) UpdateUserRole(ctx context.Context, adminUserID, userID, 
 		}
 	}
 
-	if _, err := tx.ExecContext(ctx, `UPDATE users SET role = $2 WHERE id = $1`, userID, role); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET instance_role = $2 WHERE id = $1`, userID, role); err != nil {
 		return nil, err
 	}
 	if currentRole != role {
 		if _, err := adminaudit.InsertEvent(ctx, tx, adminaudit.EventInput{
 			ActorUserID: adminUserID,
-			Action:      adminaudit.ActionUserRoleUpdated,
+			Action:      adminaudit.ActionUserInstanceRoleUpdated,
 			TargetType:  adminaudit.TargetTypeUser,
 			TargetID:    userID,
 			Metadata: map[string]any{
-				"old_role": currentRole,
-				"new_role": role,
+				"old_instance_role": currentRole,
+				"new_instance_role": role,
 			},
 		}); err != nil {
 			return nil, err
@@ -336,7 +347,7 @@ func userSelectQuery() string {
 			a.ap_id,
 			u.username,
 			u.email,
-			u.role,
+			u.instance_role,
 			u.token_version,
 			a.handle,
 			a.name,
@@ -357,7 +368,7 @@ func userSelectWithPasswordQuery() string {
 			u.username,
 			u.email,
 			u.password_hash,
-			u.role,
+			u.instance_role,
 			u.token_version,
 			a.handle,
 			a.name,

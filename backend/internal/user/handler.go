@@ -43,7 +43,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo, middleware ...echo.MiddlewareFunc
 // RegisterAdminRoutes registers authenticated admin-only user routes.
 func (h *Handler) RegisterAdminRoutes(api *echo.Group) {
 	api.GET("/admin/users", h.ListUsers)
-	api.PATCH("/admin/users/:userID/role", h.UpdateUserRole)
+	api.PATCH("/admin/users/:userID/role", h.UpdateInstanceRole)
 }
 
 // RegisterAccountRoutes registers authenticated self-service account routes.
@@ -65,9 +65,10 @@ type BootstrapAdminRequest struct {
 	Password string `json:"password"`
 }
 
-// UpdateUserRoleRequest is the JSON payload for changing a user's global role.
-type UpdateUserRoleRequest struct {
-	Role string `json:"role"`
+// UpdateInstanceRoleRequest is the JSON payload for changing a user's instance role.
+type UpdateInstanceRoleRequest struct {
+	InstanceRole string `json:"instance_role"`
+	Role         string `json:"role,omitempty"`
 }
 
 // ChangePasswordRequest is the JSON payload for replacing the current user's password.
@@ -76,7 +77,7 @@ type ChangePasswordRequest struct {
 	NewPassword     string `json:"new_password"`
 }
 
-// BootstrapAdmin creates the first local admin when bootstrap is enabled.
+// BootstrapAdmin creates the first local owner when bootstrap is enabled.
 func (h *Handler) BootstrapAdmin(c echo.Context) error {
 	if h.adminBootstrapToken == "" {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "admin bootstrap disabled"})
@@ -118,14 +119,18 @@ func (h *Handler) ListUsers(c echo.Context) error {
 	return c.JSON(http.StatusOK, users)
 }
 
-// UpdateUserRole changes a user's global role.
-func (h *Handler) UpdateUserRole(c echo.Context) error {
-	var req UpdateUserRoleRequest
+// UpdateInstanceRole changes a user's instance role.
+func (h *Handler) UpdateInstanceRole(c echo.Context) error {
+	var req UpdateInstanceRoleRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
 
-	updated, err := h.service.UpdateUserRole(c.Request().Context(), currentUserID(c), c.Param("userID"), req.Role)
+	role := req.InstanceRole
+	if role == "" {
+		role = req.Role
+	}
+	updated, err := h.service.UpdateInstanceRole(c.Request().Context(), currentUserID(c), c.Param("userID"), role)
 	if err != nil {
 		return writeAdminUserError(c, err)
 	}
@@ -170,10 +175,10 @@ func listUsersOptions(c echo.Context) (ListUsersOptions, error) {
 		return ListUsersOptions{}, ErrInvalidUserInput
 	}
 	return ListUsersOptions{
-		Role:   strings.TrimSpace(c.QueryParam("role")),
-		Query:  strings.TrimSpace(c.QueryParam("q")),
-		Limit:  limit,
-		Offset: offset,
+		InstanceRole: strings.TrimSpace(c.QueryParam("role")),
+		Query:        strings.TrimSpace(c.QueryParam("q")),
+		Limit:        limit,
+		Offset:       offset,
 	}, nil
 }
 
@@ -208,6 +213,8 @@ func writeAdminUserError(c echo.Context, err error) error {
 	switch {
 	case errors.Is(err, ErrAdminRequired):
 		return c.JSON(http.StatusForbidden, map[string]string{"error": ErrAdminRequired.Error()})
+	case errors.Is(err, ErrOwnerRequired):
+		return c.JSON(http.StatusForbidden, map[string]string{"error": ErrOwnerRequired.Error()})
 	case errors.Is(err, ErrInvalidUserInput):
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	case errors.Is(err, ErrUserNotFound):
@@ -231,7 +238,7 @@ func writeAccountError(c echo.Context, err error) error {
 	}
 }
 
-// Register creates a worker account from the public registration endpoint.
+// Register creates a regular account from the public registration endpoint.
 func (h *Handler) Register(c echo.Context) error {
 	var req RegisterRequest
 	if err := c.Bind(&req); err != nil {

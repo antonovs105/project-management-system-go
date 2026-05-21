@@ -44,7 +44,7 @@ func TestHandler_BootstrapAdmin(t *testing.T) {
 		var body User
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 		assert.Equal(t, "admin", body.Username)
-		assert.Equal(t, RoleAdmin, body.Role)
+		assert.Equal(t, InstanceRoleOwner, body.InstanceRole)
 		assert.Empty(t, body.PasswordHash)
 		repo.AssertExpectations(t)
 	})
@@ -67,29 +67,29 @@ func TestHandler_AdminUserRoutes(t *testing.T) {
 
 	t.Run("ListUsers", func(t *testing.T) {
 		repo := new(MockRepository)
-		users := []User{{ID: adminID, Role: RoleAdmin}, {ID: targetID, Role: RoleWorker}}
-		repo.On("UserRole", mock.Anything, adminID).Return(RoleAdmin, nil).Once()
+		users := []User{{ID: adminID, InstanceRole: InstanceRoleAdmin}, {ID: targetID, InstanceRole: InstanceRoleUser}}
+		repo.On("InstanceRole", mock.Anything, adminID).Return(InstanceRoleAdmin, nil).Once()
 		repo.On("ListUsers", mock.Anything, ListUsersOptions{
-			Role:   RoleWorker,
-			Query:  "work",
-			Limit:  10,
-			Offset: 20,
+			InstanceRole: InstanceRoleUser,
+			Query:        "work",
+			Limit:        10,
+			Offset:       20,
 		}).Return(users, nil).Once()
 		e := newAdminUserEcho(repo, adminID)
 
-		rec := doAdminUserRequest(e, http.MethodGet, "/api/admin/users?role=worker&q=work&limit=10&offset=20", "")
+		rec := doAdminUserRequest(e, http.MethodGet, "/api/admin/users?role=user&q=work&limit=10&offset=20", "")
 
 		require.Equal(t, http.StatusOK, rec.Code)
 		var body []User
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 		require.Len(t, body, 2)
-		assert.Equal(t, RoleAdmin, body[0].Role)
+		assert.Equal(t, InstanceRoleAdmin, body[0].InstanceRole)
 		repo.AssertExpectations(t)
 	})
 
 	t.Run("RejectsNonAdmin", func(t *testing.T) {
 		repo := new(MockRepository)
-		repo.On("UserRole", mock.Anything, targetID).Return(RoleWorker, nil).Once()
+		repo.On("InstanceRole", mock.Anything, targetID).Return(InstanceRoleUser, nil).Once()
 		e := newAdminUserEcho(repo, targetID)
 
 		rec := doAdminUserRequest(e, http.MethodGet, "/api/admin/users", "")
@@ -100,17 +100,17 @@ func TestHandler_AdminUserRoutes(t *testing.T) {
 
 	t.Run("UpdatesRole", func(t *testing.T) {
 		repo := new(MockRepository)
-		updated := &User{ID: targetID, Role: RoleAdmin}
-		repo.On("UserRole", mock.Anything, adminID).Return(RoleAdmin, nil).Once()
-		repo.On("UpdateUserRole", mock.Anything, adminID, targetID, RoleAdmin).Return(updated, nil).Once()
+		updated := &User{ID: targetID, InstanceRole: InstanceRoleAdmin}
+		repo.On("InstanceRole", mock.Anything, adminID).Return(InstanceRoleAdmin, nil).Once()
+		repo.On("UpdateInstanceRole", mock.Anything, adminID, targetID, InstanceRoleAdmin).Return(updated, nil).Once()
 		e := newAdminUserEcho(repo, adminID)
 
-		rec := doAdminUserRequest(e, http.MethodPatch, "/api/admin/users/"+targetID+"/role", `{"role":"admin"}`)
+		rec := doAdminUserRequest(e, http.MethodPatch, "/api/admin/users/"+targetID+"/role", `{"instance_role":"admin"}`)
 
 		require.Equal(t, http.StatusOK, rec.Code)
 		var body User
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
-		assert.Equal(t, RoleAdmin, body.Role)
+		assert.Equal(t, InstanceRoleAdmin, body.InstanceRole)
 		repo.AssertExpectations(t)
 	})
 }

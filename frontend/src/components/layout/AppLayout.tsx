@@ -74,7 +74,7 @@ export function AppLayout() {
             <div className="truncate text-sm font-medium text-zinc-950">{user?.email || "Signed in"}</div>
             <div className="flex items-center gap-1 text-xs text-zinc-500">
               <Shield size={12} />
-              {user?.role || "worker"}
+              {user?.instanceRole || "user"}
             </div>
           </div>
           <IconButton label="Log out" onClick={logout}>

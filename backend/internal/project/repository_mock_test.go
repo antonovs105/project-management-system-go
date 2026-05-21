@@ -32,9 +32,68 @@ func (m *MockRepository) ListByOwnerID(ctx context.Context, ownerID string, opti
 	return args.Get(0).([]Project), args.Error(1)
 }
 
-func (m *MockRepository) GetUserRole(ctx context.Context, userID, projectID string) (string, error) {
+func (m *MockRepository) GetMemberRole(ctx context.Context, userID, projectID string) (string, error) {
 	args := m.Called(ctx, userID, projectID)
 	return args.String(0), args.Error(1)
+}
+
+func (m *MockRepository) HasPermission(ctx context.Context, projectID, userID, permission string) (bool, error) {
+	args := m.Called(ctx, projectID, userID, permission)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockRepository) CountMembersWithPermission(ctx context.Context, projectID, permission string) (int, error) {
+	args := m.Called(ctx, projectID, permission)
+	return args.Int(0), args.Error(1)
+}
+
+func (m *MockRepository) RoleHasPermission(ctx context.Context, roleID, permission string) (bool, error) {
+	args := m.Called(ctx, roleID, permission)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockRepository) ResolveRole(ctx context.Context, projectID, roleRef string) (*ProjectRole, error) {
+	args := m.Called(ctx, projectID, roleRef)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*ProjectRole), args.Error(1)
+}
+
+func (m *MockRepository) ListRoles(ctx context.Context, projectID string) ([]ProjectRole, error) {
+	args := m.Called(ctx, projectID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]ProjectRole), args.Error(1)
+}
+
+func (m *MockRepository) GetRoleByID(ctx context.Context, projectID, roleID string) (*ProjectRole, error) {
+	args := m.Called(ctx, projectID, roleID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*ProjectRole), args.Error(1)
+}
+
+func (m *MockRepository) CreateRole(ctx context.Context, role *ProjectRole) error {
+	args := m.Called(ctx, role)
+	return args.Error(0)
+}
+
+func (m *MockRepository) UpdateRole(ctx context.Context, role *ProjectRole) error {
+	args := m.Called(ctx, role)
+	return args.Error(0)
+}
+
+func (m *MockRepository) DeleteRole(ctx context.Context, projectID, roleID string) error {
+	args := m.Called(ctx, projectID, roleID)
+	return args.Error(0)
+}
+
+func (m *MockRepository) RoleAssignmentCount(ctx context.Context, projectID, roleID string) (int, error) {
+	args := m.Called(ctx, projectID, roleID)
+	return args.Int(0), args.Error(1)
 }
 
 func (m *MockRepository) IsProjectMember(ctx context.Context, projectID, userID string) (bool, error) {

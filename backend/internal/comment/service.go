@@ -26,7 +26,7 @@ const (
 // TicketChecker exposes ticket lookups and project roles needed by comments.
 type TicketChecker interface {
 	GetTicketByID(ctx context.Context, ticketID, userID string) (*ticket.Ticket, error)
-	GetProjectRole(ctx context.Context, projectID, userID string) (string, error)
+	HasProjectPermission(ctx context.Context, projectID, userID, permission string) (bool, error)
 }
 
 // Service contains comment workflows and ActivityPub side effects.
@@ -64,12 +64,12 @@ func (s *Service) CreateComment(ctx context.Context, ticketID, authorID, content
 	if err != nil {
 		return nil, err
 	}
-	role, err := s.tickets.GetProjectRole(ctx, ticket.ProjectID, authorID)
+	allowed, err := s.tickets.HasProjectPermission(ctx, ticket.ProjectID, authorID, project.PermissionCommentsCreate)
 	if err != nil {
 		return nil, errors.New("project not found or access denied")
 	}
-	if !project.CanWriteTickets(role) {
-		return nil, errors.New("insufficient permissions: viewers cannot comment on tickets")
+	if !allowed {
+		return nil, errors.New("insufficient permissions: missing comments.create")
 	}
 	commentID, err := activitypub.NewID()
 	if err != nil {
@@ -134,16 +134,16 @@ func (s *Service) DeleteComment(ctx context.Context, commentID, userID string) e
 	if err != nil {
 		return err
 	}
-	role, err := s.tickets.GetProjectRole(ctx, ticket.ProjectID, userID)
+	permission := project.PermissionCommentsModerate
+	if comment.AuthorID == userID {
+		permission = project.PermissionCommentsCreate
+	}
+	allowed, err := s.tickets.HasProjectPermission(ctx, ticket.ProjectID, userID, permission)
 	if err != nil {
 		return errors.New("project not found or access denied")
 	}
-	if comment.AuthorID == userID {
-		if !project.CanWriteTickets(role) {
-			return errors.New("insufficient permissions: viewers cannot delete comments")
-		}
-	} else if !project.CanModerateComments(role) {
-		return errors.New("insufficient permissions: only owners or managers can delete other comments")
+	if !allowed {
+		return errors.New("insufficient permissions: missing " + permission)
 	}
 
 	deleteResult, err := s.repo.Delete(ctx, commentID, userID)

@@ -28,6 +28,10 @@ func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.GET("/projects", h.List)
 	api.PATCH("/projects/:id", h.Update)
 	api.DELETE("/projects/:id", h.Delete)
+	api.GET("/projects/:id/roles", h.ListRoles)
+	api.POST("/projects/:id/roles", h.CreateRole)
+	api.PATCH("/projects/:id/roles/:roleID", h.UpdateRole)
+	api.DELETE("/projects/:id/roles/:roleID", h.DeleteRole)
 	api.POST("/projects/:id/members", h.AddMember)
 	api.DELETE("/projects/:id/members/:userID", h.RemoveMember)
 	api.POST("/invites/:id/accept", h.AcceptInvite)
@@ -133,6 +137,7 @@ func (h *Handler) Delete(c echo.Context) error {
 type addMemberRequest struct {
 	UserID string `json:"user_id"`
 	Role   string `json:"role"`
+	RoleID string `json:"role_id"`
 }
 
 // AddMember creates an invite for a new project member.
@@ -152,12 +157,87 @@ func (h *Handler) AddMember(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid user id"})
 	}
 
-	invite, err := h.service.AddMemberToProject(c.Request().Context(), projectID, currentUserID, req.UserID, req.Role)
+	roleRef := req.RoleID
+	if roleRef == "" {
+		roleRef = req.Role
+	}
+	invite, err := h.service.AddMemberToProject(c.Request().Context(), projectID, currentUserID, req.UserID, roleRef)
 	if err != nil {
 		return writeProjectError(c, err)
 	}
 
 	return c.JSON(http.StatusAccepted, invite)
+}
+
+// ListRoles returns configurable project roles.
+func (h *Handler) ListRoles(c echo.Context) error {
+	projectID, ok := uuidParam(c, "id", "project id")
+	if !ok {
+		return nil
+	}
+	userID := c.Get("userID").(string)
+	roles, err := h.service.ListProjectRoles(c.Request().Context(), projectID, userID)
+	if err != nil {
+		return writeProjectError(c, err)
+	}
+	return c.JSON(http.StatusOK, roles)
+}
+
+// CreateRole creates a project role.
+func (h *Handler) CreateRole(c echo.Context) error {
+	projectID, ok := uuidParam(c, "id", "project id")
+	if !ok {
+		return nil
+	}
+	var req CreateProjectRoleRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	userID := c.Get("userID").(string)
+	role, err := h.service.CreateProjectRole(c.Request().Context(), projectID, userID, req)
+	if err != nil {
+		return writeProjectError(c, err)
+	}
+	return c.JSON(http.StatusCreated, role)
+}
+
+// UpdateRole updates a project role.
+func (h *Handler) UpdateRole(c echo.Context) error {
+	projectID, ok := uuidParam(c, "id", "project id")
+	if !ok {
+		return nil
+	}
+	roleID, ok := uuidParam(c, "roleID", "role id")
+	if !ok {
+		return nil
+	}
+	var req UpdateProjectRoleRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	userID := c.Get("userID").(string)
+	role, err := h.service.UpdateProjectRole(c.Request().Context(), projectID, userID, roleID, req)
+	if err != nil {
+		return writeProjectError(c, err)
+	}
+	return c.JSON(http.StatusOK, role)
+}
+
+// DeleteRole removes an unused project role.
+func (h *Handler) DeleteRole(c echo.Context) error {
+	projectID, ok := uuidParam(c, "id", "project id")
+	if !ok {
+		return nil
+	}
+	roleID, ok := uuidParam(c, "roleID", "role id")
+	if !ok {
+		return nil
+	}
+	userID := c.Get("userID").(string)
+	if err := h.service.DeleteProjectRole(c.Request().Context(), projectID, userID, roleID); err != nil {
+		return writeProjectError(c, err)
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 // RemoveMember removes a user from a project.
@@ -284,9 +364,9 @@ func writeProjectError(c echo.Context, err error) error {
 	switch {
 	case errors.Is(err, ErrInvalidProjectInput):
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
-	case strings.Contains(err.Error(), "already"), strings.Contains(err.Error(), "not pending"):
+	case strings.Contains(err.Error(), "already"), strings.Contains(err.Error(), "not pending"), strings.Contains(err.Error(), "still assigned"):
 		return c.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
-	case strings.Contains(err.Error(), "insufficient permissions"):
+	case strings.Contains(err.Error(), "insufficient permissions"), strings.Contains(err.Error(), "protected project role"), strings.Contains(err.Error(), "cannot remove the last"):
 		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
 	case strings.Contains(err.Error(), "access denied"), strings.Contains(err.Error(), "not found"):
 		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})

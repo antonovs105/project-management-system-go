@@ -19,26 +19,31 @@ import (
 // ErrInvalidUserInput reports a malformed user-management request.
 var ErrInvalidUserInput = errors.New("invalid user input")
 
-// ErrAdminAlreadyExists reports that bootstrap cannot create another first admin.
+// ErrAdminAlreadyExists reports that bootstrap cannot create another first owner.
 var ErrAdminAlreadyExists = errors.New("admin user already exists")
 
 // ErrAdminRequired reports that the current user lacks admin privileges.
-var ErrAdminRequired = errors.New("admin role required")
+var ErrAdminRequired = errors.New("admin privileges required")
+
+// ErrOwnerRequired reports that the current user lacks owner privileges.
+var ErrOwnerRequired = errors.New("owner privileges required")
 
 // ErrUserNotFound reports that the target user does not exist locally.
 var ErrUserNotFound = errors.New("user not found")
 
-// ErrCannotDemoteLastAdmin protects the instance from losing its final admin.
-var ErrCannotDemoteLastAdmin = errors.New("cannot demote the last admin")
+// ErrCannotDemoteLastAdmin protects the instance from losing its final owner.
+var ErrCannotDemoteLastAdmin = errors.New("cannot demote the last instance owner")
 
 // ErrInvalidCredentials reports failed authentication without revealing which credential failed.
 var ErrInvalidCredentials = errors.New("invalid credentials")
 
 const (
-	// RoleAdmin allows global administrative operations.
-	RoleAdmin = "admin"
-	// RoleWorker allows normal project-management operations.
-	RoleWorker = "worker"
+	// InstanceRoleOwner allows full instance administration, including owner assignment.
+	InstanceRoleOwner = "owner"
+	// InstanceRoleAdmin allows global administrative operations.
+	InstanceRoleAdmin = "admin"
+	// InstanceRoleUser allows normal project-management operations.
+	InstanceRoleUser = "user"
 
 	// defaultAdminListLimit is the fallback admin user list size.
 	defaultAdminListLimit = 100
@@ -62,9 +67,9 @@ func NewService(repo Repository, jwtSecret []byte, apConfig activitypub.Config) 
 	}
 }
 
-// RegisterUser creates a local worker account and its ActivityPub actor graph.
+// RegisterUser creates a local regular account and its ActivityPub actor graph.
 func (s *Service) RegisterUser(ctx context.Context, username, email, password string) (*User, error) {
-	newUser, err := s.newLocalUser(username, email, password, RoleWorker)
+	newUser, err := s.newLocalUser(username, email, password, InstanceRoleUser)
 	if err != nil {
 		return nil, err
 	}
@@ -78,10 +83,10 @@ func (s *Service) RegisterUser(ctx context.Context, username, email, password st
 	return newUser, nil
 }
 
-// BootstrapAdmin creates the first local admin account. The repository enforces
-// the one-admin bootstrap guard transactionally.
+// BootstrapAdmin creates the first local owner account. The repository enforces
+// the one-owner bootstrap guard transactionally.
 func (s *Service) BootstrapAdmin(ctx context.Context, username, email, password string) (*User, error) {
-	newUser, err := s.newLocalUser(username, email, password, RoleAdmin)
+	newUser, err := s.newLocalUser(username, email, password, InstanceRoleOwner)
 	if err != nil {
 		return nil, err
 	}
@@ -100,9 +105,9 @@ func (s *Service) ListUsers(ctx context.Context, adminUserID string, options Lis
 	if err := s.requireAdmin(ctx, adminUserID); err != nil {
 		return nil, err
 	}
-	options.Role = strings.ToLower(strings.TrimSpace(options.Role))
-	if options.Role != "" && !IsValidRole(options.Role) {
-		return nil, invalidUserInput("invalid user role")
+	options.InstanceRole = strings.ToLower(strings.TrimSpace(options.InstanceRole))
+	if options.InstanceRole != "" && !IsValidInstanceRole(options.InstanceRole) {
+		return nil, invalidUserInput("invalid instance role")
 	}
 	options.Query = strings.TrimSpace(options.Query)
 	options.Limit = normalizeListLimit(options.Limit)
@@ -110,8 +115,8 @@ func (s *Service) ListUsers(ctx context.Context, adminUserID string, options Lis
 	return s.repo.ListUsers(ctx, options)
 }
 
-// UpdateUserRole changes a local user's global role and records an audit event.
-func (s *Service) UpdateUserRole(ctx context.Context, adminUserID, targetUserID, role string) (*User, error) {
+// UpdateInstanceRole changes a local user's instance role and records an audit event.
+func (s *Service) UpdateInstanceRole(ctx context.Context, adminUserID, targetUserID, role string) (*User, error) {
 	if err := s.requireAdmin(ctx, adminUserID); err != nil {
 		return nil, err
 	}
@@ -120,10 +125,10 @@ func (s *Service) UpdateUserRole(ctx context.Context, adminUserID, targetUserID,
 		return nil, invalidUserInput("valid user id is required")
 	}
 	role = strings.ToLower(strings.TrimSpace(role))
-	if !IsValidRole(role) {
-		return nil, invalidUserInput("invalid user role")
+	if !IsValidInstanceRole(role) {
+		return nil, invalidUserInput("invalid instance role")
 	}
-	return s.repo.UpdateUserRole(ctx, adminUserID, targetUserID, role)
+	return s.repo.UpdateInstanceRole(ctx, adminUserID, targetUserID, role)
 }
 
 // ChangePassword replaces a user's password and invalidates their existing JWTs.
@@ -186,7 +191,7 @@ func (s *Service) ValidateTokenVersion(ctx context.Context, userID string, token
 }
 
 // newLocalUser validates account input and prepares actor/key data before persistence.
-func (s *Service) newLocalUser(username, email, password, role string) (*User, error) {
+func (s *Service) newLocalUser(username, email, password, instanceRole string) (*User, error) {
 	username = strings.TrimSpace(username)
 	email = normalizeEmail(email)
 	if err := validateRegistrationInput(username, email, password); err != nil {
@@ -213,7 +218,7 @@ func (s *Service) newLocalUser(username, email, password, role string) (*User, e
 		Username:      username,
 		Email:         email,
 		PasswordHash:  string(hashedPassword),
-		Role:          role,
+		InstanceRole:  instanceRole,
 		Handle:        activitypub.Handle(username, s.apConfig),
 		Name:          username,
 		Summary:       "",
@@ -251,9 +256,14 @@ func validatePassword(password string) error {
 	return nil
 }
 
-// IsValidRole reports whether role is a supported system-wide user role.
-func IsValidRole(role string) bool {
-	return role == RoleAdmin || role == RoleWorker
+// IsValidInstanceRole reports whether role is a supported system-wide user role.
+func IsValidInstanceRole(role string) bool {
+	return role == InstanceRoleOwner || role == InstanceRoleAdmin || role == InstanceRoleUser
+}
+
+// HasAdminPrivileges reports whether role can use instance administration endpoints.
+func HasAdminPrivileges(role string) bool {
+	return role == InstanceRoleOwner || role == InstanceRoleAdmin
 }
 
 // normalizeListLimit clamps admin user list limits to a bounded default range.
@@ -275,20 +285,20 @@ func normalizeOffset(offset int) int {
 	return offset
 }
 
-// requireAdmin verifies that userID belongs to a global admin account.
+// requireAdmin verifies that userID belongs to an instance owner or admin account.
 func (s *Service) requireAdmin(ctx context.Context, userID string) error {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return ErrAdminRequired
 	}
-	role, err := s.repo.UserRole(ctx, userID)
+	role, err := s.repo.InstanceRole(ctx, userID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return ErrAdminRequired
 		}
 		return err
 	}
-	if role != RoleAdmin {
+	if !HasAdminPrivileges(role) {
 		return ErrAdminRequired
 	}
 	return nil
@@ -318,7 +328,7 @@ func (s *Service) Login(ctx context.Context, email, password string) (string, er
 
 	claims := jwt.MapClaims{
 		"sub":           user.ID,
-		"role":          user.Role,
+		"instance_role": user.InstanceRole,
 		"token_version": user.TokenVersion,
 		"exp":           time.Now().Add(time.Hour * 72).Unix(),
 	}
