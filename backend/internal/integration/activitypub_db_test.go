@@ -636,6 +636,7 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 			"actor_keys",
 			"ap_objects",
 			"ap_activities",
+			"admin_audit_events",
 			"activity_deliveries",
 			"actor_inbox_items",
 			"actor_outbox_items",
@@ -669,6 +670,11 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 			"http://localhost:8080/users/owner-copy/outbox",
 			"http://localhost:8080/users/owner-copy/followers",
 		)
+		require.Error(t, err)
+	})
+
+	t.Run("invalid user role fails", func(t *testing.T) {
+		_, err := db.ExecContext(ctx, `UPDATE users SET role = 'owner' WHERE id = $1`, owner.ID)
 		require.Error(t, err)
 	})
 
