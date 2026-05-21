@@ -161,7 +161,18 @@ func (w *Worker) HandleDeliveryTask(ctx context.Context, task *asynq.Task) error
 		return err
 	}
 
-	return w.repo.MarkDelivered(ctx, delivery.ID)
+	if err := w.repo.MarkDelivered(ctx, delivery.ID); err != nil {
+		return err
+	}
+	log.Printf(
+		"activitypub_delivery_success delivery_id=%s activity_id=%s activity_ap_id=%s target_inbox_url=%s attempt=%d",
+		delivery.ID,
+		delivery.ActivityID,
+		delivery.ActivityAPID,
+		delivery.TargetInboxURL,
+		delivery.Attempts,
+	)
+	return nil
 }
 
 // deliver signs and POSTs one stored ActivityPub activity to a remote inbox.

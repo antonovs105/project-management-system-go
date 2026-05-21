@@ -200,8 +200,8 @@ func isLocalHost(host string) bool {
 
 // main builds all backend services, registers routes, and starts the API server.
 func main() {
-	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found")
+	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("failed to load .env: %v", err)
 	}
 	appEnv := normalizedEnv("APP_ENV", "development")
 	production := appEnv == "production"
@@ -225,10 +225,12 @@ func main() {
 	if localDomain == "" {
 		log.Fatal("LOCAL_DOMAIN environment variable is not set")
 	}
+	redisAddr := os.Getenv("REDIS_ADDR")
 	adminBootstrapToken := strings.TrimSpace(os.Getenv("ADMIN_BOOTSTRAP_TOKEN"))
 	if err := validateRuntimeConfig(production, jwtSecret, publicBaseURL, localDomain, adminBootstrapToken); err != nil {
 		log.Fatal(err)
 	}
+	log.Printf("backend_runtime_start app_env=%s role=%s public_base_url=%s local_domain=%s redis_configured=%t", appEnv, role, publicBaseURL, localDomain, redisAddr != "")
 	apConfig := activitypub.NewConfig(publicBaseURL, localDomain)
 
 	db, err := sqlx.Connect("postgres", dbSource)
@@ -275,7 +277,6 @@ func main() {
 	// ActivityPub delivery dependencies. API roles enqueue deliveries, while worker roles process them from Redis.
 	deliveryRepo := delivery.NewRecipientRepository(db)
 	var deliveryQueue delivery.Queue = delivery.NoopQueue{}
-	redisAddr := os.Getenv("REDIS_ADDR")
 	if redisAddr != "" {
 		redisOpt := asynq.RedisClientOpt{Addr: redisAddr}
 		deliveryQueue = delivery.NewAsynqQueue(redisOpt)

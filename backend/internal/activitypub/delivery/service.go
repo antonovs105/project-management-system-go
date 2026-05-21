@@ -1,6 +1,9 @@
 package delivery
 
-import "context"
+import (
+	"context"
+	"log"
+)
 
 // Service creates delivery rows and queues outbound federation work.
 type Service struct {
@@ -40,6 +43,15 @@ func (s *Service) queueDelivery(ctx context.Context, delivery *Delivery) (*Deliv
 		if err := s.queue.Enqueue(ctx, delivery.ID, delivery.MaxAttempts); err != nil {
 			return nil, err
 		}
+		log.Printf(
+			"activitypub_delivery_queued delivery_id=%s activity_id=%s activity_ap_id=%s target_inbox_url=%s state=%s max_attempts=%d",
+			delivery.ID,
+			delivery.ActivityID,
+			delivery.ActivityAPID,
+			delivery.TargetInboxURL,
+			delivery.State,
+			delivery.MaxAttempts,
+		)
 	}
 	return delivery, nil
 }
@@ -113,7 +125,7 @@ func (s *Service) enqueueToInboxes(ctx context.Context, inboxes []string, activi
 			if delivery.State == StateDelivered || delivery.State == StateDead {
 				continue
 			}
-			if err := s.queue.Enqueue(ctx, delivery.ID, delivery.MaxAttempts); err != nil {
+			if _, err := s.queueDelivery(ctx, delivery); err != nil {
 				return err
 			}
 		}
