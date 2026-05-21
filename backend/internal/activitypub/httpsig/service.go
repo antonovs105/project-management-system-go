@@ -17,19 +17,31 @@ import (
 )
 
 const (
-	signatureLabel      = "ap"
-	headerSignature     = "Signature"
-	headerSignatureIn   = "Signature-Input"
+	// signatureLabel is the structured field member name used for local signatures.
+	signatureLabel = "ap"
+	// headerSignature carries the RFC 9421 signature bytes.
+	headerSignature = "Signature"
+	// headerSignatureIn carries the RFC 9421 covered component metadata.
+	headerSignatureIn = "Signature-Input"
+	// headerContentDigest carries a signed digest for request bodies.
 	headerContentDigest = "Content-Digest"
-	headerDate          = "Date"
+	// headerDate carries the signed request timestamp.
+	headerDate = "Date"
 
-	componentMethod          = "@method"
-	componentAuthority       = "@authority"
-	componentPath            = "@path"
-	componentQuery           = "@query"
+	// componentMethod is the RFC 9421 pseudo-component for the HTTP method.
+	componentMethod = "@method"
+	// componentAuthority is the RFC 9421 pseudo-component for request authority.
+	componentAuthority = "@authority"
+	// componentPath is the RFC 9421 pseudo-component for request path.
+	componentPath = "@path"
+	// componentQuery is the RFC 9421 pseudo-component for query string.
+	componentQuery = "@query"
+	// componentSignatureParams is the synthetic component containing signature parameters.
 	componentSignatureParams = "@signature-params"
-	componentContentDigest   = "content-digest"
-	componentDate            = "date"
+	// componentContentDigest is the covered Content-Digest header component.
+	componentContentDigest = "content-digest"
+	// componentDate is the covered Date header component.
+	componentDate = "date"
 )
 
 var (

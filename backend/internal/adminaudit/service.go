@@ -10,8 +10,10 @@ import (
 )
 
 const (
+	// defaultAuditLimit is the fallback audit event list size.
 	defaultAuditLimit = 100
-	maxAuditLimit     = 500
+	// maxAuditLimit is the largest accepted audit event list size.
+	maxAuditLimit = 500
 )
 
 // Service enforces admin authorization before reading audit events.

@@ -23,6 +23,7 @@ const (
 	// TargetTypeFederationDelivery identifies a federation delivery audit target.
 	TargetTypeFederationDelivery = "federation_delivery"
 
+	// roleAdmin is the stored user role required for audit inspection.
 	roleAdmin = "admin"
 )
 

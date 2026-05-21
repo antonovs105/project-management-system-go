@@ -12,7 +12,8 @@ import (
 const (
 	// AlgorithmRSAV15SHA256 is the supported HTTP Message Signatures algorithm.
 	AlgorithmRSAV15SHA256 = "rsa-v1_5-sha256"
-	legacyRSAAlgorithm    = "rsa-sha256"
+	// legacyRSAAlgorithm is accepted for older ActivityPub rsa-sha256 key rows.
+	legacyRSAAlgorithm = "rsa-sha256"
 )
 
 var (

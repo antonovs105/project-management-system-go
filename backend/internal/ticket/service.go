@@ -73,12 +73,14 @@ var ticketRanks = map[string]int{
 }
 
 var (
+	// ticketPriorities lists accepted ticket priority values.
 	ticketPriorities = map[string]bool{
 		"low":    true,
 		"medium": true,
 		"high":   true,
 		"urgent": true,
 	}
+	// ticketStatuses lists accepted local workflow status values.
 	ticketStatuses = map[string]bool{
 		"open":        true,
 		"in_progress": true,

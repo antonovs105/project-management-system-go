@@ -17,8 +17,10 @@ import (
 )
 
 const (
+	// defaultCollectionPageLimit is the fallback ActivityPub collection page size.
 	defaultCollectionPageLimit = 20
-	maxCollectionPageLimit     = 100
+	// maxCollectionPageLimit is the largest accepted ActivityPub collection page size.
+	maxCollectionPageLimit = 100
 )
 
 // Handler exposes local ActivityPub read endpoints for actors, objects, and collections.

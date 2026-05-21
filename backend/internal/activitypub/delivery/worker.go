@@ -19,7 +19,9 @@ import (
 )
 
 const (
-	deliveryUserAgent       = "project-management-system-go/activitypub-delivery"
+	// deliveryUserAgent identifies outbound federation delivery HTTP requests.
+	deliveryUserAgent = "project-management-system-go/activitypub-delivery"
+	// maxResponseSnippetBytes bounds stored remote failure response snippets.
 	maxResponseSnippetBytes = int64(1024)
 )
 

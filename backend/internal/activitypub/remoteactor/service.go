@@ -19,8 +19,11 @@ import (
 )
 
 const (
+	// defaultWebFingerScheme is the default scheme for remote WebFinger discovery.
 	defaultWebFingerScheme = "https"
-	defaultUserAgent       = "project-management-system-go/activitypub"
+	// defaultUserAgent identifies remote actor discovery requests.
+	defaultUserAgent = "project-management-system-go/activitypub"
+	// defaultMaxResponseSize bounds remote WebFinger and actor response bodies.
 	defaultMaxResponseSize = int64(2 << 20)
 )
 

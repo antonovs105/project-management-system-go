@@ -22,9 +22,12 @@ import (
 const maxOutboxBodyBytes = int64(1 << 20)
 
 var (
+	// errUnsupportedActivity reports a C2S activity type this server does not implement.
 	errUnsupportedActivity = errors.New("unsupported activity")
-	errInvalidActivity     = errors.New("invalid activity")
-	errActorMismatch       = errors.New("activity actor does not match authenticated user")
+	// errInvalidActivity reports malformed C2S activity content.
+	errInvalidActivity = errors.New("invalid activity")
+	// errActorMismatch reports a C2S activity signed in as a different actor.
+	errActorMismatch = errors.New("activity actor does not match authenticated user")
 )
 
 // TicketCreator creates local tickets from ActivityPub client activities.

@@ -11,8 +11,10 @@ import (
 )
 
 const (
+	// defaultInspectionLimit is the fallback admin federation inspection page size.
 	defaultInspectionLimit = 100
-	maxInspectionLimit     = 500
+	// maxInspectionLimit is the largest admin federation inspection page size.
+	maxInspectionLimit = 500
 )
 
 // Service enforces admin access for federation moderation workflows.

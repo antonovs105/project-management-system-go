@@ -9,7 +9,9 @@ import (
 )
 
 const (
-	relSelf              = "self"
+	// relSelf is the WebFinger link relation for the actor document.
+	relSelf = "self"
+	// activityJSONMediaTyp is the ActivityPub actor document media type.
 	activityJSONMediaTyp = "application/activity+json"
 )
 

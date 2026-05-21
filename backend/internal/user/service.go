@@ -40,8 +40,10 @@ const (
 	// RoleWorker allows normal project-management operations.
 	RoleWorker = "worker"
 
+	// defaultAdminListLimit is the fallback admin user list size.
 	defaultAdminListLimit = 100
-	maxAdminListLimit     = 500
+	// maxAdminListLimit is the largest accepted admin user list size.
+	maxAdminListLimit = 500
 )
 
 // Service encapsulates local user registration, login, and account management.
