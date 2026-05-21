@@ -123,9 +123,16 @@ services:
     image: prom/prometheus:v3.11.3
     ports:
       - "${PROMETHEUS_PORT:-9090}:9090"
+    entrypoint:
+      - /bin/sh
+      - -c
     command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.path=/prometheus
+      - |
+        umask 077
+        printf '%s' "$${METRICS_TOKEN}" > /prometheus/metrics-token
+        exec /bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus
+    environment:
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus

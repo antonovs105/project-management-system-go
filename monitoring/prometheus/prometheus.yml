@@ -6,6 +6,9 @@ scrape_configs:
   - job_name: pms-backend-api
     metrics_path: /metrics
     scrape_timeout: 5s
+    authorization:
+      type: Bearer
+      credentials_file: /prometheus/metrics-token
     static_configs:
       - targets:
           - backend:8080
@@ -16,6 +19,9 @@ scrape_configs:
   - job_name: pms-backend-worker
     metrics_path: /metrics
     scrape_timeout: 5s
+    authorization:
+      type: Bearer
+      credentials_file: /prometheus/metrics-token
     static_configs:
       - targets:
           - backend-worker:9091
