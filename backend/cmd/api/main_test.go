@@ -19,6 +19,20 @@ func TestValidateRuntimeConfigAllowsDevelopmentLocalhost(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestParseAppEnvDefaultsToDevelopment(t *testing.T) {
+	env, err := parseAppEnv("")
+
+	require.NoError(t, err)
+	require.Equal(t, appEnvDevelopment, env)
+}
+
+func TestParseAppEnvRejectsUnknownValue(t *testing.T) {
+	_, err := parseAppEnv("prod")
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "APP_ENV")
+}
+
 func TestParseAppRoleDefaultsToAll(t *testing.T) {
 	role, err := parseAppRole("")
 
@@ -71,6 +85,38 @@ func TestValidateRuntimeConfigRejectsMissingProductionMetricsToken(t *testing.T)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "METRICS_TOKEN")
+}
+
+func TestValidateCORSConfigAllowsDevelopmentDefaults(t *testing.T) {
+	require.NoError(t, validateCORSConfig(false, nil))
+	require.NoError(t, validateCORSConfig(false, []string{"*"}))
+}
+
+func TestValidateCORSConfigAcceptsProductionOrigins(t *testing.T) {
+	err := validateCORSConfig(true, []string{"https://app.example.test", "https://admin.example.test:8443"})
+
+	require.NoError(t, err)
+}
+
+func TestValidateCORSConfigRejectsUnsafeProductionOrigins(t *testing.T) {
+	cases := []struct {
+		name    string
+		origins []string
+	}{
+		{name: "missing", origins: nil},
+		{name: "wildcard", origins: []string{"*"}},
+		{name: "localhost", origins: []string{"http://localhost:5173"}},
+		{name: "with path", origins: []string{"https://app.example.test/dashboard"}},
+		{name: "non http", origins: []string{"chrome-extension://extension-id"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateCORSConfig(true, tc.origins)
+
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "CORS_ALLOWED_ORIGINS")
+		})
+	}
 }
 
 func TestRequiredDatabaseTablesIncludeActivityPubFoundation(t *testing.T) {

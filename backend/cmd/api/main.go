@@ -69,6 +69,13 @@ const (
 )
 
 const (
+	// appEnvDevelopment enables local defaults and relaxed deployment checks.
+	appEnvDevelopment = "development"
+	// appEnvTest marks test processes that still use development-grade defaults.
+	appEnvTest = "test"
+	// appEnvProduction enables strict deployment safety checks.
+	appEnvProduction = "production"
+
 	// appRoleAPI runs only the HTTP API process.
 	appRoleAPI appRole = "api"
 	// appRoleWorker runs only the ActivityPub delivery worker process.
@@ -132,15 +139,6 @@ func (v signatureActorVerifier) VerifyActorID(ctx context.Context, req *http.Req
 	return verified.ActorID, nil
 }
 
-// normalizedEnv returns a lowercase environment value or fallback when the value is empty.
-func normalizedEnv(name, fallback string) string {
-	value := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
-	if value == "" {
-		return fallback
-	}
-	return value
-}
-
 // splitCSVEnv parses a comma-separated environment variable into trimmed values.
 func splitCSVEnv(name string) []string {
 	raw := strings.TrimSpace(os.Getenv(name))
@@ -156,6 +154,20 @@ func splitCSVEnv(name string) []string {
 		}
 	}
 	return values
+}
+
+// parseAppEnv validates the deployment environment name.
+func parseAppEnv(raw string) (string, error) {
+	env := strings.ToLower(strings.TrimSpace(raw))
+	if env == "" {
+		return appEnvDevelopment, nil
+	}
+	switch env {
+	case appEnvDevelopment, appEnvTest, appEnvProduction:
+		return env, nil
+	default:
+		return "", fmt.Errorf("APP_ENV must be one of development, test, or production")
+	}
 }
 
 // parseAppRole validates the configured process role.
@@ -216,6 +228,32 @@ func validateRuntimeConfig(production bool, jwtSecret, publicBaseURL, localDomai
 	return nil
 }
 
+// validateCORSConfig rejects browser origins that are unsafe for production.
+func validateCORSConfig(production bool, origins []string) error {
+	if !production {
+		return nil
+	}
+	if len(origins) == 0 {
+		return fmt.Errorf("CORS_ALLOWED_ORIGINS environment variable is required in production")
+	}
+	for _, origin := range origins {
+		if origin == "*" {
+			return fmt.Errorf("CORS_ALLOWED_ORIGINS must not include wildcard origins in production")
+		}
+		parsed, err := url.Parse(origin)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return fmt.Errorf("CORS_ALLOWED_ORIGINS must contain absolute HTTP origins")
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return fmt.Errorf("CORS_ALLOWED_ORIGINS must use http or https")
+		}
+		if isLocalHost(parsed.Hostname()) {
+			return fmt.Errorf("CORS_ALLOWED_ORIGINS must not use localhost in production")
+		}
+	}
+	return nil
+}
+
 // isLocalHost reports whether host points to the loopback development host.
 func isLocalHost(host string) bool {
 	host = strings.TrimSpace(host)
@@ -231,8 +269,11 @@ func main() {
 	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
 		log.Printf("failed to load .env: %v", err)
 	}
-	appEnv := normalizedEnv("APP_ENV", "development")
-	production := appEnv == "production"
+	appEnv, err := parseAppEnv(os.Getenv("APP_ENV"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	production := appEnv == appEnvProduction
 	role, err := parseAppRole(os.Getenv("APP_ROLE"))
 	if err != nil {
 		log.Fatal(err)
@@ -390,10 +431,10 @@ func main() {
 	registerGlobalMiddleware(e, os.Stdout, server.metrics)
 
 	corsOrigins := splitCSVEnv("CORS_ALLOWED_ORIGINS")
+	if err := validateCORSConfig(production, corsOrigins); err != nil {
+		log.Fatal(err)
+	}
 	if len(corsOrigins) == 0 {
-		if production {
-			log.Fatal("CORS_ALLOWED_ORIGINS environment variable is required in production")
-		}
 		corsOrigins = []string{"http://localhost:5173"}
 	}
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
