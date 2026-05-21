@@ -75,6 +75,24 @@ const (
 	appRoleAll appRole = "all"
 )
 
+// requiredDatabaseTables lists schema objects that must exist before the API is ready.
+var requiredDatabaseTables = []string{
+	"actors",
+	"actor_keys",
+	"users",
+	"projects",
+	"project_members",
+	"actor_follows",
+	"tickets",
+	"ticket_assignees",
+	"comments",
+	"ap_objects",
+	"ap_activities",
+	"actor_inbox_items",
+	"actor_outbox_items",
+	"activity_deliveries",
+}
+
 // appRole selects which server responsibilities this process owns.
 type appRole string
 
@@ -590,6 +608,7 @@ func (s *ApiServer) readinessCheck(c echo.Context) error {
 	statusCode := http.StatusOK
 	status := "ready"
 	checks := map[string]string{}
+	var missingTables []string
 
 	if err := s.db.PingContext(ctx); err != nil {
 		log.Printf("Readiness check failed: database ping error: %v", err)
@@ -598,6 +617,21 @@ func (s *ApiServer) readinessCheck(c echo.Context) error {
 		checks["database"] = "error"
 	} else {
 		checks["database"] = "ok"
+		var err error
+		missingTables, err = missingRequiredDatabaseTables(ctx, s.db)
+		if err != nil {
+			log.Printf("Readiness check failed: database schema check error: %v", err)
+			statusCode = http.StatusServiceUnavailable
+			status = "not_ready"
+			checks["database_schema"] = "error"
+		} else if len(missingTables) > 0 {
+			log.Printf("Readiness check failed: missing database tables: %s", strings.Join(missingTables, ","))
+			statusCode = http.StatusServiceUnavailable
+			status = "not_ready"
+			checks["database_schema"] = "missing"
+		} else {
+			checks["database_schema"] = "ok"
+		}
 	}
 
 	if strings.TrimSpace(s.redisAddr) == "" {
@@ -615,10 +649,29 @@ func (s *ApiServer) readinessCheck(c echo.Context) error {
 		}
 	}
 
-	return c.JSON(statusCode, map[string]any{
+	payload := map[string]any{
 		"status": status,
 		"checks": checks,
-	})
+	}
+	if checks["database_schema"] == "missing" {
+		payload["missing_tables"] = missingTables
+	}
+	return c.JSON(statusCode, payload)
+}
+
+// missingRequiredDatabaseTables returns required tables absent from the active schema.
+func missingRequiredDatabaseTables(ctx context.Context, db *sqlx.DB) ([]string, error) {
+	missing := make([]string, 0)
+	for _, table := range requiredDatabaseTables {
+		var exists bool
+		if err := db.GetContext(ctx, &exists, `SELECT to_regclass($1) IS NOT NULL`, table); err != nil {
+			return nil, err
+		}
+		if !exists {
+			missing = append(missing, table)
+		}
+	}
+	return missing, nil
 }
 
 // metricsHandler exposes the Prometheus scrape endpoint.

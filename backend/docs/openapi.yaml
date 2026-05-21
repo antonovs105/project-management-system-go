@@ -1711,7 +1711,11 @@ components:
           type: object
           additionalProperties:
             type: string
-            enum: [ok, error, disabled]
+            enum: [ok, error, disabled, missing]
+        missing_tables:
+          type: array
+          items:
+            type: string
     Ticket:
       type: object
       required: [id, ap_id, title, description, status, priority, type, project_id, reporter_id, is_resolved, created_at, updated_at]

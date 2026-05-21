@@ -66,6 +66,14 @@ func TestValidateRuntimeConfigRejectsWeakProductionAdminBootstrapToken(t *testin
 	require.Contains(t, err.Error(), "ADMIN_BOOTSTRAP_TOKEN")
 }
 
+func TestRequiredDatabaseTablesIncludeActivityPubFoundation(t *testing.T) {
+	require.Contains(t, requiredDatabaseTables, "actors")
+	require.Contains(t, requiredDatabaseTables, "ap_activities")
+	require.Contains(t, requiredDatabaseTables, "actor_inbox_items")
+	require.Contains(t, requiredDatabaseTables, "actor_outbox_items")
+	require.Contains(t, requiredDatabaseTables, "activity_deliveries")
+}
+
 func TestGlobalMiddlewareAddsRequestIDAndStructuredLog(t *testing.T) {
 	var logs bytes.Buffer
 	e := echo.New()
