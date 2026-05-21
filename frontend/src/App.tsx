@@ -1,51 +1,43 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Toaster } from "@/components/ui/sonner";
-
-import { AppLayout } from '@/components/layout/AppLayout';
-import { ProtectedRoute } from '@/components/layout/ProtectedRoute';
-
-import LoginPage from '@/pages/auth/LoginPage';
-import RegisterPage from '@/pages/auth/RegisterPage';
-
-import ProjectsPage from '@/pages/dashboard/ProjectsPage';
-
-import BoardPage from '@/pages/project/BoardPage';
-
-import GraphPage from '@/pages/project/GraphPage';
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { Toaster } from "sonner";
+import { AppLayout } from "./components/layout/AppLayout";
+import { ProtectedRoute } from "./components/layout/ProtectedRoute";
+import { AuthPage } from "./pages/AuthPage";
+import { ProjectWorkspace } from "./pages/ProjectWorkspace";
+import { ProjectsPage } from "./pages/ProjectsPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: false,
+      retry: 1,
+      staleTime: 15_000,
     },
   },
 });
 
-import ErrorBoundary from '@/components/ErrorBoundary';
-
-export default function App() {
+export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <ErrorBoundary>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<AuthPage mode="login" />} />
+          <Route path="/register" element={<AuthPage mode="register" />} />
 
-            <Route element={<ProtectedRoute />}>
-              <Route element={<AppLayout />}>
-                <Route path="/" element={<ProjectsPage />} />
-                <Route path="/projects/:projectId" element={<BoardPage />} />
-                <Route path="/projects/:projectId/graph" element={<GraphPage />} />
-              </Route>
+          <Route element={<ProtectedRoute />}>
+            <Route element={<AppLayout />}>
+              <Route index element={<Navigate to="/projects" replace />} />
+              <Route path="/projects" element={<ProjectsPage />} />
+              <Route path="/projects/:projectId" element={<ProjectWorkspace />} />
+              <Route path="/projects/:projectId/graph" element={<ProjectWorkspace />} />
             </Route>
+          </Route>
 
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-          <Toaster />
-        </BrowserRouter>
-      </ErrorBoundary>
+          <Route path="*" element={<Navigate to="/projects" replace />} />
+        </Routes>
+        <Toaster richColors closeButton />
+      </BrowserRouter>
     </QueryClientProvider>
   );
 }
