@@ -31,7 +31,6 @@ func TestOpenAPIContractDocumentsRegisteredRoutes(t *testing.T) {
 		{method: "get", path: "/metrics"},
 		{method: "post", path: "/register"},
 		{method: "post", path: "/login"},
-		{method: "post", path: "/setup/admin"},
 		{method: "get", path: "/api/me"},
 		{method: "patch", path: "/api/me/password"},
 		{method: "get", path: "/api/admin/users"},

@@ -51,7 +51,6 @@ services:
       APP_ENV: ${APP_ENV:-development}
       APP_ROLE: api
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
-      ADMIN_BOOTSTRAP_TOKEN: ${ADMIN_BOOTSTRAP_TOKEN:-}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       LOCAL_DOMAIN: ${LOCAL_DOMAIN:-localhost:8080}
       REDIS_ADDR: redis:6379

@@ -16,51 +16,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-func TestHandler_BootstrapAdmin(t *testing.T) {
-	t.Run("Disabled", func(t *testing.T) {
-		e := newBootstrapEcho(new(MockRepository), "")
-
-		rec := postBootstrapAdmin(e, "ignored", `{"username":"admin","email":"admin@example.com","password":"password123"}`)
-
-		require.Equal(t, http.StatusNotFound, rec.Code)
-	})
-
-	t.Run("RejectsInvalidToken", func(t *testing.T) {
-		e := newBootstrapEcho(new(MockRepository), "correct-token")
-
-		rec := postBootstrapAdmin(e, "wrong-token", `{"username":"admin","email":"admin@example.com","password":"password123"}`)
-
-		require.Equal(t, http.StatusUnauthorized, rec.Code)
-	})
-
-	t.Run("CreatesAdmin", func(t *testing.T) {
-		repo := new(MockRepository)
-		repo.On("CreateAdminIfNoAdmin", mock.Anything, mock.AnythingOfType("*user.User")).Return(nil).Once()
-		e := newBootstrapEcho(repo, "correct-token")
-
-		rec := postBootstrapAdmin(e, "correct-token", `{"username":"admin","email":"admin@example.com","password":"password123"}`)
-
-		require.Equal(t, http.StatusCreated, rec.Code)
-		var body User
-		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
-		assert.Equal(t, "admin", body.Username)
-		assert.Equal(t, InstanceRoleOwner, body.InstanceRole)
-		assert.Empty(t, body.PasswordHash)
-		repo.AssertExpectations(t)
-	})
-
-	t.Run("MapsAlreadyExists", func(t *testing.T) {
-		repo := new(MockRepository)
-		repo.On("CreateAdminIfNoAdmin", mock.Anything, mock.AnythingOfType("*user.User")).Return(ErrAdminAlreadyExists).Once()
-		e := newBootstrapEcho(repo, "correct-token")
-
-		rec := postBootstrapAdmin(e, "correct-token", `{"username":"admin","email":"admin@example.com","password":"password123"}`)
-
-		require.Equal(t, http.StatusConflict, rec.Code)
-		repo.AssertExpectations(t)
-	})
-}
-
 func TestHandler_AdminUserRoutes(t *testing.T) {
 	adminID := "11111111-1111-4111-8111-111111111111"
 	targetID := "22222222-2222-4222-8222-222222222222"
@@ -164,13 +119,6 @@ func TestHandler_ChangePassword(t *testing.T) {
 	})
 }
 
-func newBootstrapEcho(repo Repository, token string) *echo.Echo {
-	e := echo.New()
-	service := NewService(repo, []byte("secret"), activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
-	NewHandler(service, token).RegisterRoutes(e)
-	return e
-}
-
 func newAdminUserEcho(repo Repository, userID string) *echo.Echo {
 	e := echo.New()
 	api := e.Group("/api")
@@ -197,17 +145,6 @@ func newAccountEcho(repo Repository, userID string) *echo.Echo {
 	service := NewService(repo, []byte("secret"), activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
 	NewHandler(service).RegisterAccountRoutes(api)
 	return e
-}
-
-func postBootstrapAdmin(e *echo.Echo, token, body string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodPost, "/setup/admin", strings.NewReader(body))
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	if token != "" {
-		req.Header.Set(AdminBootstrapTokenHeader, token)
-	}
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-	return rec
 }
 
 func doAdminUserRequest(e *echo.Echo, method, path, body string) *httptest.ResponseRecorder {

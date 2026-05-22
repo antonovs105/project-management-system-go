@@ -14,7 +14,7 @@ import (
 )
 
 func TestValidateRuntimeConfigAllowsDevelopmentLocalhost(t *testing.T) {
-	err := validateRuntimeConfig(false, "your_secret_key_here", "http://localhost:8080", "localhost:8080", "", "", "")
+	err := validateRuntimeConfig(false, "your_secret_key_here", "http://localhost:8080", "localhost:8080", "", "")
 
 	require.NoError(t, err)
 }
@@ -62,33 +62,26 @@ func TestParseAppRoleRejectsUnknownRole(t *testing.T) {
 }
 
 func TestValidateRuntimeConfigRejectsProductionDefaults(t *testing.T) {
-	err := validateRuntimeConfig(true, "your_secret_key_here", "http://localhost:8080", "localhost:8080", "", "", "")
+	err := validateRuntimeConfig(true, "your_secret_key_here", "http://localhost:8080", "localhost:8080", "", "")
 
 	require.Error(t, err)
 }
 
 func TestValidateRuntimeConfigAcceptsProductionValues(t *testing.T) {
-	err := validateRuntimeConfig(true, "0123456789abcdef0123456789abcdef", "https://pm.example.test", "pm.example.test", "0123456789abcdef0123456789abcdef", "metrics-token-0123456789abcdef0123456789", "actor-key-0123456789abcdef0123456789")
+	err := validateRuntimeConfig(true, "0123456789abcdef0123456789abcdef", "https://pm.example.test", "pm.example.test", "metrics-token-0123456789abcdef0123456789", "actor-key-0123456789abcdef0123456789")
 
 	require.NoError(t, err)
 }
 
-func TestValidateRuntimeConfigRejectsWeakProductionAdminBootstrapToken(t *testing.T) {
-	err := validateRuntimeConfig(true, "0123456789abcdef0123456789abcdef", "https://pm.example.test", "pm.example.test", "short", "metrics-token-0123456789abcdef0123456789", "actor-key-0123456789abcdef0123456789")
-
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "ADMIN_BOOTSTRAP_TOKEN")
-}
-
 func TestValidateRuntimeConfigRejectsMissingProductionMetricsToken(t *testing.T) {
-	err := validateRuntimeConfig(true, "0123456789abcdef0123456789abcdef", "https://pm.example.test", "pm.example.test", "", "", "actor-key-0123456789abcdef0123456789")
+	err := validateRuntimeConfig(true, "0123456789abcdef0123456789abcdef", "https://pm.example.test", "pm.example.test", "", "actor-key-0123456789abcdef0123456789")
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "METRICS_TOKEN")
 }
 
 func TestValidateRuntimeConfigRejectsMissingProductionActorPrivateKeyEncryptionKey(t *testing.T) {
-	err := validateRuntimeConfig(true, "0123456789abcdef0123456789abcdef", "https://pm.example.test", "pm.example.test", "", "metrics-token-0123456789abcdef0123456789", "")
+	err := validateRuntimeConfig(true, "0123456789abcdef0123456789abcdef", "https://pm.example.test", "pm.example.test", "metrics-token-0123456789abcdef0123456789", "")
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "ACTOR_PRIVATE_KEY_ENCRYPTION_KEY")

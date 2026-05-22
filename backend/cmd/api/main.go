@@ -206,7 +206,7 @@ func (r appRole) runsWorker() bool {
 }
 
 // validateRuntimeConfig rejects unsafe deployment configuration before the server starts.
-func validateRuntimeConfig(production bool, jwtSecret, publicBaseURL, localDomain, adminBootstrapToken, metricsToken, actorPrivateKeyEncryptionKey string) error {
+func validateRuntimeConfig(production bool, jwtSecret, publicBaseURL, localDomain, metricsToken, actorPrivateKeyEncryptionKey string) error {
 	parsedBaseURL, err := url.Parse(strings.TrimSpace(publicBaseURL))
 	if err != nil || parsedBaseURL.Scheme == "" || parsedBaseURL.Host == "" {
 		return fmt.Errorf("PUBLIC_BASE_URL must be an absolute HTTP URL")
@@ -229,9 +229,6 @@ func validateRuntimeConfig(production bool, jwtSecret, publicBaseURL, localDomai
 	}
 	if isLocalHost(parsedBaseURL.Hostname()) || isLocalHost(localDomain) {
 		return fmt.Errorf("PUBLIC_BASE_URL and LOCAL_DOMAIN must not use localhost in production")
-	}
-	if adminBootstrapToken != "" && len(adminBootstrapToken) < 32 {
-		return fmt.Errorf("ADMIN_BOOTSTRAP_TOKEN must be at least 32 characters in production")
 	}
 	if len(metricsToken) < 32 {
 		return fmt.Errorf("METRICS_TOKEN must be at least 32 characters in production")
@@ -358,7 +355,6 @@ func main() {
 	redisAddr := os.Getenv("REDIS_ADDR")
 	metricsAddr := strings.TrimSpace(os.Getenv("METRICS_ADDR"))
 	metricsToken := strings.TrimSpace(os.Getenv("METRICS_TOKEN"))
-	adminBootstrapToken := strings.TrimSpace(os.Getenv("ADMIN_BOOTSTRAP_TOKEN"))
 	actorPrivateKeyEncryptionKey := strings.TrimSpace(os.Getenv("ACTOR_PRIVATE_KEY_ENCRYPTION_KEY"))
 	allowInsecureFederationHTTP := !production
 	if value, ok, err := optionalBoolEnv("FEDERATION_ALLOW_INSECURE_HTTP"); err != nil {
@@ -370,7 +366,7 @@ func main() {
 		log.Fatal("FEDERATION_ALLOW_INSECURE_HTTP cannot be enabled in production")
 	}
 	requireHTTPSFederation := !allowInsecureFederationHTTP
-	if err := validateRuntimeConfig(production, jwtSecret, publicBaseURL, localDomain, adminBootstrapToken, metricsToken, actorPrivateKeyEncryptionKey); err != nil {
+	if err := validateRuntimeConfig(production, jwtSecret, publicBaseURL, localDomain, metricsToken, actorPrivateKeyEncryptionKey); err != nil {
 		log.Fatal(err)
 	}
 	privateKeyCodec, err := secrets.NewPrivateKeyCodec(actorPrivateKeyEncryptionKey)
@@ -393,7 +389,7 @@ func main() {
 
 	userRepo := user.NewRepository(db, apConfig, privateKeyCodec)
 	userService := user.NewService(userRepo, []byte(jwtSecret), apConfig)
-	userHandler := user.NewHandler(userService, adminBootstrapToken)
+	userHandler := user.NewHandler(userService)
 
 	projectRepo := project.NewRepository(db, apConfig, privateKeyCodec)
 	projectService := project.NewService(projectRepo, apConfig)
@@ -519,7 +515,7 @@ func main() {
 	}
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins: corsOrigins,
-		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization, user.AdminBootstrapTokenHeader},
+		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
 	}))
 
 	e.GET("/health", server.healthCheck)

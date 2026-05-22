@@ -1,8 +1,6 @@
 package user
 
 import (
-	"crypto/sha256"
-	"crypto/subtle"
 	"errors"
 	"log"
 	"net/http"
@@ -12,30 +10,20 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// AdminBootstrapTokenHeader carries the one-time secret for initial admin setup.
-const AdminBootstrapTokenHeader = "X-Admin-Bootstrap-Token"
-
 // Handler exposes user registration, login, account, and admin HTTP endpoints.
 type Handler struct {
-	service             *Service
-	adminBootstrapToken string
+	service *Service
 }
 
-// NewHandler creates a user HTTP handler with an optional admin bootstrap token.
-func NewHandler(service *Service, adminBootstrapToken ...string) *Handler {
-	token := ""
-	if len(adminBootstrapToken) > 0 {
-		token = strings.TrimSpace(adminBootstrapToken[0])
-	}
+// NewHandler creates a user HTTP handler.
+func NewHandler(service *Service) *Handler {
 	return &Handler{
-		service:             service,
-		adminBootstrapToken: token,
+		service: service,
 	}
 }
 
 // RegisterRoutes registers public user routes on the root Echo router.
 func (h *Handler) RegisterRoutes(e *echo.Echo, middleware ...echo.MiddlewareFunc) {
-	e.POST("/setup/admin", h.BootstrapAdmin, middleware...)
 	e.POST("/register", h.Register, middleware...)
 	e.POST("/login", h.Login, middleware...)
 }
@@ -58,13 +46,6 @@ type RegisterRequest struct {
 	Password string `json:"password"`
 }
 
-// BootstrapAdminRequest is the JSON payload for creating the first admin.
-type BootstrapAdminRequest struct {
-	Username string `json:"username"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
-}
-
 // UpdateInstanceRoleRequest is the JSON payload for changing a user's instance role.
 type UpdateInstanceRoleRequest struct {
 	InstanceRole string `json:"instance_role"`
@@ -75,35 +56,6 @@ type UpdateInstanceRoleRequest struct {
 type ChangePasswordRequest struct {
 	CurrentPassword string `json:"current_password"`
 	NewPassword     string `json:"new_password"`
-}
-
-// BootstrapAdmin creates the first local owner when bootstrap is enabled.
-func (h *Handler) BootstrapAdmin(c echo.Context) error {
-	if h.adminBootstrapToken == "" {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": "admin bootstrap disabled"})
-	}
-	if !sameSecret(h.adminBootstrapToken, c.Request().Header.Get(AdminBootstrapTokenHeader)) {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid admin bootstrap token"})
-	}
-
-	var req BootstrapAdminRequest
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-	}
-
-	admin, err := h.service.BootstrapAdmin(c.Request().Context(), req.Username, req.Email, req.Password)
-	if err != nil {
-		if errors.Is(err, ErrInvalidUserInput) {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
-		}
-		if errors.Is(err, ErrAdminAlreadyExists) {
-			return c.JSON(http.StatusConflict, map[string]string{"error": "admin user already exists"})
-		}
-		log.Printf("Error bootstrapping admin user: %v", err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not bootstrap admin"})
-	}
-
-	return c.JSON(http.StatusCreated, admin)
 }
 
 // ListUsers returns an admin-filtered list of local users.
@@ -149,13 +101,6 @@ func (h *Handler) ChangePassword(c echo.Context) error {
 		return writeAccountError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
-}
-
-// sameSecret compares bootstrap tokens without leaking timing information.
-func sameSecret(expected, actual string) bool {
-	expectedHash := sha256.Sum256([]byte(expected))
-	actualHash := sha256.Sum256([]byte(actual))
-	return subtle.ConstantTimeCompare(expectedHash[:], actualHash[:]) == 1
 }
 
 // currentUserID returns the authenticated user ID stored by JWT middleware.

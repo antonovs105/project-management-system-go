@@ -47,7 +47,15 @@
 
    The `migrations` service runs after Postgres is healthy and must complete before the backend starts.
 
-4. **Access the application**:
+4. **Create the first owner account**:
+   Owner bootstrap is a maintenance CLI operation, not a browser/API setup page. In PowerShell:
+   ```powershell
+   "change-this-password" | docker compose run --rm -T backend ./pmsctl owner create --username owner --email owner@example.test --password-stdin
+   ```
+
+   The command can be run only while no owner account exists.
+
+5. **Access the application**:
    - Frontend: [http://localhost:5173](http://localhost:5173)
    - Backend API: [http://localhost:8080](http://localhost:8080)
 

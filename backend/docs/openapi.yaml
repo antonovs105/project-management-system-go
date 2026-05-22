@@ -98,37 +98,6 @@ paths:
                     type: string
         "401":
           $ref: "#/components/responses/Error"
-  /setup/admin:
-    post:
-      tags: [Auth]
-      operationId: bootstrapAdmin
-      security:
-        - adminBootstrapToken: []
-      requestBody:
-        $ref: "#/components/requestBodies/BootstrapAdmin"
-      responses:
-        "201":
-          description: First local owner actor created.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/User"
-        "400":
-          $ref: "#/components/responses/Error"
-        "401":
-          $ref: "#/components/responses/Error"
-        "404":
-          description: Admin bootstrap is disabled because ADMIN_BOOTSTRAP_TOKEN is not configured.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "409":
-          description: A local owner user already exists.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
   /api/me:
     get:
       tags: [Auth]
@@ -1163,10 +1132,6 @@ components:
       type: http
       scheme: bearer
       description: Optional in development; required when METRICS_TOKEN is configured.
-    adminBootstrapToken:
-      type: apiKey
-      in: header
-      name: X-Admin-Bootstrap-Token
   parameters:
     ActivityID:
       name: activityID
@@ -1351,22 +1316,6 @@ components:
                 type: string
                 format: password
     RegisterUser:
-      required: true
-      content:
-        application/json:
-          schema:
-            type: object
-            required: [username, email, password]
-            properties:
-              username:
-                type: string
-              email:
-                type: string
-                format: email
-              password:
-                type: string
-                format: password
-    BootstrapAdmin:
       required: true
       content:
         application/json:
