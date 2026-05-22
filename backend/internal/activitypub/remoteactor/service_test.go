@@ -401,6 +401,12 @@ func TestDiscoverRejectsHTTPWebFingerWhenHTTPSRequired(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidWebFinger)
 }
 
+func TestNewServiceRecordsPrivateNetworkPolicy(t *testing.T) {
+	service := NewService(&memoryRepository{}, WithAllowPrivateNetworks(true))
+
+	assert.True(t, service.allowPrivateNetworks)
+}
+
 func TestDiscoverRejectsUnsupportedSelfLinkScheme(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(t, w, map[string]any{

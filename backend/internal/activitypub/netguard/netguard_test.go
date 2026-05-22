@@ -52,6 +52,21 @@ func TestValidateRemoteURLRejectsHTTPWhenHTTPSRequired(t *testing.T) {
 	require.Contains(t, err.Error(), "https required")
 }
 
+func TestValidateRemoteURLAllowsPrivateHostsWhenExplicitlyEnabled(t *testing.T) {
+	for _, raw := range []string{
+		"http://127.0.0.1/users/alice",
+		"http://10.0.0.5/users/alice",
+		"http://172.16.0.1/users/alice",
+		"http://192.168.1.2/users/alice",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			parsed, err := ValidateRemoteURL(raw, AllowPrivateNetworks())
+			require.NoError(t, err)
+			assert.NotEmpty(t, parsed.Host)
+		})
+	}
+}
+
 func TestHTTPClientRejectsUnsafeRedirect(t *testing.T) {
 	client := NewHTTPClient(time.Second)
 	err := client.CheckRedirect(
@@ -60,6 +75,16 @@ func TestHTTPClientRejectsUnsafeRedirect(t *testing.T) {
 	)
 
 	require.ErrorIs(t, err, ErrUnsafeURL)
+}
+
+func TestHTTPClientAllowsUnsafeRedirectWhenPrivateNetworksEnabled(t *testing.T) {
+	client := NewHTTPClientWithPolicy(time.Second, AllowPrivateNetworks())
+	err := client.CheckRedirect(
+		mustRequest(t, "http://127.0.0.1/private"),
+		[]*http.Request{mustRequest(t, "https://remote.example/start")},
+	)
+
+	require.NoError(t, err)
 }
 
 func TestHTTPClientRejectsHTTPRedirectWhenHTTPSRequired(t *testing.T) {

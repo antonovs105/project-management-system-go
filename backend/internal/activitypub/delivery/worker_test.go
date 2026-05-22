@@ -83,6 +83,15 @@ func (f actorRefresherFunc) RefreshIfStale(ctx context.Context, actorAPID string
 	return f(ctx, actorAPID, maxAge)
 }
 
+func TestNewWorkerRecordsPrivateNetworkPolicy(t *testing.T) {
+	worker := NewWorker(&workerRepo{}, signerFunc(func(ctx context.Context, actorID string, req *http.Request, body []byte) error {
+		return nil
+	}), nil, WithAllowPrivateNetworks(true))
+
+	assert.True(t, worker.allowPrivateNetworks)
+	require.NotNil(t, worker.client)
+}
+
 type workerMetricsRecorder struct {
 	inFlight     int
 	observations []workerMetricObservation

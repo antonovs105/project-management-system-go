@@ -24,7 +24,8 @@ var (
 
 // URLPolicy configures outbound federation URL validation.
 type URLPolicy struct {
-	requireHTTPS bool
+	requireHTTPS         bool
+	allowPrivateNetworks bool
 }
 
 // URLPolicyOption changes outbound federation URL validation behavior.
@@ -34,6 +35,14 @@ type URLPolicyOption func(*URLPolicy)
 func RequireHTTPS() URLPolicyOption {
 	return func(policy *URLPolicy) {
 		policy.requireHTTPS = true
+	}
+}
+
+// AllowPrivateNetworks permits local/private network destinations for isolated
+// development federation tests. Do not enable it in production.
+func AllowPrivateNetworks() URLPolicyOption {
+	return func(policy *URLPolicy) {
+		policy.allowPrivateNetworks = true
 	}
 }
 
@@ -67,7 +76,7 @@ func NewHTTPClientWithPolicy(timeout time.Duration, opts ...URLPolicyOption) *ht
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
 	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-		return dialContext(ctx, dialer, network, address)
+		return dialContext(ctx, dialer, network, address, policy)
 	}
 
 	return &http.Client{
@@ -107,7 +116,7 @@ func ValidateURL(parsed *url.URL, opts ...URLPolicyOption) error {
 	if policy.requireHTTPS && scheme != "https" {
 		return fmt.Errorf("%w: https required", ErrUnsafeURL)
 	}
-	return ValidateHostname(parsed.Hostname())
+	return ValidateHostnameWithPolicy(parsed.Hostname(), policy)
 }
 
 // urlPolicy applies URL policy options to their default values.
@@ -123,14 +132,23 @@ func urlPolicy(opts ...URLPolicyOption) URLPolicy {
 
 // options converts a URL policy back into option functions.
 func (p URLPolicy) options() []URLPolicyOption {
+	options := make([]URLPolicyOption, 0, 2)
 	if p.requireHTTPS {
-		return []URLPolicyOption{RequireHTTPS()}
+		options = append(options, RequireHTTPS())
 	}
-	return nil
+	if p.allowPrivateNetworks {
+		options = append(options, AllowPrivateNetworks())
+	}
+	return options
 }
 
 // ValidateHostname rejects hostnames or IP literals unsafe for outbound federation.
 func ValidateHostname(hostname string) error {
+	return ValidateHostnameWithPolicy(hostname, URLPolicy{})
+}
+
+// ValidateHostnameWithPolicy rejects hostnames or IP literals unsafe for outbound federation.
+func ValidateHostnameWithPolicy(hostname string, policy URLPolicy) error {
 	hostname = strings.TrimSpace(hostname)
 	if hostname == "" {
 		return fmt.Errorf("%w: host required", ErrUnsafeURL)
@@ -141,18 +159,18 @@ func ValidateHostname(hostname string) error {
 
 	addr, err := netip.ParseAddr(hostname)
 	if err == nil {
-		return validateAddr(addr)
+		return validateAddr(addr, policy)
 	}
 	return nil
 }
 
 // dialContext resolves and validates a network destination before opening a socket.
-func dialContext(ctx context.Context, dialer *net.Dialer, network, address string) (net.Conn, error) {
+func dialContext(ctx context.Context, dialer *net.Dialer, network, address string, policy URLPolicy) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, err
 	}
-	if err := ValidateHostname(host); err != nil {
+	if err := ValidateHostnameWithPolicy(host, policy); err != nil {
 		return nil, err
 	}
 
@@ -176,7 +194,7 @@ func dialContext(ctx context.Context, dialer *net.Dialer, network, address strin
 			return nil, fmt.Errorf("%w: invalid resolved address", ErrUnsafeURL)
 		}
 		addr = addr.Unmap()
-		if err := validateAddr(addr); err != nil {
+		if err := validateAddr(addr, policy); err != nil {
 			return nil, err
 		}
 		if !selected.IsValid() {
@@ -188,8 +206,16 @@ func dialContext(ctx context.Context, dialer *net.Dialer, network, address strin
 }
 
 // validateAddr rejects loopback, private, multicast, and reserved addresses.
-func validateAddr(addr netip.Addr) error {
+func validateAddr(addr netip.Addr, policy URLPolicy) error {
 	addr = addr.Unmap()
+	if policy.allowPrivateNetworks {
+		if !addr.IsValid() ||
+			addr.IsUnspecified() ||
+			addr.IsMulticast() {
+			return fmt.Errorf("%w: blocked address %s", ErrUnsafeURL, addr.String())
+		}
+		return nil
+	}
 	if !addr.IsValid() ||
 		!addr.IsGlobalUnicast() ||
 		addr.IsPrivate() ||

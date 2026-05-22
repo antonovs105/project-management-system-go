@@ -365,6 +365,15 @@ func main() {
 	if production && allowInsecureFederationHTTP {
 		log.Fatal("FEDERATION_ALLOW_INSECURE_HTTP cannot be enabled in production")
 	}
+	allowPrivateFederationNetworks := false
+	if value, ok, err := optionalBoolEnv("FEDERATION_ALLOW_PRIVATE_NETWORKS"); err != nil {
+		log.Fatal(err)
+	} else if ok {
+		allowPrivateFederationNetworks = value
+	}
+	if production && allowPrivateFederationNetworks {
+		log.Fatal("FEDERATION_ALLOW_PRIVATE_NETWORKS cannot be enabled in production")
+	}
 	requireHTTPSFederation := !allowInsecureFederationHTTP
 	if err := validateRuntimeConfig(production, jwtSecret, publicBaseURL, localDomain, metricsToken, actorPrivateKeyEncryptionKey); err != nil {
 		log.Fatal(err)
@@ -373,7 +382,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("backend_runtime_start app_env=%s role=%s public_base_url=%s local_domain=%s redis_configured=%t metrics_addr=%s federation_https_required=%t", appEnv, role, publicBaseURL, localDomain, redisAddr != "", metricsAddr, requireHTTPSFederation)
+	log.Printf("backend_runtime_start app_env=%s role=%s public_base_url=%s local_domain=%s redis_configured=%t metrics_addr=%s federation_https_required=%t federation_private_networks_allowed=%t", appEnv, role, publicBaseURL, localDomain, redisAddr != "", metricsAddr, requireHTTPSFederation, allowPrivateFederationNetworks)
 	apConfig := activitypub.NewConfig(publicBaseURL, localDomain)
 	metrics := observability.NewMetrics()
 	metricsServer := startMetricsServer(metrics, metricsAddr, metricsToken)
@@ -407,7 +416,14 @@ func main() {
 
 	// Remote ActivityPub signing/discovery dependencies
 	remoteActorRepo := remoteactor.NewRepository(db)
-	remoteActorService := remoteactor.NewService(remoteActorRepo, remoteactor.WithRequireHTTPS(requireHTTPSFederation))
+	remoteActorOptions := []remoteactor.Option{
+		remoteactor.WithRequireHTTPS(requireHTTPSFederation),
+		remoteactor.WithAllowPrivateNetworks(allowPrivateFederationNetworks),
+	}
+	if allowInsecureFederationHTTP {
+		remoteActorOptions = append(remoteActorOptions, remoteactor.WithWebFingerScheme("http"))
+	}
+	remoteActorService := remoteactor.NewService(remoteActorRepo, remoteActorOptions...)
 	sigRepo := httpsig.NewRepository(db, privateKeyCodec)
 	sigService := httpsig.NewService(
 		sigRepo,
@@ -436,6 +452,7 @@ func main() {
 				delivery.WithRemoteActorRefresher(remoteActorService),
 				delivery.WithMetrics(metrics),
 				delivery.WithRequireHTTPS(requireHTTPSFederation),
+				delivery.WithAllowPrivateNetworks(allowPrivateFederationNetworks),
 			)
 			deliveryServer := delivery.NewAsynqServer(redisOpt)
 			if err := deliveryServer.Start(delivery.NewServeMux(deliveryWorker)); err != nil {

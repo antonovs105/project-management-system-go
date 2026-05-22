@@ -78,6 +78,7 @@ type Worker struct {
 	remoteActorRefresher     RemoteActorRefresher
 	targetActorRefreshMaxAge time.Duration
 	requireHTTPS             bool
+	allowPrivateNetworks     bool
 	metrics                  WorkerMetrics
 }
 
@@ -99,6 +100,9 @@ func NewWorker(repo Repository, signer Signer, client HTTPClient, opts ...Worker
 		var policy []netguard.URLPolicyOption
 		if worker.requireHTTPS {
 			policy = append(policy, netguard.RequireHTTPS())
+		}
+		if worker.allowPrivateNetworks {
+			policy = append(policy, netguard.AllowPrivateNetworks())
 		}
 		worker.client = netguard.NewHTTPClientWithPolicy(20*time.Second, policy...)
 	}
@@ -132,6 +136,14 @@ func WithMetrics(metrics WorkerMetrics) WorkerOption {
 func WithRequireHTTPS(require bool) WorkerOption {
 	return func(w *Worker) {
 		w.requireHTTPS = require
+	}
+}
+
+// WithAllowPrivateNetworks permits private/local network targets for isolated
+// development federation tests. Do not enable it in production.
+func WithAllowPrivateNetworks(allow bool) WorkerOption {
+	return func(w *Worker) {
+		w.allowPrivateNetworks = allow
 	}
 }
 

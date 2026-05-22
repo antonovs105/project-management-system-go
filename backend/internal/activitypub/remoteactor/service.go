@@ -34,13 +34,14 @@ type HTTPClient interface {
 
 // Service discovers, fetches, validates, and caches remote ActivityPub actors.
 type Service struct {
-	repo            Repository
-	client          HTTPClient
-	customClient    bool
-	webFingerScheme string
-	userAgent       string
-	maxResponseSize int64
-	requireHTTPS    bool
+	repo                 Repository
+	client               HTTPClient
+	customClient         bool
+	webFingerScheme      string
+	userAgent            string
+	maxResponseSize      int64
+	requireHTTPS         bool
+	allowPrivateNetworks bool
 }
 
 // Option configures a remote actor service.
@@ -58,8 +59,15 @@ func NewService(repo Repository, opts ...Option) *Service {
 	for _, opt := range opts {
 		opt(service)
 	}
-	if service.requireHTTPS && !service.customClient {
-		service.client = netguard.NewHTTPClientWithPolicy(10*time.Second, netguard.RequireHTTPS())
+	if !service.customClient {
+		policy := make([]netguard.URLPolicyOption, 0, 2)
+		if service.requireHTTPS {
+			policy = append(policy, netguard.RequireHTTPS())
+		}
+		if service.allowPrivateNetworks {
+			policy = append(policy, netguard.AllowPrivateNetworks())
+		}
+		service.client = netguard.NewHTTPClientWithPolicy(10*time.Second, policy...)
 	}
 	return service
 }
@@ -97,6 +105,14 @@ func WithMaxResponseSize(size int64) Option {
 func WithRequireHTTPS(require bool) Option {
 	return func(s *Service) {
 		s.requireHTTPS = require
+	}
+}
+
+// WithAllowPrivateNetworks permits private/local network targets for isolated
+// development federation tests. Do not enable it in production.
+func WithAllowPrivateNetworks(allow bool) Option {
+	return func(s *Service) {
+		s.allowPrivateNetworks = allow
 	}
 }
 

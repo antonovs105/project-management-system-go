@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteactor"
 	"github.com/antonovs105/project-management-system-go/internal/secrets"
 	"github.com/antonovs105/project-management-system-go/internal/user"
 	"github.com/jmoiron/sqlx"
@@ -22,11 +23,14 @@ import (
 
 // Runner executes pmsctl commands with injectable IO and side effects.
 type Runner struct {
-	Stdin       io.Reader
-	Stdout      io.Writer
-	Stderr      io.Writer
-	LoadEnvFile func(path string) error
-	CreateOwner func(ctx context.Context, options OwnerCreateOptions) (*user.User, error)
+	Stdin               io.Reader
+	Stdout              io.Writer
+	Stderr              io.Writer
+	LoadEnvFile         func(path string) error
+	CreateOwner         func(ctx context.Context, options OwnerCreateOptions) (*user.User, error)
+	DiscoverRemoteActor func(ctx context.Context, options FederationDiscoverOptions) (*remoteactor.Actor, error)
+	FollowRemoteActor   func(ctx context.Context, options FederationFollowOptions) (*FederationFollowResult, error)
+	AcceptProjectFollow func(ctx context.Context, options FederationAcceptFollowOptions) (*FederationAcceptFollowResult, error)
 }
 
 // OwnerCreateOptions carries validated owner bootstrap input.
@@ -39,11 +43,13 @@ type OwnerCreateOptions struct {
 
 // RuntimeConfig is the environment needed for DB-backed maintenance commands.
 type RuntimeConfig struct {
-	AppEnv                       string
-	DBSource                     string
-	PublicBaseURL                string
-	LocalDomain                  string
-	ActorPrivateKeyEncryptionKey string
+	AppEnv                         string
+	DBSource                       string
+	PublicBaseURL                  string
+	LocalDomain                    string
+	ActorPrivateKeyEncryptionKey   string
+	FederationAllowInsecureHTTP    bool
+	FederationAllowPrivateNetworks bool
 }
 
 // defaultEnvFile is the conventional env file loaded by CLI commands.
@@ -52,11 +58,14 @@ const defaultEnvFile = ".env"
 // NewRunner returns the production pmsctl runner.
 func NewRunner() *Runner {
 	return &Runner{
-		Stdin:       os.Stdin,
-		Stdout:      os.Stdout,
-		Stderr:      os.Stderr,
-		LoadEnvFile: loadEnvFile,
-		CreateOwner: createOwner,
+		Stdin:               os.Stdin,
+		Stdout:              os.Stdout,
+		Stderr:              os.Stderr,
+		LoadEnvFile:         loadEnvFile,
+		CreateOwner:         createOwner,
+		DiscoverRemoteActor: discoverRemoteActor,
+		FollowRemoteActor:   followRemoteActor,
+		AcceptProjectFollow: acceptProjectFollow,
 	}
 }
 
@@ -74,6 +83,8 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 		return 0
 	case "owner":
 		return r.runOwner(ctx, args[1:])
+	case "federation":
+		return r.runFederation(ctx, args[1:])
 	default:
 		fmt.Fprintf(r.Stderr, "unknown command %q\n\n", args[0])
 		r.printRootUsage()
@@ -97,6 +108,15 @@ func (r *Runner) withDefaults() {
 	}
 	if r.CreateOwner == nil {
 		r.CreateOwner = createOwner
+	}
+	if r.DiscoverRemoteActor == nil {
+		r.DiscoverRemoteActor = discoverRemoteActor
+	}
+	if r.FollowRemoteActor == nil {
+		r.FollowRemoteActor = followRemoteActor
+	}
+	if r.AcceptProjectFollow == nil {
+		r.AcceptProjectFollow = acceptProjectFollow
 	}
 }
 
@@ -271,6 +291,18 @@ func LoadRuntimeConfig() (RuntimeConfig, error) {
 	if cfg.AppEnv != "development" && cfg.AppEnv != "test" && cfg.AppEnv != "production" {
 		return RuntimeConfig{}, fmt.Errorf("APP_ENV must be one of development, test, or production")
 	}
+	if value, ok, err := optionalBoolEnv("FEDERATION_ALLOW_INSECURE_HTTP"); err != nil {
+		return RuntimeConfig{}, err
+	} else if ok {
+		cfg.FederationAllowInsecureHTTP = value
+	} else {
+		cfg.FederationAllowInsecureHTTP = cfg.AppEnv != "production"
+	}
+	if value, ok, err := optionalBoolEnv("FEDERATION_ALLOW_PRIVATE_NETWORKS"); err != nil {
+		return RuntimeConfig{}, err
+	} else if ok {
+		cfg.FederationAllowPrivateNetworks = value
+	}
 
 	parsedBaseURL, err := url.Parse(cfg.PublicBaseURL)
 	if err != nil || parsedBaseURL.Scheme == "" || parsedBaseURL.Host == "" {
@@ -293,9 +325,31 @@ func LoadRuntimeConfig() (RuntimeConfig, error) {
 		if len(cfg.ActorPrivateKeyEncryptionKey) < 32 {
 			return RuntimeConfig{}, fmt.Errorf("ACTOR_PRIVATE_KEY_ENCRYPTION_KEY must be at least 32 characters in production")
 		}
+		if cfg.FederationAllowInsecureHTTP {
+			return RuntimeConfig{}, fmt.Errorf("FEDERATION_ALLOW_INSECURE_HTTP cannot be enabled in production")
+		}
+		if cfg.FederationAllowPrivateNetworks {
+			return RuntimeConfig{}, fmt.Errorf("FEDERATION_ALLOW_PRIVATE_NETWORKS cannot be enabled in production")
+		}
 	}
 
 	return cfg, nil
+}
+
+// optionalBoolEnv parses an optional boolean environment setting.
+func optionalBoolEnv(name string) (bool, bool, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return false, false, nil
+	}
+	switch strings.ToLower(raw) {
+	case "1", "true", "yes", "on":
+		return true, true, nil
+	case "0", "false", "no", "off":
+		return false, true, nil
+	default:
+		return false, true, fmt.Errorf("%s must be a boolean", name)
+	}
 }
 
 // isLocalHost reports whether host points to the loopback development host.
@@ -314,6 +368,7 @@ func (r *Runner) printRootUsage() {
 	fmt.Fprintln(r.Stderr)
 	fmt.Fprintln(r.Stderr, "Commands:")
 	fmt.Fprintln(r.Stderr, "  owner create    Create the first local owner account")
+	fmt.Fprintln(r.Stderr, "  federation      Discover and send local federation activities")
 }
 
 // printOwnerUsage writes owner command help.
