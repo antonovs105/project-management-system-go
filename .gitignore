@@ -52,6 +52,7 @@ logs/
 # Temp
 tmp/
 temp/
+.local/
 
 # Docker volumes
 postgres_data/
