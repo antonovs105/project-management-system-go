@@ -1,6 +1,6 @@
 ## Overview
 
-This repository contains an unnamed full-stack project management application with federation support. The current system combines a Go backend, a React frontend, PostgreSQL persistence, Redis-backed background delivery, and Prometheus monitoring.
+This repository contains an full-stack project management application with federation support. The current system combines a Go backend, a React frontend, PostgreSQL persistence, Redis-backed background delivery, and Prometheus monitoring.
 
 ## Current State
 
