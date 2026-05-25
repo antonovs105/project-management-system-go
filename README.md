@@ -1,110 +1,193 @@
-## 🛠 Tech Stack
+## Overview
+
+This repository contains an unnamed full-stack project management application with federation support. The current system combines a Go backend, a React frontend, PostgreSQL persistence, Redis-backed background delivery, and Prometheus monitoring.
+
+## Current State
+
+- User registration and login with JWT authentication.
+- Owner bootstrap through the backend maintenance CLI.
+- Instance roles: `owner`, `admin`, and `user`.
+- Project CRUD with project-local members, invitations, custom roles, and permission sets.
+- Ticket workflow with kanban-style status columns, drag-and-drop status updates, priorities, ticket types, parent/subtask relationships, links, and comments.
+- Project graph view backed by the ticket graph API.
+- ActivityPub foundation with local actor documents, WebFinger discovery, inbox/outbox routes, HTTP signatures, remote actor caching, signed delivery, retries, and delivery inspection.
+- Federation administration for domain blocks, remote actors, delivery summaries, retry actions, and audit events.
+- Health, readiness, structured request logging, body limits, rate limits on public surfaces, protected Prometheus metrics, and container health checks.
+- Static OpenAPI contract at `backend/docs/openapi.yaml`.
+
+## Tech Stack
 
 ### Backend
-- **Language**: [Go](https://go.dev/) (v1.25+)
-- **Framework**: [Echo](https://echo.labstack.com/) (High performance, extensible web framework)
-- **Database**: [PostgreSQL](https://www.postgresql.org/)
-- **Database Toolkit**: [sqlx](https://github.com/jmoiron/sqlx) (General purpose extensions to database/sql)
-- **Migrations**: [golang-migrate](https://github.com/golang-migrate/migrate)
-- **Authentication**: JWT (JSON Web Tokens)
+
+- Go 1.25
+- Echo
+- PostgreSQL with `sqlx`
+- `golang-migrate` migrations
+- Redis and Asynq for ActivityPub delivery jobs
+- JWT authentication
+- Prometheus metrics
+- ActivityPub, WebFinger, and HTTP Signatures
 
 ### Frontend
-- **Framework**: [React](https://reactjs.org/) (v19) with [TypeScript](https://www.typescriptlang.org/)
-- **Build Tool**: [Vite](https://vitejs.dev/)
-- **Styling**: [Tailwind CSS](https://tailwindcss.com/)
-- **UI Components**: [shadcn/ui](https://ui.shadcn.com/) (Radix UI & Lucide React)
-- **Routing**: [React Router](https://reactrouter.com/) (v7)
-- **Form Handling**: [React Hook Form](https://react-hook-form.com/) with [Zod](https://zod.dev/) validation
-- **State Management**: [Zustand](https://github.com/pmndrs/zustand)
-- **Data Fetching**: [Axios](https://axios-http.com/) & [TanStack Query](https://tanstack.com/query/latest)
-- **Visualization**: [react-force-graph-2d](https://github.com/vasturiano/react-force-graph)
 
-## 📦 Getting Started
+- React 19 with TypeScript
+- Vite
+- Tailwind CSS
+- Radix UI/shadcn-style components and Lucide icons
+- React Router 7
+- TanStack Query and Axios
+- Zustand
+- React Hook Form and Zod
+- dnd-kit
+- react-force-graph-2d
+
+### Runtime Services
+
+- Backend API container
+- Backend worker container
+- Frontend Vite container
+- PostgreSQL
+- Redis
+- Migration runner
+- Prometheus
+
+## Getting Started
 
 ### Prerequisites
 
-- [Docker](https://www.docker.com/) and [Docker Compose](https://docs.docker.com/compose/)
-- (Optional for local development) [Go](https://go.dev/dl/) and [Node.js](https://nodejs.org/) (pnpm recommended)
+- Docker and Docker Compose
+- Optional for local development: Go 1.25+, Node.js 22+, and pnpm
 
-### Quick Start with Docker
+### Run with Docker
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/antonovs105/project-management-system-go.git
-   cd project-management-system-go
-   ```
+1. Clone this repository and enter the checkout.
 
-2. **Set up environment variables**:
-   Copy `.env.example` to `.env` before starting Compose. Replace the sample secrets before using the stack on a shared machine or in production.
+2. Create local environment configuration:
+
    ```bash
    cp .env.example .env
    ```
 
-3. **Run the application**:
+3. Replace the sample secrets in `.env` before using the stack on a shared machine or in production. At minimum, set strong values for:
+
+   ```text
+   POSTGRES_PASSWORD
+   JWT_SECRET_KEY
+   METRICS_TOKEN
+   ACTOR_PRIVATE_KEY_ENCRYPTION_KEY
+   ```
+
+4. Start the stack:
+
    ```bash
    docker compose up --build
    ```
 
-   The `migrations` service runs after Postgres is healthy and must complete before the backend starts.
+   The `migrations` service waits for PostgreSQL and runs all SQL migrations before the backend starts.
 
-4. **Create the first owner account**:
-   Owner bootstrap is a maintenance CLI operation, not a browser/API setup page. In PowerShell:
+5. Create the first owner account:
+
    ```powershell
    "change-this-password" | docker compose run --rm -T backend ./pmsctl owner create --username owner --email owner@example.test --password-stdin
    ```
 
-   The command can be run only while no owner account exists.
+   This can be run only while no owner account exists.
 
-5. **Access the application**:
-   - Frontend: [http://localhost:5173](http://localhost:5173)
-   - Backend API: [http://localhost:8080](http://localhost:8080)
+6. Open the application:
 
-   Compose binds PostgreSQL, Redis, Prometheus, and worker metrics to `127.0.0.1` by default. Production deployments must set `APP_ENV=production`, HTTPS `PUBLIC_BASE_URL`, strong secrets, and leave `FEDERATION_ALLOW_INSECURE_HTTP` unset or `false`.
+   - Frontend: `http://localhost:5173`
+   - Backend API: `http://localhost:8080`
+   - Prometheus: `http://localhost:9090`
 
-### Local Development Without Containers
+By default, PostgreSQL, Redis, Prometheus, and worker metrics bind to `127.0.0.1`. For production, use `APP_ENV=production`, an HTTPS `PUBLIC_BASE_URL`, a non-local `LOCAL_DOMAIN`, strong secrets, and keep insecure federation flags disabled.
 
-This path is only for development. The server runtime target is the Docker/Alpine container setup above.
+## Local Development
 
-#### Backend
+### Backend
+
+Run PostgreSQL and Redis through Docker, then start the API from the backend directory:
+
 ```bash
 cd backend
-# Create .env file with DB_SOURCE pointing to localhost, for example:
-# DB_SOURCE=postgres://postgres:postgres@localhost:5432/pms?sslmode=disable
 go run cmd/api/main.go
 ```
 
-#### Frontend
+The backend reads `.env` from the current working directory when present. For native runs, make sure `DB_SOURCE`, `REDIS_ADDR`, `PUBLIC_BASE_URL`, `LOCAL_DOMAIN`, `JWT_SECRET_KEY`, `METRICS_TOKEN`, and `ACTOR_PRIVATE_KEY_ENCRYPTION_KEY` are set.
+
+### Frontend
+
 ```bash
 cd frontend
 pnpm install
 pnpm dev
 ```
 
-### Backend Integration Tests
+The frontend reads `VITE_API_URL`; it defaults to `http://localhost:8080`.
 
-Integration tests are behind the `integration` build tag and expect a migrated PostgreSQL database.
+## Useful Commands
 
-With Docker running:
+### Backend
+
+```bash
+cd backend
+go test ./...
+go vet ./...
+```
+
+Integration tests require a migrated PostgreSQL database:
+
 ```bash
 docker compose up -d db migrations
 cd backend
 TEST_DB_SOURCE=postgres://postgres:change-me-postgres-password-32-bytes@localhost:5432/pms?sslmode=disable go test -tags=integration ./internal/integration
 ```
 
-If you changed `POSTGRES_PASSWORD` or `POSTGRES_PORT`, use those values in `TEST_DB_SOURCE`.
+### Frontend
 
-## 📂 Project Structure
+```bash
+cd frontend
+pnpm lint
+pnpm build
+pnpm test
+```
+
+### Maintenance CLI
+
+The backend image also builds `./pmsctl` for maintenance tasks:
+
+```bash
+docker compose run --rm backend ./pmsctl owner create --help
+docker compose run --rm backend ./pmsctl federation discover --help
+docker compose run --rm backend ./pmsctl federation follow --help
+docker compose run --rm backend ./pmsctl federation accept-follow --help
+```
+
+## Configuration Notes
+
+- `APP_ROLE` can be `api`, `worker`, or `all`. Docker Compose runs separate API and worker services.
+- `APP_ENV=production` enables stricter runtime validation.
+- `FEDERATION_ALLOW_INSECURE_HTTP=true` is intended only for local development.
+- `FEDERATION_ALLOW_PRIVATE_NETWORKS=true` is rejected in production.
+- `CORS_ALLOWED_ORIGINS` controls browser origins allowed to call the API.
+- `TRUSTED_PROXY_CIDRS` should be set when running behind trusted reverse proxies.
+- `/metrics` requires a bearer token when `METRICS_TOKEN` is set.
+
+## Project Structure
 
 ```text
-├── backend/            # Go source code
-│   ├── cmd/api/        # Application entry point
-│   ├── internal/       # Internal packages (user, project, ticket, etc.)
-├── frontend/           # React source code
-│   ├── src/
-│   │   ├── components/ # Reusable UI components
-│   │   ├── pages/      # Page components
-│   │   ├── store/      # Zustand stores
-│   │   └── hooks/      # Custom React hooks
-├── migrations/         # Global migration files
-└── docker-compose.yml  # Docker orchestration
+backend/
+  cmd/api/                 HTTP API and worker entrypoint
+  cmd/pmsctl/              Maintenance CLI entrypoint
+  docs/openapi.yaml        Static API contract
+  internal/                Backend vertical slices and infrastructure
+frontend/
+  src/components/          Shared UI and layout components
+  src/features/            Project, ticket, graph, and delivery views
+  src/pages/               Route-level pages
+  src/store/               Client-side auth state
+  tests/                   Frontend contract tests
+migrations/                PostgreSQL migration files
+monitoring/prometheus/     Prometheus scrape configuration
+docker-compose.yml         Local multi-service runtime
+docker-compose.instance.yml Example instance-oriented compose file
 ```
