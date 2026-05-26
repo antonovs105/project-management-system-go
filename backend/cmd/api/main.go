@@ -21,6 +21,7 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/c2s"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
+	apfederation "github.com/antonovs105/project-management-system-go/internal/activitypub/federation"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/httpsig"
 	apmoderation "github.com/antonovs105/project-management-system-go/internal/activitypub/moderation"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteactor"
@@ -129,6 +130,7 @@ type ApiServer struct {
 	apHandler         *activitypub.Handler
 	c2sHandler        *c2s.Handler
 	inboxHandler      *remoteinbox.Handler
+	federationHandler *apfederation.Handler
 	moderationHandler *apmoderation.Handler
 	deliveryHandler   *delivery.Handler
 	auditHandler      *adminaudit.Handler
@@ -483,6 +485,7 @@ func main() {
 		remoteinbox.WithBlockedDomains(splitCSVEnv("FEDERATION_BLOCKED_DOMAINS")),
 	)
 	inboxHandler := remoteinbox.NewHandler(inboxService, apConfig)
+	federationHandler := apfederation.NewHandler(apfederation.NewService(apfederation.NewRepository(db)))
 	moderationHandler := apmoderation.NewHandler(apmoderation.NewService(apmoderation.NewRepository(db), deliveryQueue))
 	auditHandler := adminaudit.NewHandler(adminaudit.NewService(adminaudit.NewRepository(db)))
 
@@ -503,6 +506,7 @@ func main() {
 		apHandler:         apHandler,
 		c2sHandler:        c2sHandler,
 		inboxHandler:      inboxHandler,
+		federationHandler: federationHandler,
 		moderationHandler: moderationHandler,
 		deliveryHandler:   deliveryHandler,
 		auditHandler:      auditHandler,
@@ -754,6 +758,7 @@ func registerAuthenticatedAPIRoutes(api *echo.Group, server *ApiServer, jwtSecre
 	api.GET("/me", server.getProfile)
 	server.userHandler.RegisterAccountRoutes(api)
 	server.userHandler.RegisterAdminRoutes(api)
+	server.federationHandler.RegisterRoutes(api)
 	server.projectHandler.RegisterRoutes(api)
 	server.ticketHandler.RegisterRoutes(api)
 	server.commentHandler.RegisterRoutes(api)

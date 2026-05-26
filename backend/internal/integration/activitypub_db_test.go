@@ -17,6 +17,7 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/c2s"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
+	apfederation "github.com/antonovs105/project-management-system-go/internal/activitypub/federation"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/httpsig"
 	apmoderation "github.com/antonovs105/project-management-system-go/internal/activitypub/moderation"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteactor"
@@ -1573,6 +1574,76 @@ func TestInboundFollowResponseUpdatesLocalFollowState(t *testing.T) {
 			requireInboxItem(t, db, localUser.ID, tc.activityType, followAPID)
 		})
 	}
+}
+
+func TestPersonalFederationViewsListInboxAndFollows(t *testing.T) {
+	db := openIntegrationDB(t)
+	resetIntegrationDB(t, db)
+
+	ctx := context.Background()
+	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+	userService := user.NewService(user.NewRepository(db, cfg), []byte("integration-secret"), cfg)
+	localUser, err := userService.RegisterUser(ctx, "feed-user", "feed-user@example.test", "password123")
+	require.NoError(t, err)
+
+	remoteProject := createRemoteActorWithPublicKey(t, ctx, db, "https://remote.example/projects/board", "remote-board", "public key")
+	_, err = db.ExecContext(ctx, `UPDATE actors SET type = 'Group', name = 'Remote Board' WHERE id = $1`, remoteProject.ID)
+	require.NoError(t, err)
+	remoteProject.Type = "Group"
+	remoteProject.Name = "Remote Board"
+	remoteAuthor := createRemoteActorWithPublicKey(t, ctx, db, "https://remote.example/users/author", "author", "public key")
+
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO actor_follows (follower_actor_id, followed_actor_id, state)
+		VALUES ($1, $2, 'accepted')
+	`, localUser.ID, remoteProject.ID)
+	require.NoError(t, err)
+
+	activityID, err := activitypub.NewID()
+	require.NoError(t, err)
+	activityAPID := "https://remote.example/activities/create-ticket"
+	ticketAPID := "https://remote.example/tickets/remote-ticket"
+	rawActivity := []byte(`{
+		"id":"https://remote.example/activities/create-ticket",
+		"type":"Create",
+		"actor":"https://remote.example/users/author",
+		"object":{
+			"id":"https://remote.example/tickets/remote-ticket",
+			"type":["forge:Ticket"],
+			"name":"Remote inbox ticket",
+			"content":"From a followed remote project"
+		},
+		"target":"https://remote.example/projects/board"
+	}`)
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO ap_activities (id, ap_id, activity_type, actor_id, object_ap_id, target_ap_id, document)
+		VALUES ($1, $2, 'Create', $3, $4, $5, $6)
+	`, activityID, activityAPID, remoteAuthor.ID, ticketAPID, remoteProject.APID, rawActivity)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO actor_inbox_items (actor_id, activity_id, activity_ap_id)
+		VALUES ($1, $2, $3)
+	`, localUser.ID, activityID, activityAPID)
+	require.NoError(t, err)
+
+	service := apfederation.NewService(apfederation.NewRepository(db))
+	follows, err := service.ListRemoteFollows(ctx, localUser.ID, apfederation.ListOptions{})
+	require.NoError(t, err)
+	require.Len(t, follows, 1)
+	assert.Equal(t, remoteProject.APID, follows[0].ActorAPID)
+	assert.Equal(t, "Group", follows[0].ActorType)
+	assert.Equal(t, "accepted", follows[0].State)
+
+	inbox, err := service.ListInboxActivities(ctx, localUser.ID, apfederation.ListOptions{})
+	require.NoError(t, err)
+	require.Len(t, inbox, 1)
+	assert.Equal(t, activityAPID, inbox[0].ActivityAPID)
+	assert.Equal(t, "Create", inbox[0].ActivityType)
+	assert.Equal(t, remoteAuthor.APID, inbox[0].ActorAPID)
+	require.NotNil(t, inbox[0].ObjectName)
+	assert.Equal(t, "Remote inbox ticket", *inbox[0].ObjectName)
+	require.NotNil(t, inbox[0].TargetName)
+	assert.Equal(t, "Remote Board", *inbox[0].TargetName)
 }
 
 func TestRemoteInboxRefreshesRotatedActorKey(t *testing.T) {

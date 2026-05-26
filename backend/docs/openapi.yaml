@@ -12,6 +12,7 @@ tags:
   - name: Tickets
   - name: Comments
   - name: Delivery
+  - name: Federation
   - name: Admin Audit
   - name: Federation Moderation
   - name: WebFinger
@@ -131,6 +132,73 @@ paths:
       responses:
         "204":
           description: Password changed.
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/me/federation/inbox:
+    get:
+      tags: [Federation]
+      operationId: listPersonalFederationInbox
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        "200":
+          description: Normalized ActivityPub activities delivered to the authenticated user's inbox.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FederationInboxActivity"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/me/federation/follows:
+    get:
+      tags: [Federation]
+      operationId: listPersonalFederationFollows
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [pending, accepted, rejected]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        "200":
+          description: Remote actors followed by the authenticated user.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FederationRemoteFollow"
         "400":
           $ref: "#/components/responses/Error"
         "401":
@@ -890,6 +958,10 @@ paths:
     $ref: "#/paths/~1api~1me"
   /api/v1/me/password:
     $ref: "#/paths/~1api~1me~1password"
+  /api/v1/me/federation/inbox:
+    $ref: "#/paths/~1api~1me~1federation~1inbox"
+  /api/v1/me/federation/follows:
+    $ref: "#/paths/~1api~1me~1federation~1follows"
   /api/v1/admin/users:
     $ref: "#/paths/~1api~1admin~1users"
   /api/v1/admin/users/{userID}/role:
@@ -1689,6 +1761,120 @@ components:
         fetch_error_at:
           type: string
           format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    FederationInboxActivity:
+      type: object
+      required:
+        - id
+        - activity_ap_id
+        - activity_type
+        - actor_id
+        - actor_ap_id
+        - actor_type
+        - actor_handle
+        - actor_name
+        - received_at
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        activity_ap_id:
+          type: string
+          format: uri
+        activity_type:
+          type: string
+        actor_id:
+          type: string
+          format: uuid
+        actor_ap_id:
+          type: string
+          format: uri
+        actor_type:
+          type: string
+        actor_handle:
+          type: string
+        actor_name:
+          type: string
+        object_ap_id:
+          type: string
+          format: uri
+        object_type:
+          type: string
+        object_name:
+          type: string
+        object_content:
+          type: string
+        target_ap_id:
+          type: string
+          format: uri
+        target_actor_id:
+          type: string
+          format: uuid
+        target_type:
+          type: string
+        target_handle:
+          type: string
+        target_name:
+          type: string
+        received_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+    FederationRemoteFollow:
+      type: object
+      required:
+        - actor_id
+        - actor_ap_id
+        - actor_type
+        - preferred_username
+        - handle
+        - name
+        - summary
+        - inbox_url
+        - outbox_url
+        - state
+        - created_at
+        - updated_at
+      properties:
+        actor_id:
+          type: string
+          format: uuid
+        actor_ap_id:
+          type: string
+          format: uri
+        actor_type:
+          type: string
+        preferred_username:
+          type: string
+        handle:
+          type: string
+        name:
+          type: string
+        summary:
+          type: string
+        inbox_url:
+          type: string
+          format: uri
+        outbox_url:
+          type: string
+          format: uri
+        followers_url:
+          type: string
+          format: uri
+        following_url:
+          type: string
+          format: uri
+        state:
+          type: string
+          enum: [pending, accepted, rejected]
         created_at:
           type: string
           format: date-time

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
+	apfederation "github.com/antonovs105/project-management-system-go/internal/activitypub/federation"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/moderation"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
 	"github.com/antonovs105/project-management-system-go/internal/project"
@@ -251,6 +252,62 @@ func TestRESTDTOsUseStableSnakeCaseFields(t *testing.T) {
 				"oldest_pending_at", "oldest_dead_at", "can_retry",
 			},
 			forbidKeys: []string{"dueRetry", "httpFailures", "oldestDeadAt", "canRetry"},
+		},
+		{
+			name: "personal federation inbox activity",
+			value: apfederation.InboxActivity{
+				ID:            "activity-1",
+				ActivityAPID:  "https://remote.test/activities/1",
+				ActivityType:  "Create",
+				ActorID:       "actor-1",
+				ActorAPID:     "https://remote.test/users/alice",
+				ActorType:     "Person",
+				ActorHandle:   "alice@remote.test",
+				ActorName:     "Alice",
+				ObjectAPID:    &parentID,
+				ObjectType:    &lastError,
+				ObjectName:    &assigneeID,
+				ObjectContent: &lastError,
+				TargetAPID:    &parentID,
+				TargetActorID: &assigneeID,
+				TargetType:    &lastError,
+				TargetHandle:  &lastError,
+				TargetName:    &lastError,
+				ReceivedAt:    now,
+				CreatedAt:     now,
+			},
+			wantKeys: []string{
+				"id", "activity_ap_id", "activity_type", "actor_id", "actor_ap_id", "actor_type",
+				"actor_handle", "actor_name", "object_ap_id", "object_type", "object_name",
+				"object_content", "target_ap_id", "target_actor_id", "target_type",
+				"target_handle", "target_name", "received_at", "created_at",
+			},
+			forbidKeys: []string{"activityAPID", "actorAPID", "objectAPID", "targetActorID", "receivedAt"},
+		},
+		{
+			name: "personal federation remote follow",
+			value: apfederation.RemoteFollow{
+				ActorID:           "actor-1",
+				ActorAPID:         "https://remote.test/projects/board",
+				ActorType:         "Group",
+				PreferredUsername: "board",
+				Handle:            "board@remote.test",
+				Name:              "Remote Board",
+				Summary:           "Remote project",
+				InboxURL:          "https://remote.test/projects/board/inbox",
+				OutboxURL:         "https://remote.test/projects/board/outbox",
+				FollowersURL:      &parentID,
+				FollowingURL:      &assigneeID,
+				State:             "accepted",
+				CreatedAt:         now,
+				UpdatedAt:         now,
+			},
+			wantKeys: []string{
+				"actor_id", "actor_ap_id", "actor_type", "preferred_username", "handle",
+				"name", "summary", "inbox_url", "outbox_url", "followers_url",
+				"following_url", "state", "created_at", "updated_at",
+			},
+			forbidKeys: []string{"actorID", "actorAPID", "preferredUsername", "inboxURL", "followersURL"},
 		},
 	}
 
