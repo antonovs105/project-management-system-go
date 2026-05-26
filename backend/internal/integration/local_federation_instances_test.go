@@ -115,12 +115,16 @@ func TestLocalThreeInstanceProjectFanOut(t *testing.T) {
 	betaProject, err := beta.projectService.CreateProject(ctx, "Beta Fan-Out Project", "Project on the beta instance", bob.ID)
 	require.NoError(t, err)
 
-	sendLocalFollow(t, ctx, router, alpha, alice.ID, alice.APID, betaProject.APID)
-	sendLocalFollow(t, ctx, router, gamma, gina.ID, gina.APID, betaProject.APID)
+	alphaRemoteProject := sendLocalFollow(t, ctx, router, alpha, alice.ID, alice.APID, betaProject.APID)
+	gammaRemoteProject := sendLocalFollow(t, ctx, router, gamma, gina.ID, gina.APID, betaProject.APID)
 	requireRemoteActorCached(t, beta.db, alice.APID)
 	requireRemoteActorCached(t, beta.db, gina.APID)
-	acceptRemoteFollower(t, ctx, beta.db, alice.APID, betaProject.ID)
-	acceptRemoteFollower(t, ctx, beta.db, gina.APID, betaProject.ID)
+	acceptAndDeliverProjectFollow(t, ctx, router, beta, alice.APID, betaProject.ID)
+	acceptAndDeliverProjectFollow(t, ctx, router, beta, gina.APID, betaProject.ID)
+	requireFollow(t, beta.db, requireActorIDByAPID(t, beta.db, alice.APID), betaProject.ID, "accepted")
+	requireFollow(t, beta.db, requireActorIDByAPID(t, beta.db, gina.APID), betaProject.ID, "accepted")
+	requireFollow(t, alpha.db, alice.ID, alphaRemoteProject.ID, "accepted")
+	requireFollow(t, gamma.db, gina.ID, gammaRemoteProject.ID, "accepted")
 
 	ticketAPID := alpha.cfg.BaseURL + "/tickets/fanout-ticket-1"
 	createActivityAPID := alpha.cfg.BaseURL + "/activities/fanout-create-ticket-1"
@@ -178,10 +182,15 @@ type localFederationInstance struct {
 	signatureService   *httpsig.Service
 }
 
-func sendLocalFollow(t *testing.T, ctx context.Context, router *localFederationRouter, source *localFederationInstance, actorID, actorAPID, projectAPID string) {
+func sendLocalFollow(t *testing.T, ctx context.Context, router *localFederationRouter, source *localFederationInstance, actorID, actorAPID, projectAPID string) *remoteactor.Actor {
 	t.Helper()
 
-	followID := source.cfg.BaseURL + "/activities/follow-" + lastLocalFederationPath(projectAPID)
+	targetActor, err := source.remoteActorService.Fetch(ctx, projectAPID)
+	require.NoError(t, err)
+
+	followActivityID, err := activitypub.NewID()
+	require.NoError(t, err)
+	followID := activitypub.ActivityAPID(source.cfg, followActivityID)
 	body := marshalLocalFederationJSON(t, map[string]any{
 		"@context": activitypub.Context(),
 		"id":       followID,
@@ -189,11 +198,14 @@ func sendLocalFollow(t *testing.T, ctx context.Context, router *localFederationR
 		"actor":    actorAPID,
 		"object":   projectAPID,
 	})
+	storeLocalOutgoingFollow(t, ctx, source.db, actorID, targetActor.ID, followActivityID, followID, projectAPID, body)
+
 	resp := postLocalSignedActivity(t, ctx, router, source, actorID, activitypub.Inbox(projectAPID), body)
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusAccepted, resp.StatusCode, string(raw))
+	return targetActor
 }
 
 func postLocalSignedActivity(t *testing.T, ctx context.Context, router *localFederationRouter, source *localFederationInstance, actorID, inboxURL string, body []byte) *http.Response {
@@ -208,18 +220,96 @@ func postLocalSignedActivity(t *testing.T, ctx context.Context, router *localFed
 	return resp
 }
 
-func acceptRemoteFollower(t *testing.T, ctx context.Context, db *sqlx.DB, followerAPID, projectID string) {
+func storeLocalOutgoingFollow(t *testing.T, ctx context.Context, db *sqlx.DB, actorID, targetActorID, followActivityID, followAPID, projectAPID string, body []byte) {
 	t.Helper()
 
-	var followerID string
-	require.NoError(t, db.GetContext(ctx, &followerID, `SELECT id::text FROM actors WHERE ap_id = $1`, followerAPID))
 	_, err := db.ExecContext(ctx, `
-		INSERT INTO actor_follows (follower_actor_id, followed_actor_id, state)
-		VALUES ($1, $2, 'accepted')
-		ON CONFLICT (follower_actor_id, followed_actor_id)
-		DO UPDATE SET state = 'accepted'
-	`, followerID, projectID)
+		INSERT INTO ap_activities (id, ap_id, activity_type, actor_id, object_ap_id, document)
+		VALUES ($1, $2, 'Follow', $3, $4, $5)
+	`, followActivityID, followAPID, actorID, projectAPID, body)
 	require.NoError(t, err)
+
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO actor_outbox_items (actor_id, activity_id, activity_ap_id)
+		VALUES ($1, $2, $3)
+	`, actorID, followActivityID, followAPID)
+	require.NoError(t, err)
+
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO actor_follows (follower_actor_id, followed_actor_id, state)
+		VALUES ($1, $2, 'pending')
+	`, actorID, targetActorID)
+	require.NoError(t, err)
+}
+
+func acceptAndDeliverProjectFollow(t *testing.T, ctx context.Context, router *localFederationRouter, instance *localFederationInstance, followerAPID, projectID string) {
+	t.Helper()
+
+	follow := requireProjectFollowActivity(t, ctx, instance.db, projectID, followerAPID)
+	inbound := &remoteinbox.InboundActivity{
+		ID:         follow.FollowAPID,
+		Type:       "Follow",
+		ActorAPID:  follow.FollowerAPID,
+		ActorID:    follow.FollowerID,
+		ObjectAPID: &follow.ProjectAPID,
+	}
+	response, err := remoteinbox.NewRepository(instance.db, instance.cfg).AcceptProjectFollow(ctx, follow.ProjectActorID, inbound)
+	require.NoError(t, err)
+
+	deliveryService := delivery.NewService(delivery.NewRecipientRepository(instance.db), delivery.NoopQueue{})
+	queued, err := deliveryService.Enqueue(ctx, response.ActivityID, response.TargetInboxURL)
+	require.NoError(t, err)
+
+	worker := delivery.NewWorker(
+		delivery.NewRepository(instance.db),
+		instance.signatureService,
+		router,
+		delivery.WithRemoteActorRefresher(instance.remoteActorService),
+		delivery.WithTargetActorRefreshMaxAge(0),
+	)
+	require.NoError(t, worker.HandleDeliveryTask(ctx, federationDeliveryTask(t, queued.ID)))
+}
+
+type localProjectFollowActivity struct {
+	ProjectActorID string `db:"project_actor_id"`
+	ProjectAPID    string `db:"project_ap_id"`
+	FollowerID     string `db:"follower_id"`
+	FollowerAPID   string `db:"follower_ap_id"`
+	FollowAPID     string `db:"follow_ap_id"`
+}
+
+func requireProjectFollowActivity(t *testing.T, ctx context.Context, db *sqlx.DB, projectID, followerAPID string) localProjectFollowActivity {
+	t.Helper()
+
+	var follow localProjectFollowActivity
+	require.NoError(t, db.GetContext(ctx, &follow, `
+		SELECT
+			project_actor.id::text AS project_actor_id,
+			project_actor.ap_id AS project_ap_id,
+			follower.id::text AS follower_id,
+			follower.ap_id AS follower_ap_id,
+			activity.ap_id AS follow_ap_id
+		FROM projects project
+		JOIN actors project_actor ON project_actor.id = project.id
+		JOIN actor_inbox_items inbox_item ON inbox_item.actor_id = project_actor.id
+		JOIN ap_activities activity ON activity.id = inbox_item.activity_id
+		JOIN actors follower ON follower.id = activity.actor_id
+		WHERE project.id = $1
+			AND activity.activity_type = 'Follow'
+			AND activity.object_ap_id = project_actor.ap_id
+			AND follower.ap_id = $2
+		ORDER BY inbox_item.received_at DESC
+		LIMIT 1
+	`, projectID, followerAPID))
+	return follow
+}
+
+func requireActorIDByAPID(t *testing.T, db *sqlx.DB, actorAPID string) string {
+	t.Helper()
+
+	var actorID string
+	require.NoError(t, db.Get(&actorID, `SELECT id::text FROM actors WHERE ap_id = $1`, actorAPID))
+	return actorID
 }
 
 func lastLocalFederationPath(apID string) string {
