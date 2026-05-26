@@ -273,6 +273,10 @@ func followRemoteActor(ctx context.Context, options FederationFollowOptions) (*F
 		return nil, err
 	}
 
+	if err := storeOutgoingFollow(ctx, db, actor.ID, remote.ID, activityID, activityAPID, remote.APID, body); err != nil {
+		return nil, err
+	}
+
 	statusCode, responseBody, err := postSignedActivity(ctx, cfg, httpsig.NewService(httpsig.NewRepository(db, privateKeyCodec)), actor.ID, remote.InboxURL, body)
 	result := &FederationFollowResult{
 		ActivityAPID:   activityAPID,
@@ -286,6 +290,59 @@ func followRemoteActor(ctx context.Context, options FederationFollowOptions) (*F
 		return result, err
 	}
 	return result, nil
+}
+
+// storeOutgoingFollow records a local Follow before sending it to a remote actor.
+func storeOutgoingFollow(ctx context.Context, db *sqlx.DB, actorID, remoteActorID, activityID, activityAPID, remoteActorAPID string, body []byte) error {
+	if actorID == "" || remoteActorID == "" || activityID == "" || activityAPID == "" || remoteActorAPID == "" {
+		return errors.New("cannot store incomplete follow activity")
+	}
+
+	tx, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var existingState string
+	err = tx.GetContext(ctx, &existingState, `
+		SELECT state
+		FROM actor_follows
+		WHERE follower_actor_id = $1 AND followed_actor_id = $2
+		FOR UPDATE
+	`, actorID, remoteActorID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if existingState == "accepted" {
+		return fmt.Errorf("local actor already follows %s", remoteActorAPID)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO ap_activities (id, ap_id, activity_type, actor_id, object_ap_id, document)
+		VALUES ($1, $2, 'Follow', $3, $4, $5)
+		ON CONFLICT (ap_id) DO NOTHING
+	`, activityID, activityAPID, actorID, remoteActorAPID, body); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO actor_outbox_items (actor_id, activity_id, activity_ap_id)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (actor_id, activity_ap_id) DO NOTHING
+	`, actorID, activityID, activityAPID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO actor_follows (follower_actor_id, followed_actor_id, state)
+		VALUES ($1, $2, 'pending')
+		ON CONFLICT (follower_actor_id, followed_actor_id)
+		DO UPDATE SET state = 'pending'
+		WHERE actor_follows.state <> 'accepted'
+	`, actorID, remoteActorID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 // acceptProjectFollow approves a stored remote Follow for a local project actor.

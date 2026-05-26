@@ -1488,6 +1488,93 @@ func TestFederationModerationInspection(t *testing.T) {
 	assert.Equal(t, createdDelivery.ID, events[0].TargetID)
 }
 
+func TestInboundFollowResponseUpdatesLocalFollowState(t *testing.T) {
+	testCases := []struct {
+		name         string
+		activityType string
+		response     remoteinbox.FollowResponseType
+		expected     string
+	}{
+		{
+			name:         "accept",
+			activityType: "Accept",
+			response:     remoteinbox.FollowResponseAccept,
+			expected:     "accepted",
+		},
+		{
+			name:         "reject",
+			activityType: "Reject",
+			response:     remoteinbox.FollowResponseReject,
+			expected:     "rejected",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openIntegrationDB(t)
+			resetIntegrationDB(t, db)
+
+			ctx := context.Background()
+			cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+			userService := user.NewService(user.NewRepository(db, cfg), []byte("integration-secret"), cfg)
+			localUser, err := userService.RegisterUser(ctx, "follower-"+tc.name, "follower-"+tc.name+"@example.test", "password123")
+			require.NoError(t, err)
+			remoteActor, _ := createRemoteActor(t, ctx, db, "follow-target-"+tc.name)
+
+			followID, err := activitypub.NewID()
+			require.NoError(t, err)
+			followAPID := activitypub.ActivityAPID(cfg, followID)
+			followDoc := activitypub.ActivityDocument("Follow", followAPID, localUser.APID, remoteActor.APID, nil, time.Now().UTC())
+			rawFollow, err := json.Marshal(followDoc)
+			require.NoError(t, err)
+			_, err = db.ExecContext(ctx, `
+				INSERT INTO ap_activities (id, ap_id, activity_type, actor_id, object_ap_id, document)
+				VALUES ($1, $2, 'Follow', $3, $4, $5)
+			`, followID, followAPID, localUser.ID, remoteActor.APID, rawFollow)
+			require.NoError(t, err)
+			_, err = db.ExecContext(ctx, `
+				INSERT INTO actor_outbox_items (actor_id, activity_id, activity_ap_id)
+				VALUES ($1, $2, $3)
+			`, localUser.ID, followID, followAPID)
+			require.NoError(t, err)
+			_, err = db.ExecContext(ctx, `
+				INSERT INTO actor_follows (follower_actor_id, followed_actor_id, state)
+				VALUES ($1, $2, 'pending')
+			`, localUser.ID, remoteActor.ID)
+			require.NoError(t, err)
+
+			responseID, err := activitypub.NewID()
+			require.NoError(t, err)
+			responseAPID := activitypub.ActivityAPID(activitypub.NewConfig("https://remote.example", "remote.example"), responseID)
+			responseDoc := activitypub.ActivityDocument(tc.activityType, responseAPID, remoteActor.APID, followAPID, localUser.APID, time.Now().UTC())
+			rawResponse, err := json.Marshal(responseDoc)
+			require.NoError(t, err)
+			inbound := &remoteinbox.InboundActivity{
+				ID:         responseAPID,
+				Type:       tc.activityType,
+				ActorAPID:  remoteActor.APID,
+				ActorID:    remoteActor.ID,
+				ObjectAPID: &followAPID,
+				TargetAPID: &localUser.APID,
+				Document:   rawResponse,
+			}
+
+			accepted, err := remoteinbox.NewRepository(db).StoreInboundFollowResponse(ctx, localUser.ID, inbound, tc.response)
+
+			require.NoError(t, err)
+			assert.False(t, accepted.Duplicate)
+			var state string
+			require.NoError(t, db.GetContext(ctx, &state, `
+				SELECT state
+				FROM actor_follows
+				WHERE follower_actor_id = $1 AND followed_actor_id = $2
+			`, localUser.ID, remoteActor.ID))
+			assert.Equal(t, tc.expected, state)
+			requireInboxItem(t, db, localUser.ID, tc.activityType, followAPID)
+		})
+	}
+}
+
 func TestRemoteInboxRefreshesRotatedActorKey(t *testing.T) {
 	db := openIntegrationDB(t)
 	fx := newInboxIntegrationFixture(t, db)

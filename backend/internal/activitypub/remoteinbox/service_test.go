@@ -16,40 +16,43 @@ import (
 )
 
 type memoryRepository struct {
-	targetActorID     string
-	actorAPID         string
-	stored            *InboundActivity
-	storedNote        *InboundActivity
-	storedTicket      *InboundActivity
-	updatedTicket     *InboundActivity
-	assignedTicket    *InboundActivity
-	unassignedTicket  *InboundActivity
-	deletedTicket     *InboundActivity
-	acceptedInvite    *InboundActivity
-	rejectedInvite    *InboundActivity
-	storeResult       *AcceptedActivity
-	projectActor      bool
-	fanoutProjectID   string
-	fanoutActorID     string
-	fanoutInboxes     []string
-	fanoutErr         error
-	blockedDomains    map[string]struct{}
-	blockedErr        error
-	follow            *InboundActivity
-	followResult      *FollowResponse
-	undo              *InboundActivity
-	findErr           error
-	storeErr          error
-	storeNoteErr      error
-	storeTicketErr    error
-	updateTicketErr   error
-	assignTicketErr   error
-	unassignTicketErr error
-	deleteTicketErr   error
-	acceptInviteErr   error
-	rejectInviteErr   error
-	followErr         error
-	undoErr           error
+	targetActorID      string
+	actorAPID          string
+	stored             *InboundActivity
+	storedNote         *InboundActivity
+	storedTicket       *InboundActivity
+	updatedTicket      *InboundActivity
+	assignedTicket     *InboundActivity
+	unassignedTicket   *InboundActivity
+	deletedTicket      *InboundActivity
+	acceptedInvite     *InboundActivity
+	rejectedInvite     *InboundActivity
+	followResponse     *InboundActivity
+	followResponseType FollowResponseType
+	storeResult        *AcceptedActivity
+	projectActor       bool
+	fanoutProjectID    string
+	fanoutActorID      string
+	fanoutInboxes      []string
+	fanoutErr          error
+	blockedDomains     map[string]struct{}
+	blockedErr         error
+	follow             *InboundActivity
+	followResult       *FollowResponse
+	undo               *InboundActivity
+	findErr            error
+	storeErr           error
+	storeNoteErr       error
+	storeTicketErr     error
+	updateTicketErr    error
+	assignTicketErr    error
+	unassignTicketErr  error
+	deleteTicketErr    error
+	acceptInviteErr    error
+	rejectInviteErr    error
+	followResponseErr  error
+	followErr          error
+	undoErr            error
 }
 
 func (m *memoryRepository) FindLocalActorIDByAPID(ctx context.Context, apID string) (string, error) {
@@ -227,6 +230,23 @@ func (m *memoryRepository) StoreInboundRejectInvite(ctx context.Context, targetA
 	}
 	return &AcceptedActivity{
 		ActivityID:   "rejected-invite-activity",
+		ActivityAPID: activity.ID,
+		ReceivedAt:   time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC),
+	}, nil
+}
+
+func (m *memoryRepository) StoreInboundFollowResponse(ctx context.Context, targetActorID string, activity *InboundActivity, response FollowResponseType) (*AcceptedActivity, error) {
+	if m.followResponseErr != nil {
+		return nil, m.followResponseErr
+	}
+	copy := *activity
+	m.followResponse = &copy
+	m.followResponseType = response
+	if m.storeResult != nil {
+		return m.storeResult, nil
+	}
+	return &AcceptedActivity{
+		ActivityID:   "follow-response-activity",
 		ActivityAPID: activity.ID,
 		ReceivedAt:   time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC),
 	}, nil
@@ -780,6 +800,70 @@ func TestServiceReceiveRejectsProjectInviteResponseWrongEmbeddedObject(t *testin
 	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
 
 	require.ErrorIs(t, err, ErrInvalidActivity)
+}
+
+func TestServiceReceiveStoresAcceptedFollowResponseForUserInbox(t *testing.T) {
+	repo := &memoryRepository{targetActorID: "target-user"}
+	service := NewService(repo, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-project",
+		ActorAPID: "https://remote.example/projects/project-1",
+	}})
+	body := []byte(`{"id":"https://remote.example/activities/accept-follow-1","type":"Accept","actor":"https://remote.example/projects/project-1","object":"http://localhost:8080/activities/follow-1","target":"http://localhost:8080/users/bob"}`)
+
+	accepted, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/users/bob", body)
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://remote.example/activities/accept-follow-1", accepted.ActivityAPID)
+	require.NotNil(t, repo.followResponse)
+	assert.Equal(t, FollowResponseAccept, repo.followResponseType)
+	require.NotNil(t, repo.followResponse.ObjectAPID)
+	assert.Equal(t, "http://localhost:8080/activities/follow-1", *repo.followResponse.ObjectAPID)
+	require.NotNil(t, repo.followResponse.TargetAPID)
+	assert.Equal(t, "http://localhost:8080/users/bob", *repo.followResponse.TargetAPID)
+}
+
+func TestServiceReceiveStoresRejectedFollowResponseForUserInbox(t *testing.T) {
+	repo := &memoryRepository{targetActorID: "target-user"}
+	service := NewService(repo, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-project",
+		ActorAPID: "https://remote.example/projects/project-1",
+	}})
+	body := []byte(`{"id":"https://remote.example/activities/reject-follow-1","type":"Reject","actor":"https://remote.example/projects/project-1","object":{"id":"http://localhost:8080/activities/follow-1","type":"Follow","actor":"http://localhost:8080/users/bob","object":"https://remote.example/projects/project-1"},"target":"http://localhost:8080/users/bob"}`)
+
+	accepted, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/users/bob", body)
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://remote.example/activities/reject-follow-1", accepted.ActivityAPID)
+	require.NotNil(t, repo.followResponse)
+	assert.Equal(t, FollowResponseReject, repo.followResponseType)
+	require.NotNil(t, repo.followResponse.ObjectActivity)
+	assert.Equal(t, "Follow", repo.followResponse.ObjectActivity.Type)
+	assert.Equal(t, "http://localhost:8080/users/bob", repo.followResponse.ObjectActivity.ActorAPID)
+	assert.Equal(t, "https://remote.example/projects/project-1", repo.followResponse.ObjectActivity.ObjectAPID)
+}
+
+func TestServiceReceiveRejectsFollowResponseWrongTarget(t *testing.T) {
+	service := NewService(&memoryRepository{targetActorID: "target-user"}, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-project",
+		ActorAPID: "https://remote.example/projects/project-1",
+	}})
+	body := []byte(`{"id":"https://remote.example/activities/accept-follow-1","type":"Accept","actor":"https://remote.example/projects/project-1","object":"http://localhost:8080/activities/follow-1","target":"http://localhost:8080/users/alice"}`)
+
+	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/users/bob", body)
+
+	require.ErrorIs(t, err, ErrInvalidActivity)
+}
+
+func TestServiceReceiveRejectsFollowResponseEmbeddedActorMismatch(t *testing.T) {
+	service := NewService(&memoryRepository{targetActorID: "target-user"}, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-project",
+		ActorAPID: "https://remote.example/projects/project-1",
+	}})
+	body := []byte(`{"id":"https://remote.example/activities/accept-follow-1","type":"Accept","actor":"https://remote.example/projects/project-1","object":{"id":"http://localhost:8080/activities/follow-1","type":"Follow","actor":"http://localhost:8080/users/alice","object":"https://remote.example/projects/project-1"},"target":"http://localhost:8080/users/bob"}`)
+
+	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/users/bob", body)
+
+	require.ErrorIs(t, err, ErrForbiddenActor)
 }
 
 func TestServiceReceiveUndoProjectFollow(t *testing.T) {

@@ -28,6 +28,7 @@ type Repository interface {
 	StoreInboundDeleteTicket(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	StoreInboundAcceptInvite(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	StoreInboundRejectInvite(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
+	StoreInboundFollowResponse(ctx context.Context, targetActorID string, activity *InboundActivity, response FollowResponseType) (*AcceptedActivity, error)
 	AcceptProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) (*FollowResponse, error)
 	UndoProjectFollow(ctx context.Context, targetActorID string, activity *InboundActivity) error
 }
@@ -301,6 +302,87 @@ func (r *PgRepository) StoreInboundAcceptInvite(ctx context.Context, targetActor
 // StoreInboundRejectInvite stores an inbound Reject for a project invite.
 func (r *PgRepository) StoreInboundRejectInvite(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
 	return r.storeInboundInviteResponse(ctx, targetActorID, activity, InviteResponseReject)
+}
+
+// StoreInboundFollowResponse stores an inbound Accept or Reject for a local actor's outbound Follow.
+func (r *PgRepository) StoreInboundFollowResponse(ctx context.Context, targetActorID string, activity *InboundActivity, response FollowResponseType) (*AcceptedActivity, error) {
+	if activity.ObjectAPID == nil {
+		return nil, ErrInvalidActivity
+	}
+	if response != FollowResponseAccept && response != FollowResponseReject {
+		return nil, ErrInvalidActivity
+	}
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	accepted, err := r.storeInboundActivityTx(ctx, tx, targetActorID, activity)
+	if err != nil {
+		return nil, err
+	}
+	if !accepted.Duplicate {
+		if err := r.applyInboundFollowResponseTx(ctx, tx, targetActorID, activity, response); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return accepted, nil
+}
+
+// applyInboundFollowResponseTx accepts or rejects a pending local follow transactionally.
+func (r *PgRepository) applyInboundFollowResponseTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity, response FollowResponseType) error {
+	var follow struct {
+		FollowerID string `db:"follower_id"`
+		FollowedID string `db:"followed_id"`
+	}
+	if err := tx.GetContext(ctx, &follow, `
+		SELECT
+			follow.actor_id::text AS follower_id,
+			followed.id::text AS followed_id
+		FROM ap_activities follow
+		JOIN actors followed ON followed.ap_id = follow.object_ap_id
+		WHERE follow.ap_id = $1
+			AND follow.activity_type = 'Follow'
+			AND follow.actor_id = $2
+			AND follow.object_ap_id = $3
+		FOR UPDATE OF follow
+	`, *activity.ObjectAPID, targetActorID, activity.ActorAPID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrInvalidActivity
+		}
+		return err
+	}
+	if follow.FollowerID != targetActorID {
+		return ErrForbiddenActor
+	}
+	if follow.FollowedID != activity.ActorID {
+		return ErrForbiddenActor
+	}
+
+	result, err := tx.ExecContext(ctx, `
+		UPDATE actor_follows
+		SET state = $3
+		WHERE follower_actor_id = $1
+			AND followed_actor_id = $2
+			AND state = 'pending'
+	`, targetActorID, activity.ActorID, string(response))
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return ErrInvalidActivity
+	}
+	return nil
 }
 
 // storeInboundInviteResponse stores an invite response and applies its membership effect.

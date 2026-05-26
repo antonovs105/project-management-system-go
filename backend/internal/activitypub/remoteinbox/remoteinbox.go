@@ -105,3 +105,13 @@ const (
 	// InviteResponseReject marks an inbound invite response as rejected.
 	InviteResponseReject InviteResponseType = "rejected"
 )
+
+// FollowResponseType records whether an inbound follow response accepted or rejected.
+type FollowResponseType string
+
+const (
+	// FollowResponseAccept marks an outbound follow as accepted by the remote actor.
+	FollowResponseAccept FollowResponseType = "accepted"
+	// FollowResponseReject marks an outbound follow as rejected by the remote actor.
+	FollowResponseReject FollowResponseType = "rejected"
+)
