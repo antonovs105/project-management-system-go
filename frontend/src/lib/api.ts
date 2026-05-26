@@ -10,6 +10,9 @@ import type {
   DomainBlock,
   FederationDelivery,
   FederationDeliverySummary,
+  FederationFollowState,
+  FederationInboxActivity,
+  FederationRemoteFollow,
   GraphData,
   ID,
   InstanceRole,
@@ -143,6 +146,17 @@ export interface DeliveryFilters {
 
 export interface FederationDeliveryFilters extends DeliveryFilters {
   failure_kind?: DeliveryFailureKind | "";
+}
+
+export interface FederationFollowFilters {
+  state?: FederationFollowState | "";
+  limit?: number;
+  offset?: number;
+}
+
+export interface FederationInboxFilters {
+  limit?: number;
+  offset?: number;
 }
 
 export interface BlockDomainPayload {
@@ -359,6 +373,20 @@ export const api = {
   async retryProjectDelivery(projectId: ID, deliveryId: ID): Promise<ProjectDelivery> {
     const { data } = await http.post<ProjectDelivery>(`${apiPrefix}/projects/${projectId}/deliveries/${deliveryId}/retry`);
     return data;
+  },
+
+  async listPersonalFederationInbox(filters: FederationInboxFilters = {}): Promise<FederationInboxActivity[]> {
+    const { data } = await http.get<FederationInboxActivity[] | null>(`${apiPrefix}/me/federation/inbox`, {
+      params: { limit: 100, offset: 0, ...filters },
+    });
+    return asArray(data);
+  },
+
+  async listPersonalFederationFollows(filters: FederationFollowFilters = {}): Promise<FederationRemoteFollow[]> {
+    const { data } = await http.get<FederationRemoteFollow[] | null>(`${apiPrefix}/me/federation/follows`, {
+      params: { limit: 100, offset: 0, ...filters },
+    });
+    return asArray(data);
   },
 
   async listFederationDomainBlocks(): Promise<DomainBlock[]> {

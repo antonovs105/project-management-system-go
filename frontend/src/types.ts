@@ -20,6 +20,7 @@ export type TicketPriority = "low" | "medium" | "high" | "urgent";
 export type TicketType = "epic" | "task" | "subtask";
 export type DeliveryState = "pending" | "processing" | "delivered" | "failed" | "dead";
 export type DeliveryFailureKind = "http" | "network" | "signing" | "safety" | "unknown";
+export type FederationFollowState = "pending" | "accepted" | "rejected";
 export type AdminAuditAction =
   | "user.instance_role_updated"
   | "federation.domain_blocked"
@@ -217,4 +218,43 @@ export interface FederationDeliverySummary extends ProjectDeliverySummary {
   unknown_failures: number;
   oldest_pending_at?: string;
   oldest_dead_at?: string;
+}
+
+export interface FederationInboxActivity {
+  id: ID;
+  activity_ap_id: string;
+  activity_type: string;
+  actor_id: ID;
+  actor_ap_id: string;
+  actor_type: string;
+  actor_handle: string;
+  actor_name: string;
+  object_ap_id?: string;
+  object_type?: string;
+  object_name?: string;
+  object_content?: string;
+  target_ap_id?: string;
+  target_actor_id?: ID;
+  target_type?: string;
+  target_handle?: string;
+  target_name?: string;
+  received_at: string;
+  created_at: string;
+}
+
+export interface FederationRemoteFollow {
+  actor_id: ID;
+  actor_ap_id: string;
+  actor_type: string;
+  preferred_username: string;
+  handle: string;
+  name: string;
+  summary: string;
+  inbox_url: string;
+  outbox_url: string;
+  followers_url?: string;
+  following_url?: string;
+  state: FederationFollowState;
+  created_at: string;
+  updated_at: string;
 }

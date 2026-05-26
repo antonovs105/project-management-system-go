@@ -58,6 +58,10 @@ export function AppLayout() {
             <LayoutDashboard size={18} />
             Projects
           </NavLink>
+          <NavLink to="/federation" className={({ isActive }) => navClass(isActive)} onClick={() => setSidebarOpen(false)}>
+            <RadioTower size={18} />
+            Federation
+          </NavLink>
           <NavLink to="/account" className={({ isActive }) => navClass(isActive)} onClick={() => setSidebarOpen(false)}>
             <KeyRound size={18} />
             Account

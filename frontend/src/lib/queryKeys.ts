@@ -7,6 +7,8 @@ export const queryKeys = {
   projectRoles: (projectId: ID) => ["projectRoles", projectId] as const,
   projectDeliveries: (projectId: ID, state?: string) => ["projectDeliveries", projectId, state || "all"] as const,
   projectDeliverySummary: (projectId: ID) => ["projectDeliverySummary", projectId] as const,
+  personalFederationInbox: ["personalFederationInbox"] as const,
+  personalFederationFollows: (state?: string) => ["personalFederationFollows", state || "all"] as const,
   tickets: (projectId: ID) => ["tickets", projectId] as const,
   ticket: (ticketId: ID) => ["ticket", ticketId] as const,
   comments: (ticketId: ID) => ["comments", ticketId] as const,

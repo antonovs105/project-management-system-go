@@ -8,6 +8,7 @@ import { AdminAuditPage } from "./pages/AdminAuditPage";
 import { AdminFederationPage } from "./pages/AdminFederationPage";
 import { AdminUsersPage } from "./pages/AdminUsersPage";
 import { AuthPage } from "./pages/AuthPage";
+import { FederationPage } from "./pages/FederationPage";
 import { ProjectWorkspace } from "./pages/ProjectWorkspace";
 import { ProjectsPage } from "./pages/ProjectsPage";
 
@@ -33,6 +34,7 @@ export function App() {
             <Route element={<AppLayout />}>
               <Route index element={<Navigate to="/projects" replace />} />
               <Route path="/projects" element={<ProjectsPage />} />
+              <Route path="/federation" element={<FederationPage />} />
               <Route path="/projects/:projectId" element={<ProjectWorkspace />} />
               <Route path="/projects/:projectId/graph" element={<ProjectWorkspace />} />
               <Route path="/projects/:projectId/deliveries" element={<ProjectWorkspace />} />
