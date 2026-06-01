@@ -1,11 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
-import { ArrowUpRight, CheckCircle2, Clock3, Inbox, RadioTower, RefreshCw, XCircle } from "lucide-react";
-import { useState } from "react";
-import { Badge, Button, EmptyState, ErrorState, LoadingState, Panel, SelectField } from "../components/ui";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowUpRight, CheckCircle2, Clock3, Inbox, Loader2, RadioTower, RefreshCw, Search, UserPlus, XCircle } from "lucide-react";
+import { useState, type FormEvent } from "react";
+import { toast } from "sonner";
+import { Badge, Button, EmptyState, ErrorState, LoadingState, Panel, SelectField, TextField } from "../components/ui";
 import { api, errorMessage } from "../lib/api";
 import { compactId, relativeDate } from "../lib/format";
 import { queryKeys } from "../lib/queryKeys";
-import type { FederationFollowState, FederationInboxActivity, FederationRemoteFollow } from "../types";
+import type { FederationFollowState, FederationInboxActivity, FederationRemoteActor, FederationRemoteFollow, FollowRemoteActorResult } from "../types";
 
 const followStateOptions: Array<{ id: FederationFollowState | ""; label: string }> = [
   { id: "", label: "All states" },
@@ -36,8 +37,26 @@ function followIcon(state: FederationFollowState) {
   }
 }
 
-function actorLabel(actor: Pick<FederationRemoteFollow, "name" | "handle" | "preferred_username" | "actor_ap_id">): string {
-  return actor.name || actor.handle || actor.preferred_username || actor.actor_ap_id;
+type ActorLabelFields = {
+  name?: string;
+  handle?: string;
+  preferred_username?: string;
+  ap_id?: string;
+  actor_ap_id?: string;
+  type?: string;
+  actor_type?: string;
+};
+
+function actorLabel(actor: ActorLabelFields): string {
+  return actor.name || actor.handle || actor.preferred_username || actor.ap_id || actor.actor_ap_id || "Remote actor";
+}
+
+function actorAPID(actor: ActorLabelFields): string {
+  return actor.ap_id || actor.actor_ap_id || "";
+}
+
+function actorType(actor: ActorLabelFields): string {
+  return actor.type || actor.actor_type || "Actor";
 }
 
 function activityObjectLabel(activity: FederationInboxActivity): string {
@@ -105,6 +124,144 @@ function FollowRow({ follow }: { follow: FederationRemoteFollow }) {
         </span>
       </div>
     </div>
+  );
+}
+
+function ResolvedActorCard({
+  actor,
+  onFollow,
+  following,
+}: {
+  actor: FederationRemoteActor;
+  onFollow: (actor: FederationRemoteActor) => void;
+  following: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge className="border-zinc-200 bg-zinc-50 text-zinc-500">{actorType(actor)}</Badge>
+            {actor.handle ? <Badge className="border-zinc-950 bg-zinc-950 text-white">{actor.handle}</Badge> : null}
+          </div>
+          <h3 className="mt-3 truncate text-base font-semibold text-zinc-950">{actorLabel(actor)}</h3>
+          <p className="mt-1 truncate text-sm text-zinc-500">{actor.ap_id}</p>
+          {actor.summary ? <p className="mt-2 line-clamp-2 text-sm text-zinc-600">{actor.summary}</p> : null}
+        </div>
+        <Button tone="primary" onClick={() => onFollow(actor)} disabled={following}>
+          {following ? <Loader2 size={16} className="animate-spin" /> : <UserPlus size={16} />}
+          Follow
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function FollowResultCard({ result }: { result: FollowRemoteActorResult }) {
+  return (
+    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${followStateClass(result.follow.state)}`}>
+              {followIcon(result.follow.state)}
+              {result.follow.state}
+            </span>
+            <Badge className="border-zinc-200 bg-white text-zinc-500">{result.created ? "queued" : "existing"}</Badge>
+            {result.delivery ? <Badge className="border-zinc-200 bg-white text-zinc-500">{result.delivery.state}</Badge> : null}
+          </div>
+          <h3 className="mt-3 truncate text-base font-semibold text-zinc-950">{actorLabel(result.follow)}</h3>
+          <p className="mt-1 truncate text-sm text-zinc-500">{actorAPID(result.follow)}</p>
+        </div>
+        <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-500">{compactId(result.follow.actor_id)}</span>
+      </div>
+    </div>
+  );
+}
+
+function FederationActionPanel() {
+  const queryClient = useQueryClient();
+  const [resource, setResource] = useState("");
+  const [resolvedActor, setResolvedActor] = useState<FederationRemoteActor | null>(null);
+  const [followResult, setFollowResult] = useState<FollowRemoteActorResult | null>(null);
+  const trimmedResource = resource.trim();
+
+  const discoverActor = useMutation({
+    mutationFn: (target: string) => api.discoverPersonalFederationActor(target),
+    onSuccess: (actor) => {
+      setResolvedActor(actor);
+      setFollowResult(null);
+      toast.success("Remote actor resolved");
+    },
+    onError: (error) => toast.error(errorMessage(error, "Could not resolve remote actor.")),
+  });
+
+  const followActor = useMutation({
+    mutationFn: (target: string) => api.followPersonalFederationActor(target),
+    onSuccess: (result) => {
+      setFollowResult(result);
+      queryClient.invalidateQueries({ queryKey: ["personalFederationFollows"] });
+      toast.success(result.created ? "Follow queued" : "Already following");
+    },
+    onError: (error) => toast.error(errorMessage(error, "Could not follow remote actor.")),
+  });
+
+  function submitDiscover(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!trimmedResource) {
+      toast.error("Enter a remote actor");
+      return;
+    }
+    discoverActor.mutate(trimmedResource);
+  }
+
+  function followResolvedActor(actor: FederationRemoteActor) {
+    followActor.mutate(actor.ap_id || trimmedResource);
+  }
+
+  return (
+    <Panel className="p-5">
+      <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr] xl:items-start">
+        <form onSubmit={submitDiscover} className="grid gap-3">
+          <TextField
+            label="Remote actor"
+            value={resource}
+            onChange={(event) => setResource(event.target.value)}
+            placeholder="acct:project@remote.test or https://remote.test/projects/id"
+            autoComplete="off"
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" tone="primary" disabled={discoverActor.isPending}>
+              {discoverActor.isPending ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+              Discover
+            </Button>
+            <Button
+              onClick={() => {
+                if (!trimmedResource) {
+                  toast.error("Enter a remote actor");
+                  return;
+                }
+                followActor.mutate(trimmedResource);
+              }}
+              disabled={followActor.isPending}
+            >
+              {followActor.isPending ? <Loader2 size={16} className="animate-spin" /> : <UserPlus size={16} />}
+              Follow
+            </Button>
+          </div>
+        </form>
+
+        <div className="grid gap-3">
+          {resolvedActor ? <ResolvedActorCard actor={resolvedActor} onFollow={followResolvedActor} following={followActor.isPending} /> : null}
+          {followResult ? <FollowResultCard result={followResult} /> : null}
+          {!resolvedActor && !followResult ? (
+            <div className="flex min-h-32 items-center justify-center rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 px-4 py-6 text-sm text-zinc-500">
+              Resolve or follow a remote project actor.
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </Panel>
   );
 }
 
@@ -202,6 +359,8 @@ export function FederationPage() {
         </div>
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">Federation</h1>
       </Panel>
+
+      <FederationActionPanel />
 
       <div className="grid gap-5 2xl:grid-cols-[0.85fr_1.15fr]">
         <RemoteFollowsPanel />

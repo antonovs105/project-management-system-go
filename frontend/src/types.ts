@@ -258,3 +258,35 @@ export interface FederationRemoteFollow {
   created_at: string;
   updated_at: string;
 }
+
+export interface FederationRemoteActor {
+  id: ID;
+  ap_id: string;
+  type: string;
+  preferred_username: string;
+  handle: string;
+  name: string;
+  summary: string;
+  inbox_url: string;
+  outbox_url: string;
+  followers_url?: string;
+  following_url?: string;
+  last_fetched_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FederationFollowDelivery {
+  id: ID;
+  activity_ap_id: string;
+  target_inbox_url: string;
+  state: DeliveryState;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FollowRemoteActorResult {
+  follow: FederationRemoteFollow;
+  delivery?: FederationFollowDelivery;
+  created: boolean;
+}

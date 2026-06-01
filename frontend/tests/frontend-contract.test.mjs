@@ -55,6 +55,7 @@ test("api client covers current backend feature routes", () => {
     "/deliveries/summary",
     "/deliveries/${deliveryId}/retry",
     "/me/federation/inbox",
+    "/me/federation/discover",
     "/me/federation/follows",
     "/admin/federation/domain-blocks",
     "/admin/federation/remote-actors",

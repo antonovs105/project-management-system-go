@@ -12,7 +12,9 @@ import type {
   FederationDeliverySummary,
   FederationFollowState,
   FederationInboxActivity,
+  FederationRemoteActor,
   FederationRemoteFollow,
+  FollowRemoteActorResult,
   GraphData,
   ID,
   InstanceRole,
@@ -152,6 +154,10 @@ export interface FederationFollowFilters {
   state?: FederationFollowState | "";
   limit?: number;
   offset?: number;
+}
+
+export interface RemoteFederationResourcePayload {
+  resource: string;
 }
 
 export interface FederationInboxFilters {
@@ -387,6 +393,18 @@ export const api = {
       params: { limit: 100, offset: 0, ...filters },
     });
     return asArray(data);
+  },
+
+  async discoverPersonalFederationActor(resource: string): Promise<FederationRemoteActor> {
+    const payload: RemoteFederationResourcePayload = { resource };
+    const { data } = await http.post<FederationRemoteActor>(`${apiPrefix}/me/federation/discover`, payload);
+    return data;
+  },
+
+  async followPersonalFederationActor(resource: string): Promise<FollowRemoteActorResult> {
+    const payload: RemoteFederationResourcePayload = { resource };
+    const { data } = await http.post<FollowRemoteActorResult>(`${apiPrefix}/me/federation/follows`, payload);
+    return data;
   },
 
   async listFederationDomainBlocks(): Promise<DomainBlock[]> {
