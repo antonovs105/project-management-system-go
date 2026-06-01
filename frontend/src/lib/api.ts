@@ -33,8 +33,10 @@ import type {
 } from "../types";
 import { useAuthStore } from "../store/auth";
 
+const apiBaseURL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "" : "http://localhost:8080");
+
 const http = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:8080",
+  baseURL: apiBaseURL,
   timeout: 20_000,
 });
 
