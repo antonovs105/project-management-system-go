@@ -8,6 +8,12 @@ import (
 var (
 	// ErrInvalidFilter reports malformed personal federation query filters.
 	ErrInvalidFilter = errors.New("invalid federation filter")
+	// ErrInvalidRemoteResource reports malformed remote federation resources.
+	ErrInvalidRemoteResource = errors.New("invalid remote federation resource")
+	// ErrRemoteActorUnavailable reports a remote actor that could not be resolved.
+	ErrRemoteActorUnavailable = errors.New("remote federation actor unavailable")
+	// ErrLocalActorNotFound reports an authenticated user without a local actor.
+	ErrLocalActorNotFound = errors.New("local federation actor not found")
 )
 
 // InboxActivity is a normalized personal federation inbox item for app UI.
@@ -49,6 +55,47 @@ type RemoteFollow struct {
 	State             string    `db:"state" json:"state"`
 	CreatedAt         time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt         time.Time `db:"updated_at" json:"updated_at"`
+}
+
+// RemoteActor is a user-facing remote ActivityPub actor projection.
+type RemoteActor struct {
+	ID                string     `json:"id"`
+	APID              string     `json:"ap_id"`
+	Type              string     `json:"type"`
+	PreferredUsername string     `json:"preferred_username"`
+	Handle            string     `json:"handle"`
+	Name              string     `json:"name"`
+	Summary           string     `json:"summary"`
+	InboxURL          string     `json:"inbox_url"`
+	OutboxURL         string     `json:"outbox_url"`
+	FollowersURL      *string    `json:"followers_url,omitempty"`
+	FollowingURL      *string    `json:"following_url,omitempty"`
+	LastFetchedAt     *time.Time `json:"last_fetched_at,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+}
+
+// FollowDelivery is the outbound delivery created for a Follow activity.
+type FollowDelivery struct {
+	ID             string    `json:"id"`
+	ActivityAPID   string    `json:"activity_ap_id"`
+	TargetInboxURL string    `json:"target_inbox_url"`
+	State          string    `json:"state"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// FollowRemoteActorResult describes an outbound Follow request.
+type FollowRemoteActorResult struct {
+	Follow   RemoteFollow    `json:"follow"`
+	Delivery *FollowDelivery `json:"delivery,omitempty"`
+	Created  bool            `json:"created"`
+}
+
+// LocalActor is the authenticated local ActivityPub actor used for outbound work.
+type LocalActor struct {
+	ID   string `db:"id"`
+	APID string `db:"ap_id"`
 }
 
 // ListOptions controls personal federation list pagination.

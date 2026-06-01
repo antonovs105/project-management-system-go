@@ -485,7 +485,12 @@ func main() {
 		remoteinbox.WithBlockedDomains(splitCSVEnv("FEDERATION_BLOCKED_DOMAINS")),
 	)
 	inboxHandler := remoteinbox.NewHandler(inboxService, apConfig)
-	federationHandler := apfederation.NewHandler(apfederation.NewService(apfederation.NewRepository(db)))
+	federationHandler := apfederation.NewHandler(apfederation.NewService(
+		apfederation.NewRepository(db),
+		apfederation.WithConfig(apConfig),
+		apfederation.WithRemoteActorResolver(remoteActorService),
+		apfederation.WithDelivery(deliveryService),
+	))
 	moderationHandler := apmoderation.NewHandler(apmoderation.NewService(apmoderation.NewRepository(db), deliveryQueue))
 	auditHandler := adminaudit.NewHandler(adminaudit.NewService(adminaudit.NewRepository(db)))
 

@@ -23,6 +23,14 @@ func NewHandler(service *Service) *Handler {
 func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.GET("/me/federation/inbox", h.ListInboxActivities)
 	api.GET("/me/federation/follows", h.ListRemoteFollows)
+	api.POST("/me/federation/discover", h.DiscoverRemoteActor)
+	api.POST("/me/federation/follows", h.FollowRemoteActor)
+}
+
+// remoteActorRequest accepts remote actor identifiers for discovery and follow actions.
+type remoteActorRequest struct {
+	Resource string `json:"resource"`
+	Target   string `json:"target"`
 }
 
 // ListInboxActivities returns normalized inbox activities for the current user.
@@ -49,6 +57,43 @@ func (h *Handler) ListRemoteFollows(c echo.Context) error {
 		return writeFederationError(c, err)
 	}
 	return c.JSON(http.StatusOK, follows)
+}
+
+// DiscoverRemoteActor resolves and caches a remote actor for the current user.
+func (h *Handler) DiscoverRemoteActor(c echo.Context) error {
+	var req remoteActorRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid federation request"})
+	}
+	actor, err := h.service.DiscoverRemoteActor(c.Request().Context(), req.resource())
+	if err != nil {
+		return writeFederationError(c, err)
+	}
+	return c.JSON(http.StatusOK, actor)
+}
+
+// FollowRemoteActor creates and queues a Follow from the current user actor.
+func (h *Handler) FollowRemoteActor(c echo.Context) error {
+	var req remoteActorRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid federation request"})
+	}
+	result, err := h.service.FollowRemoteActor(c.Request().Context(), currentUserID(c), req.resource())
+	if err != nil {
+		return writeFederationError(c, err)
+	}
+	if result.Created {
+		return c.JSON(http.StatusAccepted, result)
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+// resource returns either accepted request field for discovery/follow targets.
+func (r remoteActorRequest) resource() string {
+	if strings.TrimSpace(r.Resource) != "" {
+		return r.Resource
+	}
+	return r.Target
 }
 
 // currentUserID extracts the authenticated user identifier from Echo context.
@@ -82,8 +127,14 @@ func listOptions(c echo.Context, allowState bool) (ListOptions, error) {
 
 // writeFederationError maps personal federation errors to HTTP responses.
 func writeFederationError(c echo.Context, err error) error {
-	if errors.Is(err, ErrInvalidFilter) {
+	switch {
+	case errors.Is(err, ErrInvalidFilter), errors.Is(err, ErrInvalidRemoteResource):
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case errors.Is(err, ErrRemoteActorUnavailable):
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
+	case errors.Is(err, ErrLocalActorNotFound):
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	default:
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load federation data"})
 	}
-	return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load federation data"})
 }

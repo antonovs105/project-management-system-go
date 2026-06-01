@@ -167,6 +167,27 @@ paths:
           $ref: "#/components/responses/Error"
         "401":
           $ref: "#/components/responses/Error"
+  /api/me/federation/discover:
+    post:
+      tags: [Federation]
+      operationId: discoverPersonalFederationActor
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: "#/components/requestBodies/RemoteFederationResource"
+      responses:
+        "200":
+          description: Remote ActivityPub actor resolved and cached for federation actions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationRemoteActor"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
   /api/me/federation/follows:
     get:
       tags: [Federation]
@@ -202,6 +223,32 @@ paths:
         "400":
           $ref: "#/components/responses/Error"
         "401":
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [Federation]
+      operationId: followPersonalFederationActor
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: "#/components/requestBodies/RemoteFederationResource"
+      responses:
+        "200":
+          description: The authenticated user already follows this remote actor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FollowRemoteActorResult"
+        "202":
+          description: Follow activity created and queued for federation delivery.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FollowRemoteActorResult"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "502":
           $ref: "#/components/responses/Error"
   /api/admin/users:
     get:
@@ -960,6 +1007,8 @@ paths:
     $ref: "#/paths/~1api~1me~1password"
   /api/v1/me/federation/inbox:
     $ref: "#/paths/~1api~1me~1federation~1inbox"
+  /api/v1/me/federation/discover:
+    $ref: "#/paths/~1api~1me~1federation~1discover"
   /api/v1/me/federation/follows:
     $ref: "#/paths/~1api~1me~1federation~1follows"
   /api/v1/admin/users:
@@ -1335,6 +1384,20 @@ components:
                 type: string
               reason:
                 type: string
+    RemoteFederationResource:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [resource]
+            properties:
+              resource:
+                type: string
+                description: "Remote acct: resource, bare handle, or actor URL."
+              target:
+                type: string
+                deprecated: true
     CreateProject:
       required: true
       content:
@@ -1881,6 +1944,37 @@ components:
         updated_at:
           type: string
           format: date-time
+    FederationFollowDelivery:
+      type: object
+      required: [id, activity_ap_id, target_inbox_url, state, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        activity_ap_id:
+          type: string
+          format: uri
+        target_inbox_url:
+          type: string
+          format: uri
+        state:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    FollowRemoteActorResult:
+      type: object
+      required: [follow, created]
+      properties:
+        follow:
+          $ref: "#/components/schemas/FederationRemoteFollow"
+        delivery:
+          $ref: "#/components/schemas/FederationFollowDelivery"
+        created:
+          type: boolean
     FederationDelivery:
       allOf:
         - $ref: "#/components/schemas/ProjectDelivery"

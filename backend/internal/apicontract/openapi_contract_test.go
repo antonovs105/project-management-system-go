@@ -34,7 +34,9 @@ func TestOpenAPIContractDocumentsRegisteredRoutes(t *testing.T) {
 		{method: "get", path: "/api/me"},
 		{method: "patch", path: "/api/me/password"},
 		{method: "get", path: "/api/me/federation/inbox"},
+		{method: "post", path: "/api/me/federation/discover"},
 		{method: "get", path: "/api/me/federation/follows"},
+		{method: "post", path: "/api/me/federation/follows"},
 		{method: "get", path: "/api/admin/users"},
 		{method: "patch", path: "/api/admin/users/{userID}/role"},
 		{method: "get", path: "/api/admin/audit-events"},
@@ -119,7 +121,9 @@ func TestOpenAPIContractDocumentsDeliveryResponseShapes(t *testing.T) {
 	require.Equal(t, "#/components/schemas/FederationDeliverySummary", responseRef(t, doc, "get", "/api/admin/federation/deliveries/summary", "200", "application/json"))
 	require.Equal(t, "#/components/schemas/Delivery", responseRef(t, doc, "post", "/api/admin/federation/deliveries/{deliveryID}/retry", "202", "application/json"))
 	require.Equal(t, "#/components/schemas/FederationInboxActivity", responseItemsRef(t, doc, "get", "/api/me/federation/inbox", "200", "application/json"))
+	require.Equal(t, "#/components/schemas/FederationRemoteActor", responseRef(t, doc, "post", "/api/me/federation/discover", "200", "application/json"))
 	require.Equal(t, "#/components/schemas/FederationRemoteFollow", responseItemsRef(t, doc, "get", "/api/me/federation/follows", "200", "application/json"))
+	require.Equal(t, "#/components/schemas/FollowRemoteActorResult", responseRef(t, doc, "post", "/api/me/federation/follows", "202", "application/json"))
 
 	rawDeliveryProps := schemaProperties(t, doc, "Delivery")
 	require.Contains(t, rawDeliveryProps, "activity_id")
@@ -142,6 +146,7 @@ func TestOpenAPIContractDocumentsVersionedRESTAliases(t *testing.T) {
 		"/api/me",
 		"/api/me/password",
 		"/api/me/federation/inbox",
+		"/api/me/federation/discover",
 		"/api/me/federation/follows",
 		"/api/admin/users",
 		"/api/admin/users/{userID}/role",
