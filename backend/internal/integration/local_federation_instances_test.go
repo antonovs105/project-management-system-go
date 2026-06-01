@@ -20,6 +20,7 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/c2s"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
+	apfederation "github.com/antonovs105/project-management-system-go/internal/activitypub/federation"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/httpsig"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteactor"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteinbox"
@@ -89,6 +90,69 @@ func TestLocalTwoInstanceFederationSmoke(t *testing.T) {
 	assert.GreaterOrEqual(t, router.requests[alpha.domain+"/users/"+alice.Username], 1)
 	requireRemoteActorCached(t, beta.db, alice.APID)
 	requireInboxItem(t, beta.db, betaProject.ID, "Follow", betaProject.APID)
+}
+
+func TestLocalPersonalFederationFollowAction(t *testing.T) {
+	source := os.Getenv("TEST_DB_SOURCE")
+	if source == "" {
+		t.Skip("set TEST_DB_SOURCE to run integration tests against a migrated PostgreSQL database")
+	}
+
+	ctx := context.Background()
+	router := &localFederationRouter{handlers: make(map[string]http.Handler)}
+	alpha := newLocalFederationInstance(t, ctx, source, "alpha_personal_follow", "alpha.local.test", router)
+	beta := newLocalFederationInstance(t, ctx, source, "beta_personal_follow", "beta.local.test", router)
+	router.handlers[alpha.domain] = alpha.echo
+	router.handlers[beta.domain] = beta.echo
+
+	alice, err := alpha.userService.RegisterUser(ctx, "alice-personal", "alice-personal@alpha.local.test", "password123")
+	require.NoError(t, err)
+	bob, err := beta.userService.RegisterUser(ctx, "bob-personal", "bob-personal@beta.local.test", "password123")
+	require.NoError(t, err)
+	betaProject, err := beta.projectService.CreateProject(ctx, "Beta Personal Project", "Project on beta", bob.ID)
+	require.NoError(t, err)
+
+	personalFederation := apfederation.NewService(
+		apfederation.NewRepository(alpha.db),
+		apfederation.WithConfig(alpha.cfg),
+		apfederation.WithRemoteActorResolver(alpha.remoteActorService),
+		apfederation.WithDelivery(alpha.deliveryService),
+	)
+
+	remoteResource := "project-" + betaProject.ID + "@" + beta.domain
+	discoveredProject, err := personalFederation.DiscoverRemoteActor(ctx, remoteResource)
+	require.NoError(t, err)
+	assert.Equal(t, betaProject.APID, discoveredProject.APID)
+	assert.Equal(t, "Group", discoveredProject.Type)
+
+	result, err := personalFederation.FollowRemoteActor(ctx, alice.ID, remoteResource)
+	require.NoError(t, err)
+	require.True(t, result.Created)
+	require.NotNil(t, result.Delivery)
+	assert.Equal(t, betaProject.APID, result.Follow.ActorAPID)
+	assert.Equal(t, "pending", result.Follow.State)
+	assert.Equal(t, activitypub.Inbox(betaProject.APID), result.Delivery.TargetInboxURL)
+	requireFollow(t, alpha.db, alice.ID, result.Follow.ActorID, "pending")
+
+	alphaWorker := delivery.NewWorker(
+		delivery.NewRepository(alpha.db),
+		alpha.signatureService,
+		router,
+		delivery.WithRemoteActorRefresher(alpha.remoteActorService),
+		delivery.WithTargetActorRefreshMaxAge(0),
+	)
+	require.NoError(t, alphaWorker.HandleDeliveryTask(ctx, federationDeliveryTask(t, result.Delivery.ID)))
+	requireInboxItem(t, beta.db, betaProject.ID, "Follow", betaProject.APID)
+	requireRemoteActorCached(t, beta.db, alice.APID)
+
+	acceptAndDeliverProjectFollow(t, ctx, router, beta, alice.APID, betaProject.ID)
+	requireFollow(t, beta.db, requireActorIDByAPID(t, beta.db, alice.APID), betaProject.ID, "accepted")
+	requireFollow(t, alpha.db, alice.ID, result.Follow.ActorID, "accepted")
+
+	follows, err := personalFederation.ListRemoteFollows(ctx, alice.ID, apfederation.ListOptions{State: "accepted"})
+	require.NoError(t, err)
+	require.Len(t, follows, 1)
+	assert.Equal(t, betaProject.APID, follows[0].ActorAPID)
 }
 
 func TestLocalThreeInstanceProjectFanOut(t *testing.T) {
@@ -178,6 +242,7 @@ type localFederationInstance struct {
 	echo               *echo.Echo
 	userService        *user.Service
 	projectService     *project.Service
+	deliveryService    *delivery.Service
 	remoteActorService *remoteactor.Service
 	signatureService   *httpsig.Service
 }
@@ -364,6 +429,7 @@ func newLocalFederationInstance(t *testing.T, ctx context.Context, source, name,
 		echo:               e,
 		userService:        userService,
 		projectService:     projectService,
+		deliveryService:    deliveryService,
 		remoteActorService: remoteActorService,
 		signatureService:   signatureService,
 	}
