@@ -1,14 +1,44 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, BarChart3, CheckCircle2, Clock3, Copy, Download, FileJson, Flame, ListChecks, Pencil, Plus, Shield, Trash2, UserMinus, UserPlus } from "lucide-react";
+import {
+  Activity,
+  BarChart3,
+  CheckCircle2,
+  Clock3,
+  Copy,
+  Download,
+  FileJson,
+  Flame,
+  History,
+  ListChecks,
+  Mail,
+  Pencil,
+  Plus,
+  Send,
+  Shield,
+  Trash2,
+  UserMinus,
+  UserPlus,
+  Users,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { toast } from "sonner";
 import { Button, ErrorState, LoadingState, Modal, Panel, SelectField, TextAreaField, TextField } from "../../components/ui";
 import { api, errorMessage } from "../../lib/api";
 import { projectPermissionGroups, ticketPriorities, ticketStatuses } from "../../lib/constants";
-import { compactId, relativeDate } from "../../lib/format";
+import { compactId, initials, relativeDate } from "../../lib/format";
 import { queryKeys } from "../../lib/queryKeys";
-import type { ID, Project, ProjectDeliverySummary, ProjectInvite, ProjectPermission, ProjectRole, Ticket } from "../../types";
+import type {
+  ID,
+  Project,
+  ProjectDeliverySummary,
+  ProjectInvite,
+  ProjectInviteInspection,
+  ProjectMember,
+  ProjectPermission,
+  ProjectRole,
+  Ticket,
+} from "../../types";
 
 function allProjectPermissions(): ProjectPermission[] {
   return projectPermissionGroups.flatMap((group) => group.permissions.map((permission) => permission.id));
@@ -121,6 +151,87 @@ function ticketsToCSV(tickets: Ticket[]): string {
     ticket.updated_at,
   ]);
   return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+function membersToCSV(members: ProjectMember[]): string {
+  const header = ["user_id", "username", "email", "handle", "name", "role_id", "role", "role_name", "created_at"];
+  const rows = members.map((member) => [
+    member.user_id,
+    member.username,
+    member.email,
+    member.handle,
+    member.name,
+    member.role_id,
+    member.role,
+    member.role_name,
+    member.created_at,
+  ]);
+  return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+function invitesToCSV(invites: ProjectInviteInspection[]): string {
+  const header = [
+    "id",
+    "status",
+    "invitee_actor_id",
+    "invitee_username",
+    "invitee_email",
+    "invitee_handle",
+    "role_id",
+    "role",
+    "role_name",
+    "inviter_actor_id",
+    "inviter_username",
+    "created_at",
+    "updated_at",
+  ];
+  const rows = invites.map((invite) => [
+    invite.id,
+    invite.status,
+    invite.invitee_actor_id,
+    invite.invitee_username,
+    invite.invitee_email,
+    invite.invitee_handle,
+    invite.role_id,
+    invite.role,
+    invite.role_name,
+    invite.inviter_actor_id,
+    invite.inviter_username,
+    invite.created_at,
+    invite.updated_at,
+  ]);
+  return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+function actorTitle(name: string, username: string, handle: string): string {
+  return name || username || handle || "Unknown actor";
+}
+
+function actorSubtitle(handle: string, email?: string): string {
+  if (email) {
+    return `${handle} / ${email}`;
+  }
+  return handle || "No handle";
+}
+
+function InviteStatusBadge({ status }: { status: ProjectInvite["status"] }) {
+  const tone =
+    status === "pending"
+      ? "border-zinc-300 bg-white text-zinc-700"
+      : status === "accepted"
+        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+        : status === "rejected"
+          ? "border-zinc-200 bg-zinc-50 text-zinc-500"
+          : "border-red-200 bg-red-50 text-red-700";
+  return <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${tone}`}>{status}</span>;
+}
+
+function PersonMark({ label }: { label: string }) {
+  return (
+    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-zinc-50 text-xs font-semibold text-zinc-700">
+      {initials(label)}
+    </div>
+  );
 }
 
 function MetricPill({
@@ -466,87 +577,130 @@ function ProjectRoleManager({ projectId }: { projectId: ID }) {
   );
 }
 
-function ProjectMemberActions({ projectId }: { projectId: ID }) {
+function ProjectMemberActions({ project }: { project: Project }) {
   const queryClient = useQueryClient();
-  const [inviteUserId, setInviteUserId] = useState("");
+  const projectId = project.id;
+  const [inviteRef, setInviteRef] = useState("");
   const [inviteRoleId, setInviteRoleId] = useState("");
-  const [removeUserId, setRemoveUserId] = useState("");
-  const [inviteId, setInviteId] = useState("");
-  const [lastInvite, setLastInvite] = useState<ProjectInvite | null>(null);
+  const [inviteStatus, setInviteStatus] = useState<ProjectInvite["status"] | "">("pending");
 
   const roles = useQuery({
     queryKey: queryKeys.projectRoles(projectId),
     queryFn: () => api.listProjectRoles(projectId),
   });
+  const members = useQuery({
+    queryKey: queryKeys.projectMembers(projectId),
+    queryFn: () => api.listProjectMembers(projectId),
+  });
+  const invites = useQuery({
+    queryKey: queryKeys.projectInvites(projectId, inviteStatus),
+    queryFn: () => api.listProjectInvites(projectId, { status: inviteStatus }),
+  });
+
+  async function refreshMembership() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectMembers(projectId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectInvitesScope(projectId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
+    ]);
+  }
 
   const inviteMember = useMutation({
-    mutationFn: () => api.inviteProjectMember(projectId, { user_id: inviteUserId.trim(), role_id: inviteRoleId || undefined }),
-    onSuccess: async (invite) => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.projects });
-      setLastInvite(invite);
-      setInviteUserId("");
+    mutationFn: () => api.inviteProjectMember(projectId, { user_ref: inviteRef.trim(), role_id: inviteRoleId || undefined }),
+    onSuccess: async () => {
+      await refreshMembership();
+      setInviteRef("");
       toast.success("Invite created");
     },
     onError: (error) => toast.error(errorMessage(error, "Could not invite member.")),
   });
 
   const removeMember = useMutation({
-    mutationFn: () => api.removeProjectMember(projectId, removeUserId.trim()),
+    mutationFn: (userId: ID) => api.removeProjectMember(projectId, userId),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.projects });
-      setRemoveUserId("");
+      await Promise.all([
+        refreshMembership(),
+        queryClient.invalidateQueries({ queryKey: queryKeys.tickets(projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.graph(projectId) }),
+      ]);
       toast.success("Member removed");
     },
     onError: (error) => toast.error(errorMessage(error, "Could not remove member.")),
   });
 
-  const updateInvite = useMutation({
-    mutationFn: async (action: "accept" | "reject" | "revoke") => {
-      const id = inviteId.trim();
-      if (action === "accept") {
-        return api.acceptInvite(id);
-      }
-      if (action === "reject") {
-        return api.rejectInvite(id);
-      }
-      return api.revokeInvite(id);
+  const revokeInvite = useMutation({
+    mutationFn: (inviteId: ID) => api.revokeInvite(inviteId),
+    onSuccess: async () => {
+      await refreshMembership();
+      toast.success("Invite revoked");
     },
-    onSuccess: async (invite) => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.projects });
-      setLastInvite(invite);
-      toast.success("Invite updated");
-    },
-    onError: (error) => toast.error(errorMessage(error, "Could not update invite.")),
+    onError: (error) => toast.error(errorMessage(error, "Could not revoke invite.")),
   });
 
-  function copyInviteId() {
-    if (!lastInvite) {
-      return;
-    }
-    void navigator.clipboard?.writeText(lastInvite.id);
-    toast.success("Invite ID copied");
+  const memberRows = members.data || [];
+  const inviteRows = invites.data || [];
+
+  function copyID(id: ID) {
+    void navigator.clipboard?.writeText(id);
+    toast.success("ID copied");
+  }
+
+  function exportMembersCSV() {
+    downloadText(`${safeFilePart(project.name)}-members.csv`, "text/csv", `${membersToCSV(memberRows)}\n`);
+  }
+
+  function exportInvitesJSON() {
+    const report = {
+      project: { id: project.id, name: project.name, handle: project.handle },
+      generated_at: new Date().toISOString(),
+      status: inviteStatus || "all",
+      members: memberRows,
+      invites: inviteRows,
+    };
+    downloadText(`${safeFilePart(project.name)}-membership.json`, "application/json", `${JSON.stringify(report, null, 2)}\n`);
+  }
+
+  function exportInvitesCSV() {
+    downloadText(`${safeFilePart(project.name)}-invites.csv`, "text/csv", `${invitesToCSV(inviteRows)}\n`);
   }
 
   return (
     <Panel className="overflow-hidden">
-      <div className="px-4 py-4">
-        <h2 className="text-base font-semibold text-zinc-950">Membership</h2>
-        <p className="mt-1 text-sm text-zinc-500">Project member and invite operations.</p>
+      <div className="flex flex-col gap-3 px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="flex items-center gap-2 text-base font-semibold text-zinc-950">
+            <Users size={17} />
+            Membership
+          </h2>
+          <p className="mt-1 text-sm text-zinc-500">Manage project people, pending invitations, and membership exports.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-sm sm:flex">
+          <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+            <div className="text-xs text-zinc-400">Members</div>
+            <div className="mt-0.5 font-semibold text-zinc-950">{members.isLoading ? "..." : memberRows.length}</div>
+          </div>
+          <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+            <div className="text-xs text-zinc-400">Invites</div>
+            <div className="mt-0.5 font-semibold text-zinc-950">{invites.isLoading ? "..." : inviteRows.length}</div>
+          </div>
+        </div>
       </div>
 
-      <div className="grid gap-4 border-t border-zinc-100 p-4 xl:grid-cols-3">
+      <div className="border-t border-zinc-100 p-4">
         <form
-          className="grid gap-3"
+          className="grid gap-3 lg:grid-cols-[1fr_240px_auto]"
           onSubmit={(event) => {
             event.preventDefault();
             inviteMember.mutate();
           }}
         >
-          <div className="flex items-center gap-2 text-sm font-semibold text-zinc-950">
-            <UserPlus size={16} />
-            Invite
-          </div>
-          <TextField label="User ID" value={inviteUserId} onChange={(event) => setInviteUserId(event.target.value)} required />
+          <TextField
+            label="Invitee"
+            placeholder="alice@example.com"
+            value={inviteRef}
+            onChange={(event) => setInviteRef(event.target.value)}
+            required
+          />
           <SelectField label="Role" value={inviteRoleId} onChange={(event) => setInviteRoleId(event.target.value)}>
             <option value="">Default role</option>
             {roles.data?.map((role) => (
@@ -555,46 +709,11 @@ function ProjectMemberActions({ projectId }: { projectId: ID }) {
               </option>
             ))}
           </SelectField>
-          <Button type="submit" tone="primary" disabled={inviteMember.isPending || !inviteUserId.trim()}>
+          <Button className="self-end" type="submit" tone="primary" disabled={inviteMember.isPending || !inviteRef.trim()}>
+            <Send size={16} />
             Invite
           </Button>
         </form>
-
-        <form
-          className="grid gap-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            removeMember.mutate();
-          }}
-        >
-          <div className="flex items-center gap-2 text-sm font-semibold text-zinc-950">
-            <UserMinus size={16} />
-            Remove
-          </div>
-          <TextField label="User ID" value={removeUserId} onChange={(event) => setRemoveUserId(event.target.value)} required />
-          <Button type="submit" tone="danger" disabled={removeMember.isPending || !removeUserId.trim()}>
-            Remove member
-          </Button>
-        </form>
-
-        <div className="grid gap-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-zinc-950">
-            <Shield size={16} />
-            Invite Status
-          </div>
-          <TextField label="Invite ID" value={inviteId} onChange={(event) => setInviteId(event.target.value)} />
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => updateInvite.mutate("accept")} disabled={updateInvite.isPending || !inviteId.trim()}>
-              Accept
-            </Button>
-            <Button onClick={() => updateInvite.mutate("reject")} disabled={updateInvite.isPending || !inviteId.trim()}>
-              Reject
-            </Button>
-            <Button tone="danger" onClick={() => updateInvite.mutate("revoke")} disabled={updateInvite.isPending || !inviteId.trim()}>
-              Revoke
-            </Button>
-          </div>
-        </div>
       </div>
 
       {roles.isError ? (
@@ -602,22 +721,158 @@ function ProjectMemberActions({ projectId }: { projectId: ID }) {
           <ErrorState title="Could not load roles" body={errorMessage(roles.error, "Role request failed.")} />
         </div>
       ) : null}
-      {lastInvite ? (
-        <div className="border-t border-zinc-100 px-4 py-3">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="min-w-0 text-sm">
-              <div className="font-medium text-zinc-950">{lastInvite.status}</div>
-              <div className="mt-1 truncate text-xs text-zinc-500">
-                {lastInvite.id} / {lastInvite.role}
-              </div>
+
+      <div className="grid gap-4 border-t border-zinc-100 p-4 xl:grid-cols-[1fr_1fr]">
+        <section className="min-w-0 rounded-2xl border border-zinc-200">
+          <div className="flex flex-col gap-3 border-b border-zinc-100 p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-950">
+                <UserPlus size={15} />
+                Members
+              </h3>
+              <p className="mt-1 text-xs text-zinc-500">Accepted local users on this project.</p>
             </div>
-            <Button onClick={copyInviteId}>
-              <Copy size={15} />
-              Copy ID
+            <Button onClick={exportMembersCSV} disabled={memberRows.length === 0}>
+              <Download size={15} />
+              CSV
             </Button>
           </div>
-        </div>
-      ) : null}
+          {members.isLoading ? <LoadingState label="Loading members" /> : null}
+          {members.isError ? (
+            <div className="p-3">
+              <ErrorState title="Could not load members" body={errorMessage(members.error, "Member request failed.")} />
+            </div>
+          ) : null}
+          {!members.isLoading && !members.isError && memberRows.length === 0 ? (
+            <div className="p-6 text-center text-sm text-zinc-400">No members yet.</div>
+          ) : null}
+          <div className="divide-y divide-zinc-100">
+            {memberRows.map((member) => {
+              const title = actorTitle(member.name, member.username, member.handle);
+              return (
+                <div key={member.user_id} className="grid gap-3 p-3 md:grid-cols-[1fr_auto] md:items-center">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <PersonMark label={title} />
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="truncate font-medium text-zinc-950">{title}</span>
+                        {member.user_id === project.owner_id ? (
+                          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs text-zinc-500">owner</span>
+                        ) : null}
+                      </div>
+                      <div className="mt-1 truncate text-xs text-zinc-500">{actorSubtitle(member.handle, member.email)}</div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs font-medium text-zinc-700">
+                      {member.role_name || member.role}
+                    </span>
+                    <Button
+                      tone="danger"
+                      disabled={removeMember.isPending}
+                      onClick={() => {
+                        if (window.confirm(`Remove ${title} from this project?`)) {
+                          removeMember.mutate(member.user_id);
+                        }
+                      }}
+                    >
+                      <UserMinus size={15} />
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="min-w-0 rounded-2xl border border-zinc-200">
+          <div className="flex flex-col gap-3 border-b border-zinc-100 p-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-950">
+                  <History size={15} />
+                  Invites
+                </h3>
+                <p className="mt-1 text-xs text-zinc-500">Pending and historical invite activity.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={exportInvitesCSV} disabled={inviteRows.length === 0}>
+                  <Download size={15} />
+                  CSV
+                </Button>
+                <Button onClick={exportInvitesJSON}>
+                  <FileJson size={15} />
+                  JSON
+                </Button>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {(["pending", "accepted", "rejected", "revoked", ""] as Array<ProjectInvite["status"] | "">).map((status) => (
+                <button
+                  key={status || "all"}
+                  type="button"
+                  className={`focus-ring rounded-full border px-3 py-1 text-xs font-medium ${
+                    inviteStatus === status
+                      ? "border-zinc-950 bg-zinc-950 text-white"
+                      : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
+                  }`}
+                  onClick={() => setInviteStatus(status)}
+                >
+                  {status || "all"}
+                </button>
+              ))}
+            </div>
+          </div>
+          {invites.isLoading ? <LoadingState label="Loading invites" /> : null}
+          {invites.isError ? (
+            <div className="p-3">
+              <ErrorState title="Could not load invites" body={errorMessage(invites.error, "Invite request failed.")} />
+            </div>
+          ) : null}
+          {!invites.isLoading && !invites.isError && inviteRows.length === 0 ? (
+            <div className="p-6 text-center text-sm text-zinc-400">No invites for this filter.</div>
+          ) : null}
+          <div className="divide-y divide-zinc-100">
+            {inviteRows.map((invite) => {
+              const title = actorTitle(invite.invitee_name, invite.invitee_username, invite.invitee_handle);
+              return (
+                <div key={invite.id} className="grid gap-3 p-3 md:grid-cols-[1fr_auto] md:items-center">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <PersonMark label={title} />
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="truncate font-medium text-zinc-950">{title}</span>
+                        <InviteStatusBadge status={invite.status} />
+                      </div>
+                      <div className="mt-1 truncate text-xs text-zinc-500">{actorSubtitle(invite.invitee_handle, invite.invitee_email)}</div>
+                      <div className="mt-1 flex items-center gap-1 text-xs text-zinc-400">
+                        <Mail size={12} />
+                        invited by {invite.inviter_username} / {relativeDate(invite.created_at)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs font-medium text-zinc-700">
+                      {invite.role_name || invite.role}
+                    </span>
+                    <Button onClick={() => copyID(invite.id)}>
+                      <Copy size={15} />
+                      ID
+                    </Button>
+                    {invite.status === "pending" ? (
+                      <Button tone="danger" disabled={revokeInvite.isPending} onClick={() => revokeInvite.mutate(invite.id)}>
+                        <Trash2 size={15} />
+                        Revoke
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      </div>
     </Panel>
   );
 }
@@ -645,7 +900,7 @@ export function ProjectSettingsPanel({ project, tickets }: { project: Project; t
       </Panel>
 
       <ProjectRoleManager projectId={project.id} />
-      <ProjectMemberActions projectId={project.id} />
+      <ProjectMemberActions project={project} />
     </div>
   );
 }

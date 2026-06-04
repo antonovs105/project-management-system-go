@@ -46,6 +46,8 @@ test("api client covers current backend feature routes", () => {
     "/me/password",
     "/admin/users",
     "/admin/audit-events",
+    "/projects/${projectId}/members",
+    "/projects/${projectId}/invites",
     "/members/${userId}",
     "/invites/${inviteId}/accept",
     "/invites/${inviteId}/reject",

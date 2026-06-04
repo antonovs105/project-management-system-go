@@ -22,6 +22,8 @@ import type {
   ProjectDelivery,
   ProjectDeliverySummary,
   ProjectInvite,
+  ProjectInviteInspection,
+  ProjectMember,
   ProjectPermission,
   ProjectRole,
   ProjectRoleKey,
@@ -106,7 +108,8 @@ export interface ChangePasswordPayload {
 }
 
 export interface AddProjectMemberPayload {
-  user_id: ID;
+  user_ref?: string;
+  user_id?: ID;
   role_id?: ID;
   role?: ProjectRoleKey;
 }
@@ -146,6 +149,12 @@ export interface AdminAuditFilters {
 export interface DeliveryFilters {
   state?: DeliveryState | "";
   limit?: number;
+}
+
+export interface ProjectInviteFilters {
+  status?: ProjectInvite["status"] | "";
+  limit?: number;
+  offset?: number;
 }
 
 export interface FederationDeliveryFilters extends DeliveryFilters {
@@ -274,23 +283,34 @@ export const api = {
     return data;
   },
 
+  async listProjectMembers(projectId: ID): Promise<ProjectMember[]> {
+    const { data } = await http.get<ProjectMember[] | null>(`${apiPrefix}/projects/${projectId}/members`, {
+      params: { limit: 200, offset: 0 },
+    });
+    return asArray(data);
+  },
+
   async removeProjectMember(projectId: ID, userId: ID): Promise<void> {
     await http.delete(`${apiPrefix}/projects/${projectId}/members/${userId}`);
   },
 
-  async acceptInvite(inviteId: ID): Promise<ProjectInvite> {
-    const { data } = await http.post<ProjectInvite>(`${apiPrefix}/invites/${inviteId}/accept`);
-    return data;
+  async listProjectInvites(projectId: ID, filters: ProjectInviteFilters = {}): Promise<ProjectInviteInspection[]> {
+    const { data } = await http.get<ProjectInviteInspection[] | null>(`${apiPrefix}/projects/${projectId}/invites`, {
+      params: { limit: 100, offset: 0, ...filters },
+    });
+    return asArray(data);
   },
 
-  async rejectInvite(inviteId: ID): Promise<ProjectInvite> {
-    const { data } = await http.post<ProjectInvite>(`${apiPrefix}/invites/${inviteId}/reject`);
-    return data;
+  async acceptInvite(inviteId: ID): Promise<void> {
+    await http.post(`${apiPrefix}/invites/${inviteId}/accept`);
   },
 
-  async revokeInvite(inviteId: ID): Promise<ProjectInvite> {
-    const { data } = await http.post<ProjectInvite>(`${apiPrefix}/invites/${inviteId}/revoke`);
-    return data;
+  async rejectInvite(inviteId: ID): Promise<void> {
+    await http.post(`${apiPrefix}/invites/${inviteId}/reject`);
+  },
+
+  async revokeInvite(inviteId: ID): Promise<void> {
+    await http.post(`${apiPrefix}/invites/${inviteId}/revoke`);
   },
 
   async listProjectRoles(projectId: ID): Promise<ProjectRole[]> {

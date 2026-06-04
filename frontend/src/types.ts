@@ -58,6 +58,31 @@ export interface ProjectInvite {
   updated_at: string;
 }
 
+export interface ProjectInviteInspection extends ProjectInvite {
+  role_name: string;
+  inviter_username: string;
+  inviter_email: string;
+  inviter_handle: string;
+  inviter_name: string;
+  invitee_username: string;
+  invitee_email: string;
+  invitee_handle: string;
+  invitee_name: string;
+}
+
+export interface ProjectMember {
+  user_id: ID;
+  project_id: ID;
+  role_id: ID;
+  role: ProjectRoleKey;
+  role_name: string;
+  username: string;
+  email: string;
+  handle: string;
+  name: string;
+  created_at: string;
+}
+
 export interface ProjectRole {
   id: ID;
   project_id: ID;
