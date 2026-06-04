@@ -239,14 +239,14 @@ export function ProjectWorkspace() {
               <ErrorState title="Could not load graph" body={errorMessage(graph.error, "Graph request failed.")} />
             ) : graph.data ? (
               <Suspense fallback={<LoadingState label="Loading graph view" />}>
-                <ProjectGraph data={graph.data} />
+                <ProjectGraph data={graph.data} tickets={tickets.data || []} onOpenTicket={setSelectedTicketId} />
               </Suspense>
             ) : null
           ) : null}
 
           {view === "deliveries" ? <ProjectDeliveriesPanel projectId={activeProjectId} /> : null}
 
-          {view === "settings" ? <ProjectSettingsPanel project={project.data} /> : null}
+          {view === "settings" ? <ProjectSettingsPanel project={project.data} tickets={tickets.data || []} /> : null}
 
           <TicketFormModal
             projectId={activeProjectId}
