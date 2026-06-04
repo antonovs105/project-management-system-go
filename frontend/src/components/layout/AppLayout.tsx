@@ -95,6 +95,11 @@ export function AppLayout() {
         <div>
           <div className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">Open Projects</div>
           <div className="space-y-1">
+            {projects.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-zinc-200 px-3 py-4 text-sm text-zinc-400">
+                No projects yet
+              </div>
+            ) : null}
             {projects.map((project) => (
               <NavLink
                 key={project.id}

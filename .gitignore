@@ -18,6 +18,8 @@ coverage.html
 /frontend/node_modules/
 /frontend/dist/
 /frontend/.vite/
+/frontend/.tmp/
+/frontend/.tsbuild/
 /frontend/.pnpm-store/
 .npm
 npm-debug.log*

@@ -12,6 +12,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
 import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { ticketStatuses } from "../../lib/constants";
 import type { ID, Ticket, TicketStatus } from "../../types";
 import { StatusBadge } from "../../components/StatusBadge";
@@ -108,10 +109,12 @@ export function TicketBoard({
   tickets,
   onOpenTicket,
   onMoveTicket,
+  emptyAction,
 }: {
   tickets: Ticket[];
   onOpenTicket: (ticketId: ID) => void;
   onMoveTicket: (ticketId: ID, status: TicketStatus) => void;
+  emptyAction?: ReactNode;
 }) {
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
@@ -147,7 +150,7 @@ export function TicketBoard({
   }
 
   if (tickets.length === 0) {
-    return <EmptyState title="No tickets yet" body="Create a ticket to start shaping the board." />;
+    return <EmptyState title="No tickets yet" body="Create a ticket to start shaping the board." action={emptyAction} />;
   }
 
   return (
