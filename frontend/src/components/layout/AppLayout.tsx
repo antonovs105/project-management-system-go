@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   CircleDot,
   FolderKanban,
+  Inbox,
   KeyRound,
   LayoutDashboard,
   LogOut,
@@ -57,6 +58,10 @@ export function AppLayout() {
           <NavLink to="/projects" className={({ isActive }) => navClass(isActive)} onClick={() => setSidebarOpen(false)}>
             <LayoutDashboard size={18} />
             Projects
+          </NavLink>
+          <NavLink to="/invitations" className={({ isActive }) => navClass(isActive)} onClick={() => setSidebarOpen(false)}>
+            <Inbox size={18} />
+            Invitations
           </NavLink>
           <NavLink to="/federation" className={({ isActive }) => navClass(isActive)} onClick={() => setSidebarOpen(false)}>
             <RadioTower size={18} />

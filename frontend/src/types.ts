@@ -59,6 +59,8 @@ export interface ProjectInvite {
 }
 
 export interface ProjectInviteInspection extends ProjectInvite {
+  project_name: string;
+  project_handle: string;
   role_name: string;
   inviter_username: string;
   inviter_email: string;

@@ -44,11 +44,13 @@ test("api client covers current backend feature routes", () => {
   const api = read("src/lib/api.ts");
   const requiredFragments = [
     "/me/password",
+    "/me/invites",
     "/admin/users",
     "/admin/audit-events",
     "/projects/${projectId}/members",
     "/projects/${projectId}/invites",
     "/members/${userId}",
+    "updateProjectMemberRole",
     "/invites/${inviteId}/accept",
     "/invites/${inviteId}/reject",
     "/invites/${inviteId}/revoke",

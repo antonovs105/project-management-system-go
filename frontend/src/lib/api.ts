@@ -126,6 +126,11 @@ export interface UpdateProjectRolePayload {
   permissions?: ProjectPermission[];
 }
 
+export interface UpdateProjectMemberRolePayload {
+  role_id?: ID;
+  role?: ProjectRoleKey;
+}
+
 export interface AddTicketLinkPayload {
   target_id: ID;
   link_type: string;
@@ -232,6 +237,13 @@ export const api = {
     await http.patch(`${apiPrefix}/me/password`, payload);
   },
 
+  async listMyProjectInvites(filters: ProjectInviteFilters = {}): Promise<ProjectInviteInspection[]> {
+    const { data } = await http.get<ProjectInviteInspection[] | null>(`${apiPrefix}/me/invites`, {
+      params: { limit: 100, offset: 0, ...filters },
+    });
+    return asArray(data);
+  },
+
   async listAdminUsers(filters: AdminUsersFilters = {}): Promise<AdminUser[]> {
     const { data } = await http.get<AdminUser[] | null>(`${apiPrefix}/admin/users`, {
       params: { limit: 100, offset: 0, ...filters },
@@ -292,6 +304,11 @@ export const api = {
 
   async removeProjectMember(projectId: ID, userId: ID): Promise<void> {
     await http.delete(`${apiPrefix}/projects/${projectId}/members/${userId}`);
+  },
+
+  async updateProjectMemberRole(projectId: ID, userId: ID, payload: UpdateProjectMemberRolePayload): Promise<ProjectMember> {
+    const { data } = await http.patch<ProjectMember>(`${apiPrefix}/projects/${projectId}/members/${userId}`, payload);
+    return data;
   },
 
   async listProjectInvites(projectId: ID, filters: ProjectInviteFilters = {}): Promise<ProjectInviteInspection[]> {

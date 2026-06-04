@@ -601,6 +601,7 @@ function ProjectMemberActions({ project }: { project: Project }) {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.projectMembers(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.projectInvitesScope(projectId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.myProjectInvitesScope }),
       queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
     ]);
   }
@@ -628,6 +629,15 @@ function ProjectMemberActions({ project }: { project: Project }) {
     onError: (error) => toast.error(errorMessage(error, "Could not remove member.")),
   });
 
+  const updateMemberRole = useMutation({
+    mutationFn: ({ userId, roleId }: { userId: ID; roleId: ID }) => api.updateProjectMemberRole(projectId, userId, { role_id: roleId }),
+    onSuccess: async () => {
+      await refreshMembership();
+      toast.success("Role updated");
+    },
+    onError: (error) => toast.error(errorMessage(error, "Could not update member role.")),
+  });
+
   const revokeInvite = useMutation({
     mutationFn: (inviteId: ID) => api.revokeInvite(inviteId),
     onSuccess: async () => {
@@ -639,6 +649,7 @@ function ProjectMemberActions({ project }: { project: Project }) {
 
   const memberRows = members.data || [];
   const inviteRows = invites.data || [];
+  const availableRoles = roles.data || [];
 
   function copyID(id: ID) {
     void navigator.clipboard?.writeText(id);
@@ -764,12 +775,32 @@ function ProjectMemberActions({ project }: { project: Project }) {
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 md:justify-end">
-                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs font-medium text-zinc-700">
-                      {member.role_name || member.role}
-                    </span>
+                    <label className="grid gap-1 text-xs text-zinc-500">
+                      <span className="sr-only">Role for {title}</span>
+                      <select
+                        className="focus-ring h-9 min-w-40 rounded-full border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-800 shadow-sm disabled:opacity-50"
+                        value={member.role_id}
+                        disabled={roles.isLoading || roles.isError || updateMemberRole.isPending}
+                        onChange={(event) => {
+                          const roleId = event.target.value;
+                          if (roleId && roleId !== member.role_id) {
+                            updateMemberRole.mutate({ userId: member.user_id, roleId });
+                          }
+                        }}
+                      >
+                        {availableRoles.some((role) => role.id === member.role_id) ? null : (
+                          <option value={member.role_id}>{member.role_name || member.role}</option>
+                        )}
+                        {availableRoles.map((role) => (
+                          <option key={role.id} value={role.id}>
+                            {role.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                     <Button
                       tone="danger"
-                      disabled={removeMember.isPending}
+                      disabled={removeMember.isPending || updateMemberRole.isPending}
                       onClick={() => {
                         if (window.confirm(`Remove ${title} from this project?`)) {
                           removeMember.mutate(member.user_id);
