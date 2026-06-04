@@ -148,12 +148,40 @@ type ProjectInvite struct {
 	UpdatedAt      time.Time `db:"updated_at" json:"updated_at"`
 }
 
+// ProjectInviteInspection is an operator-facing invite view with actor and role labels.
+type ProjectInviteInspection struct {
+	ID              string    `db:"id" json:"id"`
+	APID            string    `db:"ap_id" json:"ap_id"`
+	ProjectID       string    `db:"project_id" json:"project_id"`
+	InviterActorID  string    `db:"inviter_actor_id" json:"inviter_actor_id"`
+	InviteeActorID  string    `db:"invitee_actor_id" json:"invitee_actor_id"`
+	RoleID          string    `db:"role_id" json:"role_id"`
+	Role            string    `db:"role" json:"role"`
+	RoleName        string    `db:"role_name" json:"role_name"`
+	Status          string    `db:"status" json:"status"`
+	InviterUsername string    `db:"inviter_username" json:"inviter_username"`
+	InviterEmail    string    `db:"inviter_email" json:"inviter_email"`
+	InviterHandle   string    `db:"inviter_handle" json:"inviter_handle"`
+	InviterName     string    `db:"inviter_name" json:"inviter_name"`
+	InviteeUsername string    `db:"invitee_username" json:"invitee_username"`
+	InviteeEmail    string    `db:"invitee_email" json:"invitee_email"`
+	InviteeHandle   string    `db:"invitee_handle" json:"invitee_handle"`
+	InviteeName     string    `db:"invitee_name" json:"invitee_name"`
+	CreatedAt       time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt       time.Time `db:"updated_at" json:"updated_at"`
+}
+
 // ProjectMember is the relational projection of a user's role in a project.
 type ProjectMember struct {
 	UserID    string    `db:"user_id" json:"user_id"`
 	ProjectID string    `db:"project_id" json:"project_id"`
 	RoleID    string    `db:"role_id" json:"role_id"`
 	Role      string    `db:"role" json:"role"`
+	RoleName  string    `db:"role_name" json:"role_name"`
+	Username  string    `db:"username" json:"username"`
+	Email     string    `db:"email" json:"email"`
+	Handle    string    `db:"handle" json:"handle"`
+	Name      string    `db:"name" json:"name"`
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
@@ -173,6 +201,13 @@ type ProjectRole struct {
 
 // ProjectListOptions contains pagination for project list responses.
 type ProjectListOptions struct {
+	Limit  int
+	Offset int
+}
+
+// ProjectInviteListOptions contains filters and pagination for invite inspection.
+type ProjectInviteListOptions struct {
+	Status string
 	Limit  int
 	Offset int
 }

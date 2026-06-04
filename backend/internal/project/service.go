@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -119,11 +120,57 @@ func (s *Service) RequireProjectPermission(ctx context.Context, projectID, userI
 	return nil
 }
 
+// RequireAnyProjectPermission succeeds when the user has at least one requested permission.
+func (s *Service) RequireAnyProjectPermission(ctx context.Context, projectID, userID string, permissions []string, deniedMessage string) error {
+	for _, permission := range permissions {
+		allowed, err := s.HasProjectPermission(ctx, projectID, userID, permission)
+		if err != nil {
+			return err
+		}
+		if allowed {
+			return nil
+		}
+	}
+	return errors.New(deniedMessage)
+}
+
 // ListUserProjects returns projects where the user is a member.
 func (s *Service) ListUserProjects(ctx context.Context, userID string, options ProjectListOptions) ([]Project, error) {
 	options.Limit = normalizeProjectListLimit(options.Limit)
 	options.Offset = normalizeProjectListOffset(options.Offset)
 	return s.repo.ListByOwnerID(ctx, userID, options)
+}
+
+// ListProjectMembers returns project members visible to project membership managers.
+func (s *Service) ListProjectMembers(ctx context.Context, projectID, userID string, options ProjectListOptions) ([]ProjectMember, error) {
+	if err := s.RequireAnyProjectPermission(ctx, projectID, userID, []string{
+		PermissionMembersInvite,
+		PermissionMembersRemove,
+		PermissionRolesManage,
+	}, "insufficient permissions: missing member management permission"); err != nil {
+		return nil, err
+	}
+	options.Limit = normalizeProjectListLimit(options.Limit)
+	options.Offset = normalizeProjectListOffset(options.Offset)
+	return s.repo.ListMembers(ctx, projectID, options)
+}
+
+// ListProjectInvites returns project invite history visible to project membership managers.
+func (s *Service) ListProjectInvites(ctx context.Context, projectID, userID string, options ProjectInviteListOptions) ([]ProjectInviteInspection, error) {
+	options.Status = strings.ToLower(strings.TrimSpace(options.Status))
+	if options.Status != "" && !isProjectInviteStatus(options.Status) {
+		return nil, invalidProjectInput("invalid invite status")
+	}
+	if err := s.RequireAnyProjectPermission(ctx, projectID, userID, []string{
+		PermissionMembersInvite,
+		PermissionMembersRemove,
+		PermissionRolesManage,
+	}, "insufficient permissions: missing member management permission"); err != nil {
+		return nil, err
+	}
+	options.Limit = normalizeProjectListLimit(options.Limit)
+	options.Offset = normalizeProjectListOffset(options.Offset)
+	return s.repo.ListInvites(ctx, projectID, options)
 }
 
 // UpdateProjectRequest contains partial project metadata updates.
@@ -248,12 +295,20 @@ func (s *Service) RemoveMemberFromProject(ctx context.Context, projectID, actorI
 	return s.removeMember(ctx, projectID, actorID, targetUserID)
 }
 
-// AddMemberToProject creates a pending project invite for a local user.
-func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUserID, newUserID string, roleRef string) (*ProjectInvite, error) {
-	if strings.TrimSpace(newUserID) == "" {
-		return nil, invalidProjectInput("user_id is required")
+// AddMemberToProject creates a pending project invite for a local or remote actor.
+func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUserID, inviteeRef string, roleRef string) (*ProjectInvite, error) {
+	inviteeRef = strings.TrimSpace(inviteeRef)
+	if inviteeRef == "" {
+		return nil, invalidProjectInput("invitee is required")
 	}
 	if err := s.RequireProjectPermission(ctx, projectID, currentUserID, PermissionMembersInvite, "insufficient permissions: missing members.invite"); err != nil {
+		return nil, err
+	}
+	newUserID, err := s.repo.ResolveInviteeActorID(ctx, inviteeRef)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, invalidProjectInput("invitee not found")
+		}
 		return nil, err
 	}
 
@@ -501,6 +556,16 @@ func normalizeProjectListOffset(offset int) int {
 		return 0
 	}
 	return offset
+}
+
+// isProjectInviteStatus reports whether status is a supported invite lifecycle state.
+func isProjectInviteStatus(status string) bool {
+	switch status {
+	case "pending", "accepted", "rejected", "revoked":
+		return true
+	default:
+		return false
+	}
 }
 
 // AcceptInvite accepts a pending project invite for the current user.

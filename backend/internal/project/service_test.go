@@ -94,6 +94,105 @@ func TestService_GetProjectByID(t *testing.T) {
 	})
 }
 
+func TestService_ListProjectMembersRequiresMembershipManagement(t *testing.T) {
+	ctx := context.Background()
+	projectID := "project-1"
+	userID := "manager-1"
+
+	t.Run("allowed by invite permission", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+		expected := []ProjectMember{{UserID: "member-1", ProjectID: projectID, Role: RoleDeveloper}}
+
+		mockRepo.On("HasPermission", ctx, projectID, userID, PermissionMembersInvite).Return(true, nil).Once()
+		mockRepo.On("ListMembers", ctx, projectID, ProjectListOptions{Limit: defaultProjectListLimit, Offset: 0}).Return(expected, nil).Once()
+
+		members, err := service.ListProjectMembers(ctx, projectID, userID, ProjectListOptions{})
+
+		assert.NoError(t, err)
+		assert.Equal(t, expected, members)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("denied without member management permission", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+
+		mockRepo.On("HasPermission", ctx, projectID, userID, PermissionMembersInvite).Return(false, nil).Once()
+		mockRepo.On("HasPermission", ctx, projectID, userID, PermissionMembersRemove).Return(false, nil).Once()
+		mockRepo.On("HasPermission", ctx, projectID, userID, PermissionRolesManage).Return(false, nil).Once()
+
+		members, err := service.ListProjectMembers(ctx, projectID, userID, ProjectListOptions{})
+
+		assert.Error(t, err)
+		assert.Nil(t, members)
+		assert.Contains(t, err.Error(), "insufficient permissions")
+		mockRepo.AssertNotCalled(t, "ListMembers", mock.Anything, mock.Anything, mock.Anything)
+		mockRepo.AssertExpectations(t)
+	})
+}
+
+func TestService_ListProjectInvitesValidatesStatusAndNormalizesPagination(t *testing.T) {
+	ctx := context.Background()
+	projectID := "project-1"
+	userID := "manager-1"
+	mockRepo := new(MockRepository)
+	service := NewService(mockRepo, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+	expected := []ProjectInviteInspection{{ID: "invite-1", ProjectID: projectID, Status: "pending"}}
+
+	mockRepo.On("HasPermission", ctx, projectID, userID, PermissionMembersInvite).Return(true, nil).Once()
+	mockRepo.On("ListInvites", ctx, projectID, ProjectInviteListOptions{Status: "pending", Limit: 25, Offset: 5}).Return(expected, nil).Once()
+
+	invites, err := service.ListProjectInvites(ctx, projectID, userID, ProjectInviteListOptions{Status: " PENDING ", Limit: 25, Offset: 5})
+
+	assert.NoError(t, err)
+	assert.Equal(t, expected, invites)
+	mockRepo.AssertExpectations(t)
+}
+
+func TestService_ListProjectInvitesRejectsInvalidStatus(t *testing.T) {
+	mockRepo := new(MockRepository)
+	service := NewService(mockRepo, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+
+	invites, err := service.ListProjectInvites(context.Background(), "project-1", "manager-1", ProjectInviteListOptions{Status: "waiting"})
+
+	assert.ErrorIs(t, err, ErrInvalidProjectInput)
+	assert.Nil(t, invites)
+	mockRepo.AssertNotCalled(t, "HasPermission", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	mockRepo.AssertNotCalled(t, "ListInvites", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestService_AddMemberToProjectResolvesHumanInviteeReference(t *testing.T) {
+	mockRepo := new(MockRepository)
+	service := NewService(mockRepo, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+	ctx := context.Background()
+	projectID := "project-1"
+	actorID := "owner-1"
+	inviteeID := "invitee-1"
+	role := &ProjectRole{ID: "role-1", ProjectID: projectID, Key: RoleViewer, Name: "Viewer", Permissions: []string{PermissionProjectRead}}
+
+	mockRepo.On("HasPermission", ctx, projectID, actorID, PermissionMembersInvite).Return(true, nil).Once()
+	mockRepo.On("ResolveInviteeActorID", ctx, "alice@example.test").Return(inviteeID, nil).Once()
+	mockRepo.On("ResolveRole", ctx, projectID, RoleViewer).Return(role, nil).Once()
+	mockRepo.On("IsProjectMember", ctx, projectID, inviteeID).Return(false, nil).Once()
+	mockRepo.On("HasPendingInvite", ctx, projectID, inviteeID).Return(false, nil).Once()
+	mockRepo.On("CreateInvite", ctx, mock.MatchedBy(func(invite *ProjectInvite) bool {
+		return invite.ProjectID == projectID &&
+			invite.InviterActorID == actorID &&
+			invite.InviteeActorID == inviteeID &&
+			invite.RoleID == role.ID &&
+			invite.Role == role.Key &&
+			invite.Status == "pending"
+	})).Return(&MembershipResult{ProjectID: projectID}, nil).Once()
+
+	invite, err := service.AddMemberToProject(ctx, projectID, actorID, " alice@example.test ", "")
+
+	assert.NoError(t, err)
+	assert.NotNil(t, invite)
+	assert.Equal(t, inviteeID, invite.InviteeActorID)
+	mockRepo.AssertExpectations(t)
+}
+
 func TestService_UpdateProjectRoleRejectsRemovingLastRoleManager(t *testing.T) {
 	mockRepo := new(MockRepository)
 	service := NewService(mockRepo, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))

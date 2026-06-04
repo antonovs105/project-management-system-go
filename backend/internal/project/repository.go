@@ -16,6 +16,8 @@ type Repository interface {
 	Create(ctx context.Context, project *Project) error
 	GetByID(ctx context.Context, id string) (*Project, error)
 	ListByOwnerID(ctx context.Context, ownerID string, options ProjectListOptions) ([]Project, error)
+	ListMembers(ctx context.Context, projectID string, options ProjectListOptions) ([]ProjectMember, error)
+	ListInvites(ctx context.Context, projectID string, options ProjectInviteListOptions) ([]ProjectInviteInspection, error)
 	GetMemberRole(ctx context.Context, userID, projectID string) (string, error)
 	HasPermission(ctx context.Context, projectID, userID, permission string) (bool, error)
 	CountMembersWithPermission(ctx context.Context, projectID, permission string) (int, error)
@@ -28,6 +30,7 @@ type Repository interface {
 	UpdateRole(ctx context.Context, role *ProjectRole) error
 	DeleteRole(ctx context.Context, projectID, roleID string) error
 	RoleAssignmentCount(ctx context.Context, projectID, roleID string) (int, error)
+	ResolveInviteeActorID(ctx context.Context, ref string) (string, error)
 	IsProjectMember(ctx context.Context, projectID, userID string) (bool, error)
 	HasPendingInvite(ctx context.Context, projectID, userID string) (bool, error)
 	Update(ctx context.Context, project *Project, actorID string) (*UpdateResult, error)
@@ -260,6 +263,74 @@ func (r *PgRepository) ListByOwnerID(ctx context.Context, ownerID string, option
 	return projects, nil
 }
 
+// ListMembers returns local project members with role and profile metadata.
+func (r *PgRepository) ListMembers(ctx context.Context, projectID string, options ProjectListOptions) ([]ProjectMember, error) {
+	members := make([]ProjectMember, 0)
+	if err := r.db.SelectContext(ctx, &members, `
+		SELECT
+			member.user_id::text,
+			member.project_id::text,
+			member.role_id::text,
+			role.key AS role,
+			role.name AS role_name,
+			u.username,
+			u.email,
+			actor.handle,
+			actor.name,
+			member.created_at
+		FROM project_members member
+		JOIN users u ON u.id = member.user_id
+		JOIN actors actor ON actor.id = member.user_id
+		JOIN project_roles role ON role.id = member.role_id
+		WHERE member.project_id = $1
+		ORDER BY role.position ASC, member.created_at ASC, lower(actor.name) ASC, member.user_id ASC
+		LIMIT $2 OFFSET $3
+	`, projectID, options.Limit, options.Offset); err != nil {
+		return nil, err
+	}
+	return members, nil
+}
+
+// ListInvites returns project invites with actor and role metadata.
+func (r *PgRepository) ListInvites(ctx context.Context, projectID string, options ProjectInviteListOptions) ([]ProjectInviteInspection, error) {
+	invites := make([]ProjectInviteInspection, 0)
+	if err := r.db.SelectContext(ctx, &invites, `
+		SELECT
+			invite.id::text,
+			invite.ap_id,
+			invite.project_id::text,
+			invite.inviter_actor_id::text,
+			invite.invitee_actor_id::text,
+			invite.role_id::text,
+			role.key AS role,
+			role.name AS role_name,
+			invite.status,
+			COALESCE(inviter_user.username, inviter.preferred_username) AS inviter_username,
+			COALESCE(inviter_user.email, '') AS inviter_email,
+			inviter.handle AS inviter_handle,
+			inviter.name AS inviter_name,
+			COALESCE(invitee_user.username, invitee.preferred_username) AS invitee_username,
+			COALESCE(invitee_user.email, '') AS invitee_email,
+			invitee.handle AS invitee_handle,
+			invitee.name AS invitee_name,
+			invite.created_at,
+			invite.updated_at
+		FROM project_invites invite
+		JOIN actors inviter ON inviter.id = invite.inviter_actor_id
+		JOIN actors invitee ON invitee.id = invite.invitee_actor_id
+		LEFT JOIN users inviter_user ON inviter_user.id = invite.inviter_actor_id
+		LEFT JOIN users invitee_user ON invitee_user.id = invite.invitee_actor_id
+		JOIN project_roles role ON role.id = invite.role_id
+		WHERE invite.project_id = $1
+			AND ($2 = '' OR invite.status = $2)
+		ORDER BY invite.created_at DESC, invite.id DESC
+		LIMIT $3 OFFSET $4
+	`, projectID, options.Status, options.Limit, options.Offset); err != nil {
+		return nil, err
+	}
+	return invites, nil
+}
+
 // GetMemberRole returns a user's role key in a project.
 func (r *PgRepository) GetMemberRole(ctx context.Context, userID, projectID string) (string, error) {
 	var role string
@@ -462,6 +533,25 @@ func (r *PgRepository) RoleAssignmentCount(ctx context.Context, projectID, roleI
 			(SELECT count(*) FROM project_invites WHERE project_id = $1 AND role_id = $2 AND status = 'pending')
 	`, projectID, roleID)
 	return count, err
+}
+
+// ResolveInviteeActorID resolves an invite target by UUID, handle, username, or local email.
+func (r *PgRepository) ResolveInviteeActorID(ctx context.Context, ref string) (string, error) {
+	var actorID string
+	err := r.db.GetContext(ctx, &actorID, `
+		SELECT actor.id::text
+		FROM actors actor
+		LEFT JOIN users u ON u.id = actor.id
+		WHERE actor.id::text = $1
+			OR lower(actor.handle) = lower($1)
+			OR lower('acct:' || actor.handle) = lower($1)
+			OR lower(actor.preferred_username) = lower($1)
+			OR lower(u.username) = lower($1)
+			OR lower(u.email) = lower($1)
+		ORDER BY actor.is_local DESC, actor.created_at DESC, actor.id ASC
+		LIMIT 1
+	`, ref)
+	return actorID, err
 }
 
 // lockProjectManagerBoundary serializes changes that could remove the final project role manager.

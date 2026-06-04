@@ -32,6 +32,22 @@ func (m *MockRepository) ListByOwnerID(ctx context.Context, ownerID string, opti
 	return args.Get(0).([]Project), args.Error(1)
 }
 
+func (m *MockRepository) ListMembers(ctx context.Context, projectID string, options ProjectListOptions) ([]ProjectMember, error) {
+	args := m.Called(ctx, projectID, options)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]ProjectMember), args.Error(1)
+}
+
+func (m *MockRepository) ListInvites(ctx context.Context, projectID string, options ProjectInviteListOptions) ([]ProjectInviteInspection, error) {
+	args := m.Called(ctx, projectID, options)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]ProjectInviteInspection), args.Error(1)
+}
+
 func (m *MockRepository) GetMemberRole(ctx context.Context, userID, projectID string) (string, error) {
 	args := m.Called(ctx, userID, projectID)
 	return args.String(0), args.Error(1)
@@ -99,6 +115,11 @@ func (m *MockRepository) DeleteRole(ctx context.Context, projectID, roleID strin
 func (m *MockRepository) RoleAssignmentCount(ctx context.Context, projectID, roleID string) (int, error) {
 	args := m.Called(ctx, projectID, roleID)
 	return args.Int(0), args.Error(1)
+}
+
+func (m *MockRepository) ResolveInviteeActorID(ctx context.Context, ref string) (string, error) {
+	args := m.Called(ctx, ref)
+	return args.String(0), args.Error(1)
 }
 
 func (m *MockRepository) IsProjectMember(ctx context.Context, projectID, userID string) (bool, error) {

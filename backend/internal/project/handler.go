@@ -32,8 +32,10 @@ func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.POST("/projects/:id/roles", h.CreateRole)
 	api.PATCH("/projects/:id/roles/:roleID", h.UpdateRole)
 	api.DELETE("/projects/:id/roles/:roleID", h.DeleteRole)
+	api.GET("/projects/:id/members", h.ListMembers)
 	api.POST("/projects/:id/members", h.AddMember)
 	api.DELETE("/projects/:id/members/:userID", h.RemoveMember)
+	api.GET("/projects/:id/invites", h.ListInvites)
 	api.POST("/invites/:id/accept", h.AcceptInvite)
 	api.POST("/invites/:id/reject", h.RejectInvite)
 	api.POST("/invites/:id/revoke", h.RevokeInvite)
@@ -135,9 +137,10 @@ func (h *Handler) Delete(c echo.Context) error {
 
 // addMemberRequest is the JSON payload for inviting a project member.
 type addMemberRequest struct {
-	UserID string `json:"user_id"`
-	Role   string `json:"role"`
-	RoleID string `json:"role_id"`
+	UserID  string `json:"user_id"`
+	UserRef string `json:"user_ref"`
+	Role    string `json:"role"`
+	RoleID  string `json:"role_id"`
 }
 
 // AddMember creates an invite for a new project member.
@@ -153,20 +156,63 @@ func (h *Handler) AddMember(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
-	if !validUUID(req.UserID) {
+	if req.UserID != "" && !validUUID(req.UserID) {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid user id"})
+	}
+	inviteeRef := strings.TrimSpace(req.UserRef)
+	if inviteeRef == "" {
+		inviteeRef = strings.TrimSpace(req.UserID)
+	}
+	if inviteeRef == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invitee is required"})
 	}
 
 	roleRef := req.RoleID
 	if roleRef == "" {
 		roleRef = req.Role
 	}
-	invite, err := h.service.AddMemberToProject(c.Request().Context(), projectID, currentUserID, req.UserID, roleRef)
+	invite, err := h.service.AddMemberToProject(c.Request().Context(), projectID, currentUserID, inviteeRef, roleRef)
 	if err != nil {
 		return writeProjectError(c, err)
 	}
 
 	return c.JSON(http.StatusAccepted, invite)
+}
+
+// ListMembers returns project members for membership managers.
+func (h *Handler) ListMembers(c echo.Context) error {
+	projectID, ok := uuidParam(c, "id", "project id")
+	if !ok {
+		return nil
+	}
+	options, err := projectListOptions(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	userID := c.Get("userID").(string)
+	members, err := h.service.ListProjectMembers(c.Request().Context(), projectID, userID, options)
+	if err != nil {
+		return writeProjectError(c, err)
+	}
+	return c.JSON(http.StatusOK, members)
+}
+
+// ListInvites returns project invite history for membership managers.
+func (h *Handler) ListInvites(c echo.Context) error {
+	projectID, ok := uuidParam(c, "id", "project id")
+	if !ok {
+		return nil
+	}
+	options, err := projectInviteListOptions(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	userID := c.Get("userID").(string)
+	invites, err := h.service.ListProjectInvites(c.Request().Context(), projectID, userID, options)
+	if err != nil {
+		return writeProjectError(c, err)
+	}
+	return c.JSON(http.StatusOK, invites)
 }
 
 // ListRoles returns configurable project roles.
@@ -315,6 +361,19 @@ func projectListOptions(c echo.Context) (ProjectListOptions, error) {
 		return ProjectListOptions{}, ErrInvalidProjectInput
 	}
 	return ProjectListOptions{Limit: limit, Offset: offset}, nil
+}
+
+// projectInviteListOptions parses invite filters and pagination.
+func projectInviteListOptions(c echo.Context) (ProjectInviteListOptions, error) {
+	options, err := projectListOptions(c)
+	if err != nil {
+		return ProjectInviteListOptions{}, err
+	}
+	return ProjectInviteListOptions{
+		Status: strings.TrimSpace(c.QueryParam("status")),
+		Limit:  options.Limit,
+		Offset: options.Offset,
+	}, nil
 }
 
 // parseOptionalPositiveInt parses an optional positive pagination value.

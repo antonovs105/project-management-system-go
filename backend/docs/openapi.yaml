@@ -443,6 +443,35 @@ paths:
   /api/projects/{projectID}/members:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [Projects]
+      operationId: listProjectMembers
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Project members with role and profile metadata.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProjectMember"
+        "403":
+          $ref: "#/components/responses/Error"
     post:
       tags: [Projects]
       operationId: inviteProjectMember
@@ -458,6 +487,45 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProjectInvite"
         "409":
+          $ref: "#/components/responses/Error"
+  /api/projects/{projectID}/invites:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [Projects]
+      operationId: listProjectInvites
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, accepted, rejected, revoked]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Project invite history with actor and role metadata.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProjectInviteInspection"
+        "400":
+          $ref: "#/components/responses/Error"
+        "403":
           $ref: "#/components/responses/Error"
   /api/projects/{projectID}/roles:
     parameters:
@@ -1023,6 +1091,8 @@ paths:
     $ref: "#/paths/~1api~1projects~1{projectID}"
   /api/v1/projects/{projectID}/members:
     $ref: "#/paths/~1api~1projects~1{projectID}~1members"
+  /api/v1/projects/{projectID}/invites:
+    $ref: "#/paths/~1api~1projects~1{projectID}~1invites"
   /api/v1/projects/{projectID}/roles:
     $ref: "#/paths/~1api~1projects~1{projectID}~1roles"
   /api/v1/projects/{projectID}/roles/{roleID}:
@@ -1339,11 +1409,14 @@ components:
         application/json:
           schema:
             type: object
-            required: [user_id]
             properties:
               user_id:
                 type: string
                 format: uuid
+                deprecated: true
+              user_ref:
+                type: string
+                description: Invite target UUID, handle, acct handle, username, or local email.
               role_id:
                 type: string
                 format: uuid
@@ -2168,6 +2241,68 @@ components:
           type: string
           format: date-time
         updated_at:
+          type: string
+          format: date-time
+    ProjectInviteInspection:
+      allOf:
+        - $ref: "#/components/schemas/ProjectInvite"
+        - type: object
+          required:
+            - role_name
+            - inviter_username
+            - inviter_email
+            - inviter_handle
+            - inviter_name
+            - invitee_username
+            - invitee_email
+            - invitee_handle
+            - invitee_name
+          properties:
+            role_name:
+              type: string
+            inviter_username:
+              type: string
+            inviter_email:
+              type: string
+            inviter_handle:
+              type: string
+            inviter_name:
+              type: string
+            invitee_username:
+              type: string
+            invitee_email:
+              type: string
+            invitee_handle:
+              type: string
+            invitee_name:
+              type: string
+    ProjectMember:
+      type: object
+      required: [user_id, project_id, role_id, role, role_name, username, email, handle, name, created_at]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        role_id:
+          type: string
+          format: uuid
+        role:
+          $ref: "#/components/schemas/ProjectRoleKey"
+        role_name:
+          type: string
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        handle:
+          type: string
+        name:
+          type: string
+        created_at:
           type: string
           format: date-time
     ProjectRole:

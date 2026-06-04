@@ -49,8 +49,10 @@ func TestOpenAPIContractDocumentsRegisteredRoutes(t *testing.T) {
 		{method: "post", path: "/api/projects/{projectID}/roles"},
 		{method: "patch", path: "/api/projects/{projectID}/roles/{roleID}"},
 		{method: "delete", path: "/api/projects/{projectID}/roles/{roleID}"},
+		{method: "get", path: "/api/projects/{projectID}/members"},
 		{method: "post", path: "/api/projects/{projectID}/members"},
 		{method: "delete", path: "/api/projects/{projectID}/members/{userID}"},
+		{method: "get", path: "/api/projects/{projectID}/invites"},
 		{method: "post", path: "/api/invites/{inviteID}/accept"},
 		{method: "post", path: "/api/invites/{inviteID}/reject"},
 		{method: "post", path: "/api/invites/{inviteID}/revoke"},
@@ -124,6 +126,8 @@ func TestOpenAPIContractDocumentsDeliveryResponseShapes(t *testing.T) {
 	require.Equal(t, "#/components/schemas/FederationRemoteActor", responseRef(t, doc, "post", "/api/me/federation/discover", "200", "application/json"))
 	require.Equal(t, "#/components/schemas/FederationRemoteFollow", responseItemsRef(t, doc, "get", "/api/me/federation/follows", "200", "application/json"))
 	require.Equal(t, "#/components/schemas/FollowRemoteActorResult", responseRef(t, doc, "post", "/api/me/federation/follows", "202", "application/json"))
+	require.Equal(t, "#/components/schemas/ProjectMember", responseItemsRef(t, doc, "get", "/api/projects/{projectID}/members", "200", "application/json"))
+	require.Equal(t, "#/components/schemas/ProjectInviteInspection", responseItemsRef(t, doc, "get", "/api/projects/{projectID}/invites", "200", "application/json"))
 
 	rawDeliveryProps := schemaProperties(t, doc, "Delivery")
 	require.Contains(t, rawDeliveryProps, "activity_id")
@@ -157,6 +161,7 @@ func TestOpenAPIContractDocumentsVersionedRESTAliases(t *testing.T) {
 		"/api/projects/{projectID}/roles/{roleID}",
 		"/api/projects/{projectID}/members",
 		"/api/projects/{projectID}/members/{userID}",
+		"/api/projects/{projectID}/invites",
 		"/api/invites/{inviteID}/accept",
 		"/api/invites/{inviteID}/reject",
 		"/api/invites/{inviteID}/revoke",
