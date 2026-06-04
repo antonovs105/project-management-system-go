@@ -48,6 +48,14 @@ func (m *MockRepository) ListInvites(ctx context.Context, projectID string, opti
 	return args.Get(0).([]ProjectInviteInspection), args.Error(1)
 }
 
+func (m *MockRepository) ListInvitesForActor(ctx context.Context, actorID string, options ProjectInviteListOptions) ([]ProjectInviteInspection, error) {
+	args := m.Called(ctx, actorID, options)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]ProjectInviteInspection), args.Error(1)
+}
+
 func (m *MockRepository) GetMemberRole(ctx context.Context, userID, projectID string) (string, error) {
 	args := m.Called(ctx, userID, projectID)
 	return args.String(0), args.Error(1)
@@ -154,6 +162,14 @@ func (m *MockRepository) RemoveMember(ctx context.Context, projectID, actorID, t
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*MembershipResult), args.Error(1)
+}
+
+func (m *MockRepository) UpdateMemberRole(ctx context.Context, projectID, targetUserID, roleID string) (*ProjectMember, error) {
+	args := m.Called(ctx, projectID, targetUserID, roleID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*ProjectMember), args.Error(1)
 }
 
 func (m *MockRepository) CreateInvite(ctx context.Context, invite *ProjectInvite) (*MembershipResult, error) {

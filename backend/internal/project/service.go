@@ -157,9 +157,10 @@ func (s *Service) ListProjectMembers(ctx context.Context, projectID, userID stri
 
 // ListProjectInvites returns project invite history visible to project membership managers.
 func (s *Service) ListProjectInvites(ctx context.Context, projectID, userID string, options ProjectInviteListOptions) ([]ProjectInviteInspection, error) {
-	options.Status = strings.ToLower(strings.TrimSpace(options.Status))
-	if options.Status != "" && !isProjectInviteStatus(options.Status) {
-		return nil, invalidProjectInput("invalid invite status")
+	var err error
+	options, err = normalizeProjectInviteListOptions(options)
+	if err != nil {
+		return nil, err
 	}
 	if err := s.RequireAnyProjectPermission(ctx, projectID, userID, []string{
 		PermissionMembersInvite,
@@ -171,6 +172,16 @@ func (s *Service) ListProjectInvites(ctx context.Context, projectID, userID stri
 	options.Limit = normalizeProjectListLimit(options.Limit)
 	options.Offset = normalizeProjectListOffset(options.Offset)
 	return s.repo.ListInvites(ctx, projectID, options)
+}
+
+// ListUserInvites returns invites addressed to the current actor.
+func (s *Service) ListUserInvites(ctx context.Context, userID string, options ProjectInviteListOptions) ([]ProjectInviteInspection, error) {
+	var err error
+	options, err = normalizeProjectInviteListOptions(options)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.ListInvitesForActor(ctx, userID, options)
 }
 
 // UpdateProjectRequest contains partial project metadata updates.
@@ -293,6 +304,22 @@ func (s *Service) RemoveMemberFromProject(ctx context.Context, projectID, actorI
 	}
 
 	return s.removeMember(ctx, projectID, actorID, targetUserID)
+}
+
+// UpdateProjectMemberRole changes an existing project member role.
+func (s *Service) UpdateProjectMemberRole(ctx context.Context, projectID, actorID, targetUserID string, roleRef string) (*ProjectMember, error) {
+	roleRef = strings.TrimSpace(roleRef)
+	if roleRef == "" {
+		return nil, invalidProjectInput("role is required")
+	}
+	if err := s.RequireProjectPermission(ctx, projectID, actorID, PermissionRolesManage, "insufficient permissions: missing roles.manage"); err != nil {
+		return nil, err
+	}
+	role, err := s.repo.ResolveRole(ctx, projectID, roleRef)
+	if err != nil {
+		return nil, invalidProjectInput("invalid project role")
+	}
+	return s.repo.UpdateMemberRole(ctx, projectID, targetUserID, role.ID)
 }
 
 // AddMemberToProject creates a pending project invite for a local or remote actor.
@@ -556,6 +583,17 @@ func normalizeProjectListOffset(offset int) int {
 		return 0
 	}
 	return offset
+}
+
+// normalizeProjectInviteListOptions validates invite filters and bounds pagination.
+func normalizeProjectInviteListOptions(options ProjectInviteListOptions) (ProjectInviteListOptions, error) {
+	options.Status = strings.ToLower(strings.TrimSpace(options.Status))
+	if options.Status != "" && !isProjectInviteStatus(options.Status) {
+		return ProjectInviteListOptions{}, invalidProjectInput("invalid invite status")
+	}
+	options.Limit = normalizeProjectListLimit(options.Limit)
+	options.Offset = normalizeProjectListOffset(options.Offset)
+	return options, nil
 }
 
 // isProjectInviteStatus reports whether status is a supported invite lifecycle state.

@@ -111,6 +111,8 @@ func TestRESTDTOsUseStableSnakeCaseFields(t *testing.T) {
 				ID:              "invite-1",
 				APID:            "https://local.test/activities/invite-1",
 				ProjectID:       "project-1",
+				ProjectName:     "Board",
+				ProjectHandle:   "board@local.test",
 				InviterActorID:  "owner-1",
 				InviteeActorID:  "invitee-1",
 				RoleID:          "role-1",
@@ -129,11 +131,11 @@ func TestRESTDTOsUseStableSnakeCaseFields(t *testing.T) {
 				UpdatedAt:       now,
 			},
 			wantKeys: []string{
-				"id", "ap_id", "project_id", "inviter_actor_id", "invitee_actor_id", "role_id", "role", "role_name",
+				"id", "ap_id", "project_id", "project_name", "project_handle", "inviter_actor_id", "invitee_actor_id", "role_id", "role", "role_name",
 				"status", "inviter_username", "inviter_email", "inviter_handle", "inviter_name",
 				"invitee_username", "invitee_email", "invitee_handle", "invitee_name", "created_at", "updated_at",
 			},
-			forbidKeys: []string{"projectID", "roleName", "inviterUsername", "inviteeUsername"},
+			forbidKeys: []string{"projectID", "projectName", "projectHandle", "roleName", "inviterUsername", "inviteeUsername"},
 		},
 		{
 			name: "ticket",

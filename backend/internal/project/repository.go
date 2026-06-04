@@ -18,6 +18,7 @@ type Repository interface {
 	ListByOwnerID(ctx context.Context, ownerID string, options ProjectListOptions) ([]Project, error)
 	ListMembers(ctx context.Context, projectID string, options ProjectListOptions) ([]ProjectMember, error)
 	ListInvites(ctx context.Context, projectID string, options ProjectInviteListOptions) ([]ProjectInviteInspection, error)
+	ListInvitesForActor(ctx context.Context, actorID string, options ProjectInviteListOptions) ([]ProjectInviteInspection, error)
 	GetMemberRole(ctx context.Context, userID, projectID string) (string, error)
 	HasPermission(ctx context.Context, projectID, userID, permission string) (bool, error)
 	CountMembersWithPermission(ctx context.Context, projectID, permission string) (int, error)
@@ -36,6 +37,7 @@ type Repository interface {
 	Update(ctx context.Context, project *Project, actorID string) (*UpdateResult, error)
 	Delete(ctx context.Context, id string, actorID string) (*DeleteResult, error)
 	RemoveMember(ctx context.Context, projectID, actorID, targetUserID string) (*MembershipResult, error)
+	UpdateMemberRole(ctx context.Context, projectID, targetUserID, roleID string) (*ProjectMember, error)
 	GetInviteByID(ctx context.Context, inviteID string) (*ProjectInvite, error)
 	CreateInvite(ctx context.Context, invite *ProjectInvite) (*MembershipResult, error)
 	AcceptInvite(ctx context.Context, inviteID, userID string) (*MembershipResult, error)
@@ -266,22 +268,7 @@ func (r *PgRepository) ListByOwnerID(ctx context.Context, ownerID string, option
 // ListMembers returns local project members with role and profile metadata.
 func (r *PgRepository) ListMembers(ctx context.Context, projectID string, options ProjectListOptions) ([]ProjectMember, error) {
 	members := make([]ProjectMember, 0)
-	if err := r.db.SelectContext(ctx, &members, `
-		SELECT
-			member.user_id::text,
-			member.project_id::text,
-			member.role_id::text,
-			role.key AS role,
-			role.name AS role_name,
-			u.username,
-			u.email,
-			actor.handle,
-			actor.name,
-			member.created_at
-		FROM project_members member
-		JOIN users u ON u.id = member.user_id
-		JOIN actors actor ON actor.id = member.user_id
-		JOIN project_roles role ON role.id = member.role_id
+	if err := r.db.SelectContext(ctx, &members, projectMemberSelectQuery()+`
 		WHERE member.project_id = $1
 		ORDER BY role.position ASC, member.created_at ASC, lower(actor.name) ASC, member.user_id ASC
 		LIMIT $2 OFFSET $3
@@ -294,38 +281,26 @@ func (r *PgRepository) ListMembers(ctx context.Context, projectID string, option
 // ListInvites returns project invites with actor and role metadata.
 func (r *PgRepository) ListInvites(ctx context.Context, projectID string, options ProjectInviteListOptions) ([]ProjectInviteInspection, error) {
 	invites := make([]ProjectInviteInspection, 0)
-	if err := r.db.SelectContext(ctx, &invites, `
-		SELECT
-			invite.id::text,
-			invite.ap_id,
-			invite.project_id::text,
-			invite.inviter_actor_id::text,
-			invite.invitee_actor_id::text,
-			invite.role_id::text,
-			role.key AS role,
-			role.name AS role_name,
-			invite.status,
-			COALESCE(inviter_user.username, inviter.preferred_username) AS inviter_username,
-			COALESCE(inviter_user.email, '') AS inviter_email,
-			inviter.handle AS inviter_handle,
-			inviter.name AS inviter_name,
-			COALESCE(invitee_user.username, invitee.preferred_username) AS invitee_username,
-			COALESCE(invitee_user.email, '') AS invitee_email,
-			invitee.handle AS invitee_handle,
-			invitee.name AS invitee_name,
-			invite.created_at,
-			invite.updated_at
-		FROM project_invites invite
-		JOIN actors inviter ON inviter.id = invite.inviter_actor_id
-		JOIN actors invitee ON invitee.id = invite.invitee_actor_id
-		LEFT JOIN users inviter_user ON inviter_user.id = invite.inviter_actor_id
-		LEFT JOIN users invitee_user ON invitee_user.id = invite.invitee_actor_id
-		JOIN project_roles role ON role.id = invite.role_id
+	if err := r.db.SelectContext(ctx, &invites, projectInviteInspectionSelectQuery()+`
 		WHERE invite.project_id = $1
 			AND ($2 = '' OR invite.status = $2)
 		ORDER BY invite.created_at DESC, invite.id DESC
 		LIMIT $3 OFFSET $4
 	`, projectID, options.Status, options.Limit, options.Offset); err != nil {
+		return nil, err
+	}
+	return invites, nil
+}
+
+// ListInvitesForActor returns project invites addressed to one actor.
+func (r *PgRepository) ListInvitesForActor(ctx context.Context, actorID string, options ProjectInviteListOptions) ([]ProjectInviteInspection, error) {
+	invites := make([]ProjectInviteInspection, 0)
+	if err := r.db.SelectContext(ctx, &invites, projectInviteInspectionSelectQuery()+`
+		WHERE invite.invitee_actor_id = $1
+			AND ($2 = '' OR invite.status = $2)
+		ORDER BY invite.created_at DESC, invite.id DESC
+		LIMIT $3 OFFSET $4
+	`, actorID, options.Status, options.Limit, options.Offset); err != nil {
 		return nil, err
 	}
 	return invites, nil
@@ -636,6 +611,74 @@ func projectRoleSelectQuery() string {
 			updated_at
 		FROM project_roles
 	`
+}
+
+// projectMemberSelectQuery returns the shared member API projection.
+func projectMemberSelectQuery() string {
+	return `
+		SELECT
+			member.user_id::text,
+			member.project_id::text,
+			member.role_id::text,
+			role.key AS role,
+			role.name AS role_name,
+			u.username,
+			u.email,
+			actor.handle,
+			actor.name,
+			member.created_at
+		FROM project_members member
+		JOIN users u ON u.id = member.user_id
+		JOIN actors actor ON actor.id = member.user_id
+		JOIN project_roles role ON role.id = member.role_id
+	`
+}
+
+// projectInviteInspectionSelectQuery returns the shared invite inspection projection.
+func projectInviteInspectionSelectQuery() string {
+	return `
+		SELECT
+			invite.id::text,
+			invite.ap_id,
+			invite.project_id::text,
+			project.name AS project_name,
+			project_actor.handle AS project_handle,
+			invite.inviter_actor_id::text,
+			invite.invitee_actor_id::text,
+			invite.role_id::text,
+			role.key AS role,
+			role.name AS role_name,
+			invite.status,
+			COALESCE(inviter_user.username, inviter.preferred_username) AS inviter_username,
+			COALESCE(inviter_user.email, '') AS inviter_email,
+			inviter.handle AS inviter_handle,
+			inviter.name AS inviter_name,
+			COALESCE(invitee_user.username, invitee.preferred_username) AS invitee_username,
+			COALESCE(invitee_user.email, '') AS invitee_email,
+			invitee.handle AS invitee_handle,
+			invitee.name AS invitee_name,
+			invite.created_at,
+			invite.updated_at
+		FROM project_invites invite
+		JOIN projects project ON project.id = invite.project_id
+		JOIN actors project_actor ON project_actor.id = invite.project_id
+		JOIN actors inviter ON inviter.id = invite.inviter_actor_id
+		JOIN actors invitee ON invitee.id = invite.invitee_actor_id
+		LEFT JOIN users inviter_user ON inviter_user.id = invite.inviter_actor_id
+		LEFT JOIN users invitee_user ON invitee_user.id = invite.invitee_actor_id
+		JOIN project_roles role ON role.id = invite.role_id
+	`
+}
+
+// loadProjectMember loads one member using the public member projection.
+func loadProjectMember(ctx context.Context, q sqlx.QueryerContext, projectID, userID string) (*ProjectMember, error) {
+	var member ProjectMember
+	if err := sqlx.GetContext(ctx, q, &member, projectMemberSelectQuery()+`
+		WHERE member.project_id = $1 AND member.user_id = $2
+	`, projectID, userID); err != nil {
+		return nil, err
+	}
+	return &member, nil
 }
 
 // loadRolePermissions attaches permissions to a role projection.
@@ -956,6 +999,104 @@ func (r *PgRepository) writeProjectDeleteActivity(ctx context.Context, tx *sqlx.
 		return "", err
 	}
 	return activityID, nil
+}
+
+// UpdateMemberRole changes a local project member's role without breaking manager lockout protection.
+func (r *PgRepository) UpdateMemberRole(ctx context.Context, projectID, targetUserID, roleID string) (*ProjectMember, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	if err := lockProjectManagerBoundary(ctx, tx, projectID); err != nil {
+		return nil, err
+	}
+
+	var memberExists bool
+	if err := tx.GetContext(ctx, &memberExists, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM project_members
+			WHERE project_id = $1 AND user_id = $2
+		)
+	`, projectID, targetUserID); err != nil {
+		return nil, err
+	}
+	if !memberExists {
+		return nil, errors.New("project member not found")
+	}
+
+	var roleExists bool
+	if err := tx.GetContext(ctx, &roleExists, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM project_roles
+			WHERE project_id = $1 AND id = $2
+		)
+	`, projectID, roleID); err != nil {
+		return nil, err
+	}
+	if !roleExists {
+		return nil, errors.New("project role not found")
+	}
+
+	var currentGrantsRoleManagement bool
+	if err := tx.GetContext(ctx, &currentGrantsRoleManagement, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM project_members member
+			JOIN project_role_permissions permission ON permission.role_id = member.role_id
+			WHERE member.project_id = $1
+				AND member.user_id = $2
+				AND permission.permission = $3
+		)
+	`, projectID, targetUserID, PermissionRolesManage); err != nil {
+		return nil, err
+	}
+	var nextGrantsRoleManagement bool
+	if err := tx.GetContext(ctx, &nextGrantsRoleManagement, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM project_role_permissions
+			WHERE role_id = $1 AND permission = $2
+		)
+	`, roleID, PermissionRolesManage); err != nil {
+		return nil, err
+	}
+	if currentGrantsRoleManagement && !nextGrantsRoleManagement {
+		var remainingManagers int
+		if err := tx.GetContext(ctx, &remainingManagers, `
+			SELECT count(*)
+			FROM project_members member
+			JOIN project_role_permissions permission ON permission.role_id = member.role_id
+			WHERE member.project_id = $1
+				AND member.user_id <> $2
+				AND permission.permission = $3
+		`, projectID, targetUserID, PermissionRolesManage); err != nil {
+			return nil, err
+		}
+		if remainingManagers == 0 {
+			return nil, errors.New("cannot remove the last project role manager")
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE project_members
+		SET role_id = $3
+		WHERE project_id = $1 AND user_id = $2
+	`, projectID, targetUserID, roleID); err != nil {
+		return nil, err
+	}
+
+	member, err := loadProjectMember(ctx, tx, projectID, targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return member, nil
 }
 
 // RemoveMember removes a user from a project and records membership activity.

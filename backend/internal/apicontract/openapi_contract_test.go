@@ -33,6 +33,7 @@ func TestOpenAPIContractDocumentsRegisteredRoutes(t *testing.T) {
 		{method: "post", path: "/login"},
 		{method: "get", path: "/api/me"},
 		{method: "patch", path: "/api/me/password"},
+		{method: "get", path: "/api/me/invites"},
 		{method: "get", path: "/api/me/federation/inbox"},
 		{method: "post", path: "/api/me/federation/discover"},
 		{method: "get", path: "/api/me/federation/follows"},
@@ -51,6 +52,7 @@ func TestOpenAPIContractDocumentsRegisteredRoutes(t *testing.T) {
 		{method: "delete", path: "/api/projects/{projectID}/roles/{roleID}"},
 		{method: "get", path: "/api/projects/{projectID}/members"},
 		{method: "post", path: "/api/projects/{projectID}/members"},
+		{method: "patch", path: "/api/projects/{projectID}/members/{userID}"},
 		{method: "delete", path: "/api/projects/{projectID}/members/{userID}"},
 		{method: "get", path: "/api/projects/{projectID}/invites"},
 		{method: "post", path: "/api/invites/{inviteID}/accept"},
@@ -126,7 +128,9 @@ func TestOpenAPIContractDocumentsDeliveryResponseShapes(t *testing.T) {
 	require.Equal(t, "#/components/schemas/FederationRemoteActor", responseRef(t, doc, "post", "/api/me/federation/discover", "200", "application/json"))
 	require.Equal(t, "#/components/schemas/FederationRemoteFollow", responseItemsRef(t, doc, "get", "/api/me/federation/follows", "200", "application/json"))
 	require.Equal(t, "#/components/schemas/FollowRemoteActorResult", responseRef(t, doc, "post", "/api/me/federation/follows", "202", "application/json"))
+	require.Equal(t, "#/components/schemas/ProjectInviteInspection", responseItemsRef(t, doc, "get", "/api/me/invites", "200", "application/json"))
 	require.Equal(t, "#/components/schemas/ProjectMember", responseItemsRef(t, doc, "get", "/api/projects/{projectID}/members", "200", "application/json"))
+	require.Equal(t, "#/components/schemas/ProjectMember", responseRef(t, doc, "patch", "/api/projects/{projectID}/members/{userID}", "200", "application/json"))
 	require.Equal(t, "#/components/schemas/ProjectInviteInspection", responseItemsRef(t, doc, "get", "/api/projects/{projectID}/invites", "200", "application/json"))
 
 	rawDeliveryProps := schemaProperties(t, doc, "Delivery")
@@ -149,6 +153,7 @@ func TestOpenAPIContractDocumentsVersionedRESTAliases(t *testing.T) {
 	for _, path := range []string{
 		"/api/me",
 		"/api/me/password",
+		"/api/me/invites",
 		"/api/me/federation/inbox",
 		"/api/me/federation/discover",
 		"/api/me/federation/follows",

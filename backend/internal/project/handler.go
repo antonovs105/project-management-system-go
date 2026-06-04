@@ -23,6 +23,7 @@ func NewHandler(service *Service) *Handler {
 
 // RegisterRoutes registers authenticated project routes.
 func (h *Handler) RegisterRoutes(api *echo.Group) {
+	api.GET("/me/invites", h.ListMyInvites)
 	api.POST("/projects", h.Create)
 	api.GET("/projects/:id", h.Get)
 	api.GET("/projects", h.List)
@@ -34,6 +35,7 @@ func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.DELETE("/projects/:id/roles/:roleID", h.DeleteRole)
 	api.GET("/projects/:id/members", h.ListMembers)
 	api.POST("/projects/:id/members", h.AddMember)
+	api.PATCH("/projects/:id/members/:userID", h.UpdateMemberRole)
 	api.DELETE("/projects/:id/members/:userID", h.RemoveMember)
 	api.GET("/projects/:id/invites", h.ListInvites)
 	api.POST("/invites/:id/accept", h.AcceptInvite)
@@ -96,6 +98,20 @@ func (h *Handler) List(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, projects)
+}
+
+// ListMyInvites returns invites addressed to the current user.
+func (h *Handler) ListMyInvites(c echo.Context) error {
+	userID := c.Get("userID").(string)
+	options, err := projectInviteListOptions(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	invites, err := h.service.ListUserInvites(c.Request().Context(), userID, options)
+	if err != nil {
+		return writeProjectError(c, err)
+	}
+	return c.JSON(http.StatusOK, invites)
 }
 
 // Update changes project metadata.
@@ -284,6 +300,38 @@ func (h *Handler) DeleteRole(c echo.Context) error {
 		return writeProjectError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// updateMemberRoleRequest is the JSON payload for changing a project member's role.
+type updateMemberRoleRequest struct {
+	RoleID string `json:"role_id"`
+	Role   string `json:"role"`
+}
+
+// UpdateMemberRole changes an existing project member role.
+func (h *Handler) UpdateMemberRole(c echo.Context) error {
+	projectID, ok := uuidParam(c, "id", "project id")
+	if !ok {
+		return nil
+	}
+	targetUserID, ok := uuidParam(c, "userID", "user id")
+	if !ok {
+		return nil
+	}
+	var req updateMemberRoleRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	roleRef := req.RoleID
+	if roleRef == "" {
+		roleRef = req.Role
+	}
+	userID := c.Get("userID").(string)
+	member, err := h.service.UpdateProjectMemberRole(c.Request().Context(), projectID, userID, targetUserID, roleRef)
+	if err != nil {
+		return writeProjectError(c, err)
+	}
+	return c.JSON(http.StatusOK, member)
 }
 
 // RemoveMember removes a user from a project.

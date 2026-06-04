@@ -153,6 +153,8 @@ type ProjectInviteInspection struct {
 	ID              string    `db:"id" json:"id"`
 	APID            string    `db:"ap_id" json:"ap_id"`
 	ProjectID       string    `db:"project_id" json:"project_id"`
+	ProjectName     string    `db:"project_name" json:"project_name"`
+	ProjectHandle   string    `db:"project_handle" json:"project_handle"`
 	InviterActorID  string    `db:"inviter_actor_id" json:"inviter_actor_id"`
 	InviteeActorID  string    `db:"invitee_actor_id" json:"invitee_actor_id"`
 	RoleID          string    `db:"role_id" json:"role_id"`
