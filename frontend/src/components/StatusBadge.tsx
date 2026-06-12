@@ -1,4 +1,5 @@
 import type { TicketPriority, TicketStatus, TicketType } from "../types";
+import { useI18n } from "../lib/i18n-context";
 import { Badge } from "./ui";
 
 function statusClass(status: TicketStatus): string {
@@ -38,10 +39,6 @@ function typeClass(type: TicketType): string {
   }
 }
 
-function label(value: string): string {
-  return value.replace(/_/g, " ");
-}
-
 export function StatusBadge({
   value,
   kind,
@@ -49,6 +46,13 @@ export function StatusBadge({
   value: TicketStatus | TicketPriority | TicketType;
   kind: "status" | "priority" | "type";
 }) {
+  const { t } = useI18n();
   const tone = kind === "status" ? statusClass(value as TicketStatus) : kind === "priority" ? priorityClass(value as TicketPriority) : typeClass(value as TicketType);
-  return <Badge className={tone}>{label(value)}</Badge>;
+  const label =
+    kind === "status"
+      ? t(`ticket.status.${value as TicketStatus}`)
+      : kind === "priority"
+        ? t(`ticket.priority.${value as TicketPriority}`)
+        : t(`ticket.type.${value as TicketType}`);
+  return <Badge className={tone}>{label}</Badge>;
 }

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button, EmptyState, ErrorState, LoadingState, Panel } from "../components/ui";
 import { api, errorMessage } from "../lib/api";
 import { initials, relativeDate } from "../lib/format";
+import { useI18n } from "../lib/i18n-context";
 import { queryKeys } from "../lib/queryKeys";
 import type { ID, ProjectInvite, ProjectInviteInspection } from "../types";
 
@@ -13,8 +14,8 @@ type InviteStatusFilter = ProjectInvite["status"] | "";
 
 const statusFilters: InviteStatusFilter[] = ["pending", "accepted", "rejected", "revoked", ""];
 
-function actorTitle(name: string, username: string, handle: string): string {
-  return name || username || handle || "Unknown actor";
+function actorTitle(name: string, username: string, handle: string, fallback: string): string {
+  return name || username || handle || fallback;
 }
 
 function statusTone(status: ProjectInvite["status"]): string {
@@ -30,8 +31,8 @@ function statusTone(status: ProjectInvite["status"]): string {
   }
 }
 
-function InviteStatusBadge({ status }: { status: ProjectInvite["status"] }) {
-  return <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${statusTone(status)}`}>{status}</span>;
+function InviteStatusBadge({ status, label }: { status: ProjectInvite["status"]; label: string }) {
+  return <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${statusTone(status)}`}>{label}</span>;
 }
 
 function InviteMetric({ label, value }: { label: string; value: number | string }) {
@@ -48,13 +49,22 @@ function InviteRow({
   onAccept,
   onReject,
   pending,
+  labels,
 }: {
   invite: ProjectInviteInspection;
   onAccept: (inviteId: ID) => void;
   onReject: (inviteId: ID) => void;
   pending: boolean;
+  labels: {
+    accept: string;
+    reject: string;
+    open: string;
+    role: string;
+    status: string;
+    unknownActor: string;
+  };
 }) {
-  const inviter = actorTitle(invite.inviter_name, invite.inviter_username, invite.inviter_handle);
+  const inviter = actorTitle(invite.inviter_name, invite.inviter_username, invite.inviter_handle, labels.unknownActor);
 
   return (
     <div className="grid gap-3 p-4 lg:grid-cols-[1fr_auto] lg:items-center">
@@ -65,7 +75,7 @@ function InviteRow({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-medium text-zinc-950">{invite.project_name}</span>
-            <InviteStatusBadge status={invite.status} />
+            <InviteStatusBadge status={invite.status} label={labels.status} />
           </div>
           <div className="mt-1 truncate text-sm text-zinc-500">{invite.project_handle}</div>
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500">
@@ -73,7 +83,9 @@ function InviteRow({
               <Mail size={12} />
               {inviter}
             </span>
-            <span>{invite.role_name || invite.role}</span>
+            <span>
+              {labels.role}: {invite.role_name || invite.role}
+            </span>
             <span>{relativeDate(invite.created_at)}</span>
           </div>
         </div>
@@ -84,11 +96,11 @@ function InviteRow({
           <>
             <Button tone="primary" disabled={pending} onClick={() => onAccept(invite.id)}>
               <CheckCircle2 size={16} />
-              Accept
+              {labels.accept}
             </Button>
             <Button tone="danger" disabled={pending} onClick={() => onReject(invite.id)}>
               <XCircle size={16} />
-              Reject
+              {labels.reject}
             </Button>
           </>
         ) : null}
@@ -97,7 +109,7 @@ function InviteRow({
             className="focus-ring inline-flex h-9 items-center justify-center gap-2 rounded-full border border-zinc-200 bg-white px-4 text-sm font-medium text-zinc-800 shadow-sm transition hover:border-zinc-300 hover:bg-zinc-50"
             to={`/projects/${invite.project_id}`}
           >
-            Open
+            {labels.open}
             <ArrowRight size={16} />
           </Link>
         ) : null}
@@ -108,6 +120,7 @@ function InviteRow({
 
 export function InvitationsPage() {
   const queryClient = useQueryClient();
+  const { t } = useI18n();
   const [status, setStatus] = useState<InviteStatusFilter>("pending");
 
   const invites = useQuery({
@@ -126,18 +139,18 @@ export function InvitationsPage() {
     mutationFn: (inviteId: ID) => api.acceptInvite(inviteId),
     onSuccess: async () => {
       await refreshInvites();
-      toast.success("Invitation accepted");
+      toast.success(t("invitations.accepted"));
     },
-    onError: (error) => toast.error(errorMessage(error, "Could not accept invitation.")),
+    onError: (error) => toast.error(errorMessage(error, t("invitations.acceptFailed"))),
   });
 
   const rejectInvite = useMutation({
     mutationFn: (inviteId: ID) => api.rejectInvite(inviteId),
     onSuccess: async () => {
       await refreshInvites();
-      toast.success("Invitation rejected");
+      toast.success(t("invitations.rejected"));
     },
-    onError: (error) => toast.error(errorMessage(error, "Could not reject invitation.")),
+    onError: (error) => toast.error(errorMessage(error, t("invitations.rejectFailed"))),
   });
 
   const rows = invites.data || [];
@@ -150,19 +163,19 @@ export function InvitationsPage() {
           <div>
             <h1 className="flex items-center gap-2 text-2xl font-semibold text-zinc-950">
               <Mail size={24} />
-              Invitations
+              {t("invitations.title")}
             </h1>
             <div className="mt-2 flex flex-wrap gap-2 text-sm text-zinc-500">
               <span className="inline-flex items-center gap-1">
                 <Clock3 size={14} />
-                {status || "all"}
+                {status ? t(`status.${status}`) : t("common.all")}
               </span>
-              <span>{invites.isLoading ? "..." : `${rows.length} shown`}</span>
+              <span>{invites.isLoading ? "..." : t("common.shown", { count: rows.length })}</span>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2 text-sm sm:flex">
-            <InviteMetric label="Filter" value={status || "all"} />
-            <InviteMetric label="Rows" value={invites.isLoading ? "..." : rows.length} />
+            <InviteMetric label={t("common.filter")} value={status ? t(`status.${status}`) : t("common.all")} />
+            <InviteMetric label={t("common.rows")} value={invites.isLoading ? "..." : rows.length} />
           </div>
         </div>
 
@@ -177,23 +190,23 @@ export function InvitationsPage() {
                 }`}
                 onClick={() => setStatus(item)}
               >
-                {item || "all"}
+                {item ? t(`status.${item}`) : t("common.all")}
               </button>
             ))}
           </div>
           <Button onClick={() => invites.refetch()} disabled={invites.isFetching}>
             <RefreshCw size={16} />
-            Refresh
+            {t("actions.refresh")}
           </Button>
         </div>
       </Panel>
 
-      {invites.isLoading ? <LoadingState label="Loading invitations" /> : null}
+      {invites.isLoading ? <LoadingState label={t("invitations.loading")} /> : null}
       {invites.isError ? (
-        <ErrorState title="Could not load invitations" body={errorMessage(invites.error, "Invitation request failed.")} />
+        <ErrorState title={t("invitations.loadFailed")} body={errorMessage(invites.error, t("invitations.loadFailedBody"))} />
       ) : null}
       {!invites.isLoading && !invites.isError && rows.length === 0 ? (
-        <EmptyState icon={<Mail size={34} />} title="No invitations" body="Project invitations addressed to this account will appear here." />
+        <EmptyState icon={<Mail size={34} />} title={t("invitations.emptyTitle")} body={t("invitations.emptyBody")} />
       ) : null}
 
       {rows.length > 0 ? (
@@ -206,6 +219,14 @@ export function InvitationsPage() {
                 pending={pendingAction}
                 onAccept={acceptInvite.mutate}
                 onReject={rejectInvite.mutate}
+                labels={{
+                  accept: t("actions.accept"),
+                  reject: t("actions.reject"),
+                  open: t("actions.open"),
+                  role: t("invitations.role"),
+                  status: t(`status.${invite.status}`),
+                  unknownActor: t("invitations.unknownActor"),
+                }}
               />
             ))}
           </div>

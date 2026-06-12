@@ -3,10 +3,12 @@ import { ArrowRight, CheckCircle2 } from "lucide-react";
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { LanguageSwitcher } from "../components/LanguageSwitcher";
+import { Button, ErrorState, Panel, TextField } from "../components/ui";
 import { api, errorMessage } from "../lib/api";
+import { useI18n } from "../lib/i18n-context";
 import { sessionFromToken } from "../lib/jwt";
 import { useAuthStore } from "../store/auth";
-import { Button, ErrorState, Panel, TextField } from "../components/ui";
 
 function destinationFromLocation(state: unknown): string {
   if (
@@ -27,6 +29,7 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
   const navigate = useNavigate();
   const location = useLocation();
   const setSession = useAuthStore((state) => state.setSession);
+  const { t } = useI18n();
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -37,19 +40,19 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
     onSuccess: ({ token }) => {
       const user = sessionFromToken(token, email.trim());
       if (!user) {
-        setFormError("The server returned an invalid session token.");
+        setFormError(t("auth.invalidToken"));
         return;
       }
       setSession(token, user);
       navigate(destinationFromLocation(location.state), { replace: true });
     },
-    onError: (error) => setFormError(errorMessage(error, "Unable to sign in.")),
+    onError: (error) => setFormError(errorMessage(error, t("auth.loginFailed"))),
   });
 
   const register = useMutation({
     mutationFn: api.register,
     onSuccess: () => navigate("/login", { replace: true, state: { registered: true } }),
-    onError: (error) => setFormError(errorMessage(error, "Unable to create account.")),
+    onError: (error) => setFormError(errorMessage(error, t("auth.registerFailed"))),
   });
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -68,47 +71,54 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
     <main className="grid min-h-screen bg-zinc-100 lg:grid-cols-[1fr_460px]">
       <section className="hidden min-h-screen flex-col justify-between border-r border-zinc-200 bg-white p-10 lg:flex">
         <div>
-          <div className="text-sm font-semibold uppercase tracking-wide text-zinc-500">TaskFlow</div>
+          <div className="text-sm font-semibold uppercase tracking-wide text-zinc-500">{t("app.name")}</div>
           <h1 className="mt-5 max-w-2xl text-5xl font-semibold leading-tight text-zinc-950">
-            Practical project coordination for local teams and federated work.
+            {t("auth.heroTitle")}
           </h1>
         </div>
         <div className="grid max-w-2xl gap-3 text-sm text-zinc-600">
           <div className="flex items-center gap-2">
             <CheckCircle2 size={18} className="text-zinc-950" />
-            Project boards, ticket hierarchy, comments, and graph relationships.
+            {t("auth.heroBoards")}
           </div>
           <div className="flex items-center gap-2">
             <CheckCircle2 size={18} className="text-zinc-950" />
-            Built against the current backend API, not the old prototype.
+            {t("auth.heroApi")}
           </div>
         </div>
       </section>
 
-      <section className="flex min-h-screen items-center justify-center px-4 py-10">
+      <section className="flex min-h-screen flex-col items-center justify-center px-4 py-10">
+        <div className="mb-4 flex w-full max-w-md justify-end">
+          <LanguageSwitcher />
+        </div>
         <Panel className="w-full max-w-md p-6">
           <div className="mb-6">
-            <div className="text-sm font-semibold text-zinc-500">TaskFlow</div>
+            <div className="text-sm font-semibold text-zinc-500">{t("app.name")}</div>
             <h2 className="mt-2 text-2xl font-semibold text-zinc-950">
-              {mode === "login" ? "Sign in" : "Create account"}
+              {mode === "login" ? t("auth.loginTitle") : t("auth.registerTitle")}
             </h2>
             <p className="mt-1 text-sm text-zinc-500">
-              {mode === "login" ? "Open your workspace." : "Create a regular account."}
+              {mode === "login" ? t("auth.loginSubtitle") : t("auth.registerSubtitle")}
             </p>
           </div>
 
           {location.state && mode === "login" && destinationFromLocation(location.state) === "/projects" ? (
             <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-              Account created. Sign in to continue.
+              {t("auth.accountCreated")}
             </div>
           ) : null}
 
-          {formError ? <div className="mb-4"><ErrorState title="Request failed" body={formError} /></div> : null}
+          {formError ? (
+            <div className="mb-4">
+              <ErrorState title={t("common.requestFailed")} body={formError} />
+            </div>
+          ) : null}
 
           <form className="grid gap-4" onSubmit={submit}>
             {mode === "register" ? (
               <TextField
-                label="Username"
+                label={t("auth.username")}
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
                 autoComplete="username"
@@ -117,7 +127,7 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
               />
             ) : null}
             <TextField
-              label="Email"
+              label={t("auth.email")}
               type="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
@@ -125,7 +135,7 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
               required
             />
             <TextField
-              label="Password"
+              label={t("auth.password")}
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
@@ -134,7 +144,7 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
               minLength={6}
             />
             <Button type="submit" tone="primary" className="w-full" disabled={pending}>
-              {pending ? "Working..." : mode === "login" ? "Sign in" : "Create account"}
+              {pending ? t("common.working") : mode === "login" ? t("actions.signIn") : t("actions.createAccount")}
               <ArrowRight size={16} />
             </Button>
           </form>
@@ -142,21 +152,27 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
           <div className="mt-5 text-center text-sm text-zinc-500">
             {mode === "login" ? (
               <>
-                Need an account?{" "}
+                {t("auth.needAccount")}{" "}
                 <Link className="font-medium text-zinc-950 underline-offset-4 hover:underline" to="/register">
-                  Register
+                  {t("actions.register")}
                 </Link>
               </>
             ) : (
               <>
-                Already registered?{" "}
+                {t("auth.alreadyRegistered")}{" "}
                 <Link className="font-medium text-zinc-950 underline-offset-4 hover:underline" to="/login">
-                  Sign in
+                  {t("actions.signIn")}
                 </Link>
               </>
             )}
           </div>
         </Panel>
+        <div className="mt-4 flex w-full max-w-md flex-wrap items-center justify-between gap-2 px-1 text-xs text-zinc-500">
+          <Link className="hover:text-zinc-950 hover:underline" to="/terms">
+            {t("legal.link")}
+          </Link>
+          <span>{t("app.copyright")}</span>
+        </div>
       </section>
     </main>
   );

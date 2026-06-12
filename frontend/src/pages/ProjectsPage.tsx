@@ -5,12 +5,14 @@ import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, errorMessage } from "../lib/api";
 import { relativeDate } from "../lib/format";
+import { useI18n } from "../lib/i18n-context";
 import { queryKeys } from "../lib/queryKeys";
 import { Button, EmptyState, ErrorState, LoadingState, Modal, Panel, TextAreaField, TextField } from "../components/ui";
 
 export function ProjectsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { t } = useI18n();
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -41,38 +43,38 @@ export function ProjectsPage() {
       <div className="flex flex-col gap-4 rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm md:flex-row md:items-center md:justify-between">
         <div>
           <div className="mb-2 inline-flex rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-medium text-zinc-500">
-            Workspace overview
+            {t("projects.badge")}
           </div>
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">Projects</h1>
-          <p className="mt-1 text-sm text-zinc-500">Create workspaces and jump into active boards.</p>
+          <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">{t("projects.title")}</h1>
+          <p className="mt-1 text-sm text-zinc-500">{t("projects.subtitle")}</p>
         </div>
         <div className="flex gap-2">
           <Button onClick={() => projects.refetch()} disabled={projects.isFetching}>
             <RefreshCw size={16} />
-            Refresh
+            {t("actions.refresh")}
           </Button>
           <Button tone="primary" onClick={() => setCreateOpen(true)}>
             <Plus size={16} />
-            Project
+            {t("projects.project")}
           </Button>
         </div>
       </div>
 
-      {projects.isLoading ? <LoadingState label="Loading projects" /> : null}
+      {projects.isLoading ? <LoadingState label={t("projects.loading")} /> : null}
 
       {projects.isError ? (
-        <ErrorState title="Could not load projects" body={errorMessage(projects.error, "Project list request failed.")} />
+        <ErrorState title={t("projects.loadFailed")} body={errorMessage(projects.error, t("projects.loadFailedBody"))} />
       ) : null}
 
       {projects.data && projects.data.length === 0 ? (
         <EmptyState
           icon={<FolderKanban size={36} />}
-          title="No projects yet"
-          body="Create the first project and start shaping the board around real backend data."
+          title={t("projects.emptyTitle")}
+          body={t("projects.emptyBody")}
           action={
             <Button tone="primary" onClick={() => setCreateOpen(true)}>
               <Plus size={16} />
-              Create project
+              {t("projects.createProject")}
             </Button>
           }
         />
@@ -93,7 +95,7 @@ export function ProjectsPage() {
                       <ArrowUpRight size={16} className="mt-0.5 shrink-0 text-zinc-300 transition group-hover:text-zinc-950" />
                     </div>
                     <p className="mt-1 line-clamp-2 min-h-10 text-sm text-zinc-500">
-                      {project.description || "No description"}
+                      {project.description || t("common.noDescription")}
                     </p>
                   </div>
                 </div>
@@ -109,29 +111,29 @@ export function ProjectsPage() {
 
       <Modal
         open={createOpen}
-        title="Create Project"
+        title={t("projects.createTitle")}
         onClose={() => setCreateOpen(false)}
         formId="create-project"
         onSubmit={submit}
         footer={
           <>
-            <Button onClick={() => setCreateOpen(false)}>Cancel</Button>
+            <Button onClick={() => setCreateOpen(false)}>{t("actions.cancel")}</Button>
             <Button type="submit" form="create-project" tone="primary" disabled={createProject.isPending || !name.trim()}>
-              Create
+              {t("actions.create")}
             </Button>
           </>
         }
       >
         <div className="grid gap-4">
           {createProject.isError ? (
-            <ErrorState title="Could not create project" body={errorMessage(createProject.error, "Project creation failed.")} />
+            <ErrorState title={t("projects.createFailed")} body={errorMessage(createProject.error, t("projects.createFailedBody"))} />
           ) : null}
-          <TextField label="Name" value={name} onChange={(event) => setName(event.target.value)} required />
+          <TextField label={t("projects.name")} value={name} onChange={(event) => setName(event.target.value)} required />
           <TextAreaField
-            label="Description"
+            label={t("projects.description")}
             value={description}
             onChange={(event) => setDescription(event.target.value)}
-            placeholder="What this project is responsible for"
+            placeholder={t("projects.descriptionPlaceholder")}
           />
         </div>
       </Modal>

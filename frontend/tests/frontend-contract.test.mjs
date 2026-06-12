@@ -70,3 +70,15 @@ test("api client covers current backend feature routes", () => {
     assert.ok(api.includes(fragment), `${fragment} is not wired in api.ts`);
   }
 });
+
+test("frontend exposes bilingual locale dictionaries and copyright notice", () => {
+  const app = read("src/App.tsx");
+  const i18n = read("src/lib/i18n-messages.ts");
+  const combined = `${app}\n${i18n}`;
+
+  assert.ok(app.includes("I18nProvider"), "App must mount the locale provider");
+  assert.ok(i18n.includes('supportedLocales = ["en", "uk"]'), "English and Ukrainian locales must be supported");
+  assert.ok(combined.includes("Sviatoslav Antonov"), "English copyright owner name is missing");
+  assert.ok(combined.includes("Святослав Антонов"), "Ukrainian copyright owner name is missing");
+  assert.ok(i18n.includes("Умови використання"), "Ukrainian legal copy is missing");
+});

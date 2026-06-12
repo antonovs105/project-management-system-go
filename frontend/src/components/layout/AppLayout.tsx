@@ -15,8 +15,10 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
+import { LanguageSwitcher } from "../../components/LanguageSwitcher";
 import { api } from "../../lib/api";
 import { initials } from "../../lib/format";
+import { useI18n } from "../../lib/i18n-context";
 import { queryKeys } from "../../lib/queryKeys";
 import { useAuthStore } from "../../store/auth";
 import { IconButton } from "../ui";
@@ -32,6 +34,7 @@ export function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
+  const { t } = useI18n();
   const canUseAdmin = user?.instanceRole === "owner" || user?.instanceRole === "admin";
 
   const { data: projects = [] } = useQuery({
@@ -46,9 +49,9 @@ export function AppLayout() {
           <span className="flex h-8 w-8 items-center justify-center rounded-2xl bg-zinc-950 text-white">
             <CircleDot size={17} />
           </span>
-          TaskFlow
+          {t("app.name")}
         </Link>
-        <IconButton label="Close navigation" className="md:hidden" onClick={() => setSidebarOpen(false)}>
+        <IconButton label={t("nav.close")} className="md:hidden" onClick={() => setSidebarOpen(false)}>
           <X size={18} />
         </IconButton>
       </div>
@@ -57,29 +60,29 @@ export function AppLayout() {
         <div className="space-y-1">
           <NavLink to="/projects" className={({ isActive }) => navClass(isActive)} onClick={() => setSidebarOpen(false)}>
             <LayoutDashboard size={18} />
-            Projects
+            {t("nav.projects")}
           </NavLink>
           <NavLink to="/invitations" className={({ isActive }) => navClass(isActive)} onClick={() => setSidebarOpen(false)}>
             <Inbox size={18} />
-            Invitations
+            {t("nav.invitations")}
           </NavLink>
           <NavLink to="/federation" className={({ isActive }) => navClass(isActive)} onClick={() => setSidebarOpen(false)}>
             <RadioTower size={18} />
-            Federation
+            {t("nav.federation")}
           </NavLink>
           <NavLink to="/account" className={({ isActive }) => navClass(isActive)} onClick={() => setSidebarOpen(false)}>
             <KeyRound size={18} />
-            Account
+            {t("nav.account")}
           </NavLink>
         </div>
 
         {canUseAdmin ? (
           <div>
-            <div className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">Administration</div>
+            <div className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">{t("nav.administration")}</div>
             <div className="space-y-1">
               <NavLink to="/admin/users" className={({ isActive }) => navClass(isActive)} onClick={() => setSidebarOpen(false)}>
                 <Users size={18} />
-                Users
+                {t("nav.users")}
               </NavLink>
               <NavLink
                 to="/admin/federation"
@@ -87,22 +90,22 @@ export function AppLayout() {
                 onClick={() => setSidebarOpen(false)}
               >
                 <RadioTower size={18} />
-                Federation
+                {t("nav.federation")}
               </NavLink>
               <NavLink to="/admin/audit" className={({ isActive }) => navClass(isActive)} onClick={() => setSidebarOpen(false)}>
                 <ScrollText size={18} />
-                Audit
+                {t("nav.audit")}
               </NavLink>
             </div>
           </div>
         ) : null}
 
         <div>
-          <div className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">Open Projects</div>
+          <div className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">{t("nav.openProjects")}</div>
           <div className="space-y-1">
             {projects.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-zinc-200 px-3 py-4 text-sm text-zinc-400">
-                No projects yet
+                {t("nav.noProjects")}
               </div>
             ) : null}
             {projects.map((project) => (
@@ -126,15 +129,21 @@ export function AppLayout() {
             {initials(user?.email || user?.userId)}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium text-zinc-950">{user?.email || "Signed in"}</div>
+            <div className="truncate text-sm font-medium text-zinc-950">{user?.email || t("common.signedIn")}</div>
             <div className="flex items-center gap-1 text-xs text-zinc-500">
               <Shield size={12} />
-              {user?.instanceRole || "user"}
+              {user?.instanceRole || t("common.user")}
             </div>
           </div>
-          <IconButton label="Log out" onClick={logout}>
+          <IconButton label={t("layout.logout")} onClick={logout}>
             <LogOut size={18} />
           </IconButton>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-zinc-500">
+          <Link className="hover:text-zinc-950 hover:underline" to="/terms">
+            {t("legal.link")}
+          </Link>
+          <span>{t("app.copyright")}</span>
         </div>
       </div>
     </aside>
@@ -148,7 +157,7 @@ export function AppLayout() {
         <div className="fixed inset-0 z-40 md:hidden">
           <button
             type="button"
-            aria-label="Close navigation overlay"
+            aria-label={t("nav.close")}
             className="absolute inset-0 bg-zinc-950/40 backdrop-blur-sm"
             onClick={() => setSidebarOpen(false)}
           />
@@ -159,13 +168,16 @@ export function AppLayout() {
       <div className="md:pl-72">
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-zinc-200 bg-white/80 px-4 backdrop-blur md:px-6">
           <div className="flex items-center gap-3">
-            <IconButton label="Open navigation" className="md:hidden" onClick={() => setSidebarOpen(true)}>
+            <IconButton label={t("nav.open")} className="md:hidden" onClick={() => setSidebarOpen(true)}>
               <Menu size={18} />
             </IconButton>
-            <span className="text-sm font-medium text-zinc-500">Workspace</span>
+            <span className="text-sm font-medium text-zinc-500">{t("layout.workspace")}</span>
           </div>
-          <div className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-500 shadow-sm">
-            {user?.userId.slice(0, 8)}
+          <div className="flex items-center gap-2">
+            <LanguageSwitcher />
+            <div className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-500 shadow-sm">
+              {user?.userId.slice(0, 8)}
+            </div>
           </div>
         </header>
 
