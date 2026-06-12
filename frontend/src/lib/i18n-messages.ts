@@ -2,7 +2,7 @@ export const supportedLocales = ["en", "uk"] as const;
 export type Locale = (typeof supportedLocales)[number];
 
 const en = {
-  "app.name": "TaskFlow",
+  "app.name": "Progo",
   "app.copyright": "© 2026 Sviatoslav Antonov / Святослав Антонов",
   "language.label": "Language",
   "language.english": "English",
@@ -42,7 +42,6 @@ const en = {
   "layout.logout": "Log out",
   "auth.heroTitle": "Practical project coordination for local teams and federated work.",
   "auth.heroBoards": "Project boards, ticket hierarchy, comments, and graph relationships.",
-  "auth.heroApi": "Built against the current backend API, not the old prototype.",
   "auth.loginTitle": "Sign in",
   "auth.registerTitle": "Create account",
   "auth.loginSubtitle": "Open your workspace.",
@@ -126,7 +125,7 @@ const en = {
 } as const;
 
 const uk: Record<keyof typeof en, string> = {
-  "app.name": "TaskFlow",
+  "app.name": "Progo",
   "app.copyright": "© 2026 Sviatoslav Antonov / Святослав Антонов",
   "language.label": "Мова",
   "language.english": "English",
@@ -166,7 +165,6 @@ const uk: Record<keyof typeof en, string> = {
   "layout.logout": "Вийти",
   "auth.heroTitle": "Практична координація проєктів для локальних команд і федеративної роботи.",
   "auth.heroBoards": "Дошки проєктів, ієрархія задач, коментарі та граф зв'язків.",
-  "auth.heroApi": "Працює з поточним backend API, а не зі старим прототипом.",
   "auth.loginTitle": "Увійти",
   "auth.registerTitle": "Створити обліковий запис",
   "auth.loginSubtitle": "Відкрийте свою робочу область.",

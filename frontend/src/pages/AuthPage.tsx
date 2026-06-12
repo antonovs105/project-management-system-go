@@ -81,10 +81,6 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
             <CheckCircle2 size={18} className="text-zinc-950" />
             {t("auth.heroBoards")}
           </div>
-          <div className="flex items-center gap-2">
-            <CheckCircle2 size={18} className="text-zinc-950" />
-            {t("auth.heroApi")}
-          </div>
         </div>
       </section>
 
