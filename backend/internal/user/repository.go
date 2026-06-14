@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/antonovs105/project-management-system-go/internal/adminaudit"
@@ -14,9 +15,14 @@ import (
 // Repository defines persistence operations for local users and account metadata.
 type Repository interface {
 	CreateUser(ctx context.Context, user *User) error
+	CreateUserWithOAuthIdentity(ctx context.Context, user *User, identity *OAuthIdentity) error
 	CreateAdminIfNoAdmin(ctx context.Context, user *User) error
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
 	GetUserByID(ctx context.Context, userID string) (*User, error)
+	GetOAuthIdentity(ctx context.Context, provider, subject string) (*OAuthIdentity, error)
+	UpdateOAuthIdentity(ctx context.Context, identity *OAuthIdentity) error
+	CreateOAuthLoginCode(ctx context.Context, userID, codeHash string, expiresAt time.Time) error
+	ConsumeOAuthLoginCode(ctx context.Context, codeHash string, now time.Time) (*User, error)
 	UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error
 	TokenVersion(ctx context.Context, userID string) (int, error)
 	InstanceRole(ctx context.Context, userID string) (string, error)
@@ -49,6 +55,11 @@ func (r *PgRepository) CreateUser(ctx context.Context, user *User) error {
 	return r.createUserInTx(ctx, user, nil)
 }
 
+// CreateUserWithOAuthIdentity stores a regular user and links an OAuth identity atomically.
+func (r *PgRepository) CreateUserWithOAuthIdentity(ctx context.Context, user *User, identity *OAuthIdentity) error {
+	return r.createUserInTx(ctx, user, nil, identity)
+}
+
 // CreateAdminIfNoAdmin stores the first owner when no owner currently exists.
 func (r *PgRepository) CreateAdminIfNoAdmin(ctx context.Context, user *User) error {
 	return r.createUserInTx(ctx, user, func(tx *sqlx.Tx) error {
@@ -68,7 +79,7 @@ func (r *PgRepository) CreateAdminIfNoAdmin(ctx context.Context, user *User) err
 }
 
 // createUserInTx runs the optional guard and inserts the full user actor graph atomically.
-func (r *PgRepository) createUserInTx(ctx context.Context, user *User, beforeInsert func(*sqlx.Tx) error) error {
+func (r *PgRepository) createUserInTx(ctx context.Context, user *User, beforeInsert func(*sqlx.Tx) error, identities ...*OAuthIdentity) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
@@ -82,6 +93,15 @@ func (r *PgRepository) createUserInTx(ctx context.Context, user *User, beforeIns
 	}
 	if err := r.insertUserGraph(ctx, tx, user); err != nil {
 		return err
+	}
+	for _, identity := range identities {
+		if identity == nil {
+			continue
+		}
+		identity.UserID = user.ID
+		if err := insertOAuthIdentity(ctx, tx, identity); err != nil {
+			return err
+		}
 	}
 
 	return tx.Commit()
@@ -205,6 +225,84 @@ func (r *PgRepository) GetUserByID(ctx context.Context, userID string) (*User, e
 	return &user, nil
 }
 
+// GetOAuthIdentity finds a linked provider account.
+func (r *PgRepository) GetOAuthIdentity(ctx context.Context, provider, subject string) (*OAuthIdentity, error) {
+	var identity OAuthIdentity
+	if err := r.db.GetContext(ctx, &identity, `
+		SELECT
+			id::text,
+			user_id::text,
+			provider,
+			provider_subject,
+			email,
+			email_verified,
+			display_name,
+			avatar_url,
+			created_at,
+			updated_at
+		FROM oauth_identities
+		WHERE provider = $1 AND provider_subject = $2
+	`, provider, subject); err != nil {
+		return nil, err
+	}
+	return &identity, nil
+}
+
+// UpdateOAuthIdentity refreshes provider metadata for an existing link.
+func (r *PgRepository) UpdateOAuthIdentity(ctx context.Context, identity *OAuthIdentity) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE oauth_identities
+		SET email = $3,
+			email_verified = $4,
+			display_name = $5,
+			avatar_url = $6,
+			updated_at = now()
+		WHERE provider = $1 AND provider_subject = $2
+	`, identity.Provider, identity.ProviderSubject, identity.Email, identity.EmailVerified, identity.DisplayName, identity.AvatarURL)
+	return err
+}
+
+// CreateOAuthLoginCode stores a short-lived one-time frontend exchange code.
+func (r *PgRepository) CreateOAuthLoginCode(ctx context.Context, userID, codeHash string, expiresAt time.Time) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO oauth_login_codes (user_id, code_hash, expires_at)
+		VALUES ($1, $2, $3)
+	`, userID, codeHash, expiresAt)
+	return err
+}
+
+// ConsumeOAuthLoginCode marks a one-time code used and returns the linked user.
+func (r *PgRepository) ConsumeOAuthLoginCode(ctx context.Context, codeHash string, now time.Time) (*User, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var userID string
+	if err := tx.GetContext(ctx, &userID, `
+		UPDATE oauth_login_codes
+		SET used_at = $2
+		WHERE code_hash = $1
+			AND used_at IS NULL
+			AND expires_at > $2
+		RETURNING user_id::text
+	`, codeHash, now); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrOAuthInvalidCode
+		}
+		return nil, err
+	}
+	user, err := loadUserByID(ctx, tx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
 // UpdatePasswordHash changes a user's password hash and bumps token invalidation state.
 func (r *PgRepository) UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error {
 	result, err := r.db.ExecContext(ctx, `
@@ -222,6 +320,21 @@ func (r *PgRepository) UpdatePasswordHash(ctx context.Context, userID, passwordH
 	}
 	if affected == 0 {
 		return ErrUserNotFound
+	}
+	return nil
+}
+
+// insertOAuthIdentity stores a provider identity link inside an existing transaction.
+func insertOAuthIdentity(ctx context.Context, tx *sqlx.Tx, identity *OAuthIdentity) error {
+	if _, err := tx.NamedExecContext(ctx, `
+		INSERT INTO oauth_identities (
+			user_id, provider, provider_subject, email, email_verified, display_name, avatar_url
+		)
+		VALUES (
+			:user_id, :provider, :provider_subject, :email, :email_verified, :display_name, :avatar_url
+		)
+	`, identity); err != nil {
+		return err
 	}
 	return nil
 }

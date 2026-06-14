@@ -99,6 +99,86 @@ paths:
                     type: string
         "401":
           $ref: "#/components/responses/Error"
+  /auth/oauth/providers:
+    get:
+      tags: [Auth]
+      operationId: listOAuthProviders
+      responses:
+        "200":
+          description: Optional OAuth providers configured for this instance.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [providers]
+                properties:
+                  providers:
+                    type: array
+                    items:
+                      type: string
+                      enum: [google, github]
+  /auth/{provider}/start:
+    parameters:
+      - name: provider
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [google, github]
+    get:
+      tags: [Auth]
+      operationId: startOAuthLogin
+      responses:
+        "302":
+          description: Redirect to the provider authorization URL.
+        "404":
+          $ref: "#/components/responses/Error"
+  /auth/{provider}/callback:
+    parameters:
+      - name: provider
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [google, github]
+    get:
+      tags: [Auth]
+      operationId: completeOAuthProviderCallback
+      parameters:
+        - name: code
+          in: query
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+        - name: error
+          in: query
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Redirect to the frontend OAuth callback with a one-time code or safe error code.
+  /auth/oauth/exchange:
+    post:
+      tags: [Auth]
+      operationId: exchangeOAuthLoginCode
+      requestBody:
+        $ref: "#/components/requestBodies/ExchangeOAuthCode"
+      responses:
+        "200":
+          description: JWT issued after consuming a one-time OAuth code.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token]
+                properties:
+                  token:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Error"
   /api/me:
     get:
       tags: [Auth]
@@ -1584,6 +1664,16 @@ components:
               password:
                 type: string
                 format: password
+    ExchangeOAuthCode:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [code]
+            properties:
+              code:
+                type: string
     RegisterUser:
       required: true
       content:

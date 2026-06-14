@@ -12,6 +12,7 @@ import { AuthPage } from "./pages/AuthPage";
 import { FederationPage } from "./pages/FederationPage";
 import { InvitationsPage } from "./pages/InvitationsPage";
 import { LegalPage } from "./pages/LegalPage";
+import { OAuthCallbackPage } from "./pages/OAuthCallbackPage";
 import { ProjectWorkspace } from "./pages/ProjectWorkspace";
 import { ProjectsPage } from "./pages/ProjectsPage";
 
@@ -33,6 +34,7 @@ export function App() {
           <Routes>
             <Route path="/login" element={<AuthPage mode="login" />} />
             <Route path="/register" element={<AuthPage mode="register" />} />
+            <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
             <Route path="/terms" element={<LegalPage />} />
 
             <Route element={<ProtectedRoute />}>

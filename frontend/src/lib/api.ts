@@ -18,6 +18,7 @@ import type {
   GraphData,
   ID,
   InstanceRole,
+  OAuthProvider,
   Project,
   ProjectDelivery,
   ProjectDeliverySummary,
@@ -191,12 +192,16 @@ export interface RemoteActorFilters {
   limit?: number;
 }
 
-interface LoginResponse {
+export interface LoginResponse {
   token: string;
 }
 
 interface ProfileResponse {
   user_id: ID;
+}
+
+interface OAuthProvidersResponse {
+  providers?: OAuthProvider[];
 }
 
 interface ErrorResponse {
@@ -218,9 +223,28 @@ export function errorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+function isOAuthProvider(value: string): value is OAuthProvider {
+  return value === "google" || value === "github";
+}
+
+export function oauthStartURL(provider: OAuthProvider): string {
+  const trimmedBase = apiBaseURL.replace(/\/$/, "");
+  return `${trimmedBase}/auth/${provider}/start`;
+}
+
 export const api = {
   async login(payload: LoginPayload): Promise<LoginResponse> {
     const { data } = await http.post<LoginResponse>("/login", payload);
+    return data;
+  },
+
+  async listOAuthProviders(): Promise<OAuthProvider[]> {
+    const { data } = await http.get<OAuthProvidersResponse>("/auth/oauth/providers");
+    return asArray(data.providers).filter(isOAuthProvider);
+  },
+
+  async exchangeOAuthCode(code: string): Promise<LoginResponse> {
+    const { data } = await http.post<LoginResponse>("/auth/oauth/exchange", { code });
     return data;
   },
 

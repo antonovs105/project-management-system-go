@@ -44,6 +44,9 @@ test("api client covers current backend feature routes", () => {
   const api = read("src/lib/api.ts");
   const requiredFragments = [
     "/me/password",
+    "/auth/oauth/providers",
+    "/auth/oauth/exchange",
+    "/auth/${provider}/start",
     "/me/invites",
     "/admin/users",
     "/admin/audit-events",

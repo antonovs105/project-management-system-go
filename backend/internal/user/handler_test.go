@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/labstack/echo/v4"
@@ -117,6 +118,35 @@ func TestHandler_ChangePassword(t *testing.T) {
 		require.Equal(t, http.StatusUnauthorized, rec.Code)
 		repo.AssertExpectations(t)
 	})
+}
+
+func TestHandler_OAuthStateCookie(t *testing.T) {
+	state := "signed-state"
+	authURL := "https://accounts.example/oauth?client_id=client&state=" + state
+
+	extracted, err := oauthStateFromAuthURL(authURL)
+	require.NoError(t, err)
+	assert.Equal(t, state, extracted)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/auth/google/start", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	setOAuthStateCookie(c, state, 10*time.Minute)
+
+	cookies := rec.Result().Cookies()
+	require.Len(t, cookies, 1)
+	assert.Equal(t, oauthStateCookieName, cookies[0].Name)
+	assert.True(t, cookies[0].HttpOnly)
+	assert.Equal(t, http.SameSiteLaxMode, cookies[0].SameSite)
+
+	callbackReq := httptest.NewRequest(http.MethodGet, "/auth/google/callback?state="+state, nil)
+	callbackReq.AddCookie(cookies[0])
+	callbackCtx := e.NewContext(callbackReq, httptest.NewRecorder())
+
+	assert.True(t, validOAuthStateCookie(callbackCtx, state))
+	assert.False(t, validOAuthStateCookie(callbackCtx, "other-state"))
 }
 
 func newAdminUserEcho(repo Repository, userID string) *echo.Echo {

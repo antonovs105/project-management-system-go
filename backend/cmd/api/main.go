@@ -112,6 +112,8 @@ var requiredDatabaseTables = []string{
 	"actor_inbox_items",
 	"actor_outbox_items",
 	"activity_deliveries",
+	"oauth_identities",
+	"oauth_login_codes",
 }
 
 // appRole selects which server responsibilities this process owns.
@@ -399,7 +401,19 @@ func main() {
 	log.Println("DB connection successful")
 
 	userRepo := user.NewRepository(db, apConfig, privateKeyCodec)
-	userService := user.NewService(userRepo, []byte(jwtSecret), apConfig)
+	userService := user.NewService(userRepo, []byte(jwtSecret), apConfig, user.WithOAuthConfig(user.OAuthConfig{
+		FrontendCallbackURL: strings.TrimSpace(os.Getenv("OAUTH_FRONTEND_CALLBACK_URL")),
+		Google: user.OAuthProviderConfig{
+			ClientID:     strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_CLIENT_ID")),
+			ClientSecret: strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_CLIENT_SECRET")),
+			RedirectURL:  strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_REDIRECT_URL")),
+		},
+		GitHub: user.OAuthProviderConfig{
+			ClientID:     strings.TrimSpace(os.Getenv("GITHUB_OAUTH_CLIENT_ID")),
+			ClientSecret: strings.TrimSpace(os.Getenv("GITHUB_OAUTH_CLIENT_SECRET")),
+			RedirectURL:  strings.TrimSpace(os.Getenv("GITHUB_OAUTH_REDIRECT_URL")),
+		},
+	}))
 	userHandler := user.NewHandler(userService)
 
 	projectRepo := project.NewRepository(db, apConfig, privateKeyCodec)

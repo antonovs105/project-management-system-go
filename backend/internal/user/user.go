@@ -20,6 +20,20 @@ type User struct {
 	UpdatedAt     time.Time `db:"updated_at" json:"updated_at"`
 }
 
+// OAuthIdentity links a provider account to a local user.
+type OAuthIdentity struct {
+	ID              string    `db:"id" json:"id"`
+	UserID          string    `db:"user_id" json:"user_id"`
+	Provider        string    `db:"provider" json:"provider"`
+	ProviderSubject string    `db:"provider_subject" json:"provider_subject"`
+	Email           string    `db:"email" json:"email"`
+	EmailVerified   bool      `db:"email_verified" json:"email_verified"`
+	DisplayName     string    `db:"display_name" json:"display_name"`
+	AvatarURL       string    `db:"avatar_url" json:"avatar_url"`
+	CreatedAt       time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt       time.Time `db:"updated_at" json:"updated_at"`
+}
+
 // ListUsersOptions contains admin filters and pagination for local user listing.
 type ListUsersOptions struct {
 	InstanceRole string

@@ -1,6 +1,7 @@
 export type ID = string;
 
 export type InstanceRole = "owner" | "admin" | "user";
+export type OAuthProvider = "google" | "github";
 export type ProjectRoleKey = string;
 export type ProjectPermission =
   | "project.read"

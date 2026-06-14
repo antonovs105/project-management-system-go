@@ -2,8 +2,11 @@ package user
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"net/url"
 	"testing"
+	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/golang-jwt/jwt/v5"
@@ -339,6 +342,124 @@ func TestService_Login(t *testing.T) {
 		assert.Equal(t, "invalid credentials", err.Error())
 		mockRepo.AssertExpectations(t)
 	})
+}
+
+func TestService_OAuthProvidersAndStartURL(t *testing.T) {
+	service := NewService(new(MockRepository), []byte("secret"), activitypub.NewConfig("http://localhost:8080", "localhost:8080"), WithOAuthConfig(OAuthConfig{
+		Google: OAuthProviderConfig{
+			ClientID:     "google-client",
+			ClientSecret: "google-secret",
+			RedirectURL:  "http://localhost:8080/auth/google/callback",
+		},
+		GitHub: OAuthProviderConfig{
+			ClientID:     "github-client",
+			ClientSecret: "github-secret",
+			RedirectURL:  "http://localhost:8080/auth/github/callback",
+		},
+	}))
+
+	assert.Equal(t, []string{OAuthProviderGoogle, OAuthProviderGitHub}, service.EnabledOAuthProviders())
+	authURL, err := service.OAuthStartURL(OAuthProviderGoogle)
+
+	assert.NoError(t, err)
+	parsed, err := url.Parse(authURL)
+	assert.NoError(t, err)
+	assert.Equal(t, "accounts.google.com", parsed.Host)
+	assert.Equal(t, "google-client", parsed.Query().Get("client_id"))
+	assert.Equal(t, "openid email profile", parsed.Query().Get("scope"))
+	assert.NotEmpty(t, parsed.Query().Get("state"))
+}
+
+func TestService_OAuthUserForProfile(t *testing.T) {
+	ctx := context.Background()
+	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+	profile := OAuthProfile{
+		Provider:      OAuthProviderGoogle,
+		Subject:       "123456789",
+		Email:         " OAuthUser@Example.COM ",
+		EmailVerified: true,
+		DisplayName:   "OAuth User",
+		AvatarURL:     "https://example.com/avatar.png",
+	}
+
+	t.Run("CreatesLocalUserWhenIdentityAndEmailAreNew", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, []byte("secret"), cfg)
+		mockRepo.On("GetOAuthIdentity", ctx, OAuthProviderGoogle, "123456789").Return(nil, sql.ErrNoRows).Once()
+		mockRepo.On("GetUserByEmail", ctx, "oauthuser@example.com").Return(nil, sql.ErrNoRows).Once()
+		mockRepo.On("CreateUserWithOAuthIdentity", ctx, mock.MatchedBy(func(created *User) bool {
+			return created.Username == "google_123456789" &&
+				created.Email == "oauthuser@example.com" &&
+				created.InstanceRole == InstanceRoleUser &&
+				created.Name == "OAuth User" &&
+				created.PasswordHash != ""
+		}), mock.MatchedBy(func(identity *OAuthIdentity) bool {
+			return identity.Provider == OAuthProviderGoogle &&
+				identity.ProviderSubject == "123456789" &&
+				identity.Email == "oauthuser@example.com" &&
+				identity.EmailVerified &&
+				identity.DisplayName == "OAuth User" &&
+				identity.AvatarURL == "https://example.com/avatar.png"
+		})).Return(nil).Once()
+
+		created, err := service.userForOAuthProfile(ctx, profile)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, created)
+		assert.Empty(t, created.PasswordHash)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("RejectsUnlinkedExistingEmail", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, []byte("secret"), cfg)
+		mockRepo.On("GetOAuthIdentity", ctx, OAuthProviderGoogle, "123456789").Return(nil, sql.ErrNoRows).Once()
+		mockRepo.On("GetUserByEmail", ctx, "oauthuser@example.com").Return(&User{ID: "existing"}, nil).Once()
+
+		user, err := service.userForOAuthProfile(ctx, profile)
+
+		assert.ErrorIs(t, err, ErrOAuthEmailAlreadyRegistered)
+		assert.Nil(t, user)
+		mockRepo.AssertNotCalled(t, "CreateUserWithOAuthIdentity")
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("UsesExistingIdentity", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, []byte("secret"), cfg)
+		identity := &OAuthIdentity{UserID: "11111111-1111-4111-8111-111111111111", Provider: OAuthProviderGoogle, ProviderSubject: "123456789"}
+		expected := &User{ID: identity.UserID, InstanceRole: InstanceRoleUser, TokenVersion: 2}
+		mockRepo.On("GetOAuthIdentity", ctx, OAuthProviderGoogle, "123456789").Return(identity, nil).Once()
+		mockRepo.On("UpdateOAuthIdentity", ctx, mock.MatchedBy(func(updated *OAuthIdentity) bool {
+			return updated.Email == "oauthuser@example.com" && updated.EmailVerified
+		})).Return(nil).Once()
+		mockRepo.On("GetUserByID", ctx, identity.UserID).Return(expected, nil).Once()
+
+		user, err := service.userForOAuthProfile(ctx, profile)
+
+		assert.NoError(t, err)
+		assert.Equal(t, expected, user)
+		mockRepo.AssertExpectations(t)
+	})
+}
+
+func TestService_ExchangeOAuthLoginCode(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	service := NewService(mockRepo, []byte("secret"), activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+	user := &User{ID: "11111111-1111-4111-8111-111111111111", InstanceRole: InstanceRoleUser, TokenVersion: 4}
+	mockRepo.On("ConsumeOAuthLoginCode", ctx, hashOAuthCode("front-code"), mock.MatchedBy(func(now time.Time) bool {
+		return !now.IsZero()
+	})).Return(user, nil).Once()
+
+	token, err := service.ExchangeOAuthLoginCode(ctx, " front-code ")
+
+	assert.NoError(t, err)
+	assert.NotEmpty(t, token)
+	claims := parseTokenClaims(t, token, []byte("secret"))
+	assert.Equal(t, user.ID, claims["sub"])
+	assert.Equal(t, float64(4), claims["token_version"])
+	mockRepo.AssertExpectations(t)
 }
 
 func parseTokenClaims(t *testing.T, raw string, secret []byte) jwt.MapClaims {

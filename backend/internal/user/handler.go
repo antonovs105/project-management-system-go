@@ -1,14 +1,20 @@
 package user
 
 import (
+	"crypto/hmac"
 	"errors"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
+
+// oauthStateCookieName stores the browser-bound verifier for OAuth callbacks.
+const oauthStateCookieName = "progo.oauth_state"
 
 // Handler exposes user registration, login, account, and admin HTTP endpoints.
 type Handler struct {
@@ -26,6 +32,10 @@ func NewHandler(service *Service) *Handler {
 func (h *Handler) RegisterRoutes(e *echo.Echo, middleware ...echo.MiddlewareFunc) {
 	e.POST("/register", h.Register, middleware...)
 	e.POST("/login", h.Login, middleware...)
+	e.GET("/auth/oauth/providers", h.OAuthProviders, middleware...)
+	e.GET("/auth/:provider/start", h.StartOAuth, middleware...)
+	e.GET("/auth/:provider/callback", h.OAuthCallback, middleware...)
+	e.POST("/auth/oauth/exchange", h.ExchangeOAuthCode, middleware...)
 }
 
 // RegisterAdminRoutes registers authenticated admin-only user routes.
@@ -44,6 +54,11 @@ type RegisterRequest struct {
 	Username string `json:"username"`
 	Email    string `json:"email"`
 	Password string `json:"password"`
+}
+
+// ExchangeOAuthCodeRequest is the JSON payload for completing OAuth login in the SPA.
+type ExchangeOAuthCodeRequest struct {
+	Code string `json:"code"`
 }
 
 // UpdateInstanceRoleRequest is the JSON payload for changing a user's instance role.
@@ -202,6 +217,57 @@ func (h *Handler) Register(c echo.Context) error {
 	return c.JSON(http.StatusCreated, newUser)
 }
 
+// OAuthProviders returns currently configured optional OAuth providers.
+func (h *Handler) OAuthProviders(c echo.Context) error {
+	return c.JSON(http.StatusOK, map[string][]string{"providers": h.service.EnabledOAuthProviders()})
+}
+
+// StartOAuth redirects the browser to the requested provider authorization screen.
+func (h *Handler) StartOAuth(c echo.Context) error {
+	authURL, err := h.service.OAuthStartURL(c.Param("provider"))
+	if err != nil {
+		return writeOAuthStartError(c, err)
+	}
+	state, err := oauthStateFromAuthURL(authURL)
+	if err != nil {
+		return writeOAuthStartError(c, err)
+	}
+	setOAuthStateCookie(c, state, h.service.oauthConfig.StateTTL)
+	return c.Redirect(http.StatusFound, authURL)
+}
+
+// OAuthCallback receives the provider callback and redirects back to the SPA with a one-time code.
+func (h *Handler) OAuthCallback(c echo.Context) error {
+	provider := c.Param("provider")
+	if providerError := strings.TrimSpace(c.QueryParam("error")); providerError != "" {
+		clearOAuthStateCookie(c)
+		return c.Redirect(http.StatusFound, h.service.OAuthFrontendRedirectURL("", "provider_denied"))
+	}
+	if !validOAuthStateCookie(c, c.QueryParam("state")) {
+		clearOAuthStateCookie(c)
+		return c.Redirect(http.StatusFound, h.service.OAuthFrontendRedirectURL("", "invalid_state"))
+	}
+	clearOAuthStateCookie(c)
+	code, err := h.service.CompleteOAuthLogin(c.Request().Context(), provider, c.QueryParam("code"), c.QueryParam("state"))
+	if err != nil {
+		return c.Redirect(http.StatusFound, h.service.OAuthFrontendRedirectURL("", oauthErrorCode(err)))
+	}
+	return c.Redirect(http.StatusFound, h.service.OAuthFrontendRedirectURL(code, ""))
+}
+
+// ExchangeOAuthCode consumes a one-time OAuth code and returns a normal bearer JWT.
+func (h *Handler) ExchangeOAuthCode(c echo.Context) error {
+	var req ExchangeOAuthCodeRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	token, err := h.service.ExchangeOAuthLoginCode(c.Request().Context(), req.Code)
+	if err != nil {
+		return writeOAuthExchangeError(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]string{"token": token})
+}
+
 // LoginRequest is the JSON payload for password login.
 type LoginRequest struct {
 	Email    string `json:"email"`
@@ -223,4 +289,100 @@ func (h *Handler) Login(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{
 		"token": token,
 	})
+}
+
+// writeOAuthStartError maps OAuth authorization-start failures to public responses.
+func writeOAuthStartError(c echo.Context, err error) error {
+	switch {
+	case errors.Is(err, ErrOAuthProviderUnavailable):
+		return c.JSON(http.StatusNotFound, map[string]string{"error": ErrOAuthProviderUnavailable.Error()})
+	default:
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "oauth start failed"})
+	}
+}
+
+// writeOAuthExchangeError maps one-time OAuth code failures to public responses.
+func writeOAuthExchangeError(c echo.Context, err error) error {
+	switch {
+	case errors.Is(err, ErrOAuthInvalidCode):
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": ErrOAuthInvalidCode.Error()})
+	default:
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "oauth exchange failed"})
+	}
+}
+
+// oauthErrorCode converts OAuth service errors into safe SPA callback codes.
+func oauthErrorCode(err error) string {
+	switch {
+	case errors.Is(err, ErrOAuthProviderUnavailable):
+		return "provider_unavailable"
+	case errors.Is(err, ErrOAuthInvalidState):
+		return "invalid_state"
+	case errors.Is(err, ErrOAuthEmailNotVerified):
+		return "email_unverified"
+	case errors.Is(err, ErrOAuthEmailAlreadyRegistered):
+		return "email_registered"
+	default:
+		return "provider_failed"
+	}
+}
+
+// oauthStateFromAuthURL extracts the signed state generated for the provider redirect.
+func oauthStateFromAuthURL(rawURL string) (string, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	state := strings.TrimSpace(parsed.Query().Get("state"))
+	if state == "" {
+		return "", ErrOAuthInvalidState
+	}
+	return state, nil
+}
+
+// setOAuthStateCookie stores a callback verifier tied to this browser flow.
+func setOAuthStateCookie(c echo.Context, signedState string, ttl time.Duration) {
+	c.SetCookie(&http.Cookie{
+		Name:     oauthStateCookieName,
+		Value:    hashOAuthCode(signedState),
+		Path:     "/auth",
+		HttpOnly: true,
+		Secure:   oauthCookieSecure(c),
+		SameSite: http.SameSiteLaxMode,
+		Expires:  time.Now().Add(ttl),
+		MaxAge:   int(ttl.Seconds()),
+	})
+}
+
+// validOAuthStateCookie reports whether callback state matches the browser verifier.
+func validOAuthStateCookie(c echo.Context, signedState string) bool {
+	signedState = strings.TrimSpace(signedState)
+	if signedState == "" {
+		return false
+	}
+	cookie, err := c.Cookie(oauthStateCookieName)
+	if err != nil {
+		return false
+	}
+	expected := hashOAuthCode(signedState)
+	return hmac.Equal([]byte(cookie.Value), []byte(expected))
+}
+
+// clearOAuthStateCookie removes the browser verifier after any callback outcome.
+func clearOAuthStateCookie(c echo.Context) {
+	c.SetCookie(&http.Cookie{
+		Name:     oauthStateCookieName,
+		Value:    "",
+		Path:     "/auth",
+		HttpOnly: true,
+		Secure:   oauthCookieSecure(c),
+		SameSite: http.SameSiteLaxMode,
+		Expires:  time.Unix(0, 0),
+		MaxAge:   -1,
+	})
+}
+
+// oauthCookieSecure detects HTTPS directly or through a reverse proxy.
+func oauthCookieSecure(c echo.Context) bool {
+	return c.IsTLS() || strings.EqualFold(c.Request().Header.Get("X-Forwarded-Proto"), "https")
 }

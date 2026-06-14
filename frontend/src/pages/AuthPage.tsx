@@ -1,14 +1,16 @@
-import { useMutation } from "@tanstack/react-query";
-import { ArrowRight, CheckCircle2 } from "lucide-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { ArrowRight, CheckCircle2, Chrome, Github } from "lucide-react";
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import { Button, ErrorState, Panel, TextField } from "../components/ui";
-import { api, errorMessage } from "../lib/api";
+import { api, errorMessage, oauthStartURL } from "../lib/api";
 import { useI18n } from "../lib/i18n-context";
 import { sessionFromToken } from "../lib/jwt";
+import { queryKeys } from "../lib/queryKeys";
 import { useAuthStore } from "../store/auth";
+import type { OAuthProvider } from "../types";
 
 function destinationFromLocation(state: unknown): string {
   if (
@@ -25,6 +27,17 @@ function destinationFromLocation(state: unknown): string {
   return "/projects";
 }
 
+function oauthProviderLabel(provider: OAuthProvider, t: (key: "auth.continueWithGoogle" | "auth.continueWithGitHub") => string): string {
+  return provider === "google" ? t("auth.continueWithGoogle") : t("auth.continueWithGitHub");
+}
+
+function OAuthProviderIcon({ provider }: { provider: OAuthProvider }) {
+  if (provider === "github") {
+    return <Github size={18} />;
+  }
+  return <Chrome size={18} />;
+}
+
 export function AuthPage({ mode }: { mode: "login" | "register" }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -34,6 +47,13 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+
+  const oauthProviders = useQuery({
+    queryKey: queryKeys.oauthProviders,
+    queryFn: api.listOAuthProviders,
+    retry: false,
+    staleTime: 60_000,
+  });
 
   const login = useMutation({
     mutationFn: api.login,
@@ -66,6 +86,7 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
   }
 
   const pending = login.isPending || register.isPending;
+  const availableOAuthProviders = oauthProviders.data ?? [];
 
   return (
     <main className="grid min-h-screen bg-zinc-100 lg:grid-cols-[1fr_460px]">
@@ -108,6 +129,28 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
           {formError ? (
             <div className="mb-4">
               <ErrorState title={t("common.requestFailed")} body={formError} />
+            </div>
+          ) : null}
+
+          {availableOAuthProviders.length > 0 ? (
+            <div className="mb-5 grid gap-4">
+              <div className="grid gap-2">
+                {availableOAuthProviders.map((provider) => (
+                  <a
+                    key={provider}
+                    className="focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-full border border-zinc-200 bg-white px-4 text-sm font-medium text-zinc-900 shadow-sm transition hover:border-zinc-300 hover:bg-zinc-50"
+                    href={oauthStartURL(provider)}
+                  >
+                    <OAuthProviderIcon provider={provider} />
+                    {oauthProviderLabel(provider, t)}
+                  </a>
+                ))}
+              </div>
+              <div className="flex items-center gap-3 text-xs font-medium uppercase text-zinc-400">
+                <span className="h-px flex-1 bg-zinc-200" />
+                <span>{t("auth.emailDivider")}</span>
+                <span className="h-px flex-1 bg-zinc-200" />
+              </div>
             </div>
           ) : null}
 
