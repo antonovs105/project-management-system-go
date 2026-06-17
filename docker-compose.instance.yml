@@ -65,6 +65,7 @@ services:
       GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
       GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
       GITHUB_OAUTH_REDIRECT_URL: ${GITHUB_OAUTH_REDIRECT_URL:-http://localhost:${BACKEND_PORT}/auth/github/callback}
+      GITHUB_API_TOKEN: ${GITHUB_API_TOKEN:-}
     depends_on:
       migrations:
         condition: service_completed_successfully
@@ -116,6 +117,7 @@ services:
       GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
       GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
       GITHUB_OAUTH_REDIRECT_URL: ${GITHUB_OAUTH_REDIRECT_URL:-http://localhost:${BACKEND_PORT}/auth/github/callback}
+      GITHUB_API_TOKEN: ${GITHUB_API_TOKEN:-}
     depends_on:
       migrations:
         condition: service_completed_successfully

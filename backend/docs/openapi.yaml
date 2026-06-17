@@ -796,6 +796,85 @@ paths:
           description: Invite revoked.
         "409":
           $ref: "#/components/responses/Error"
+  /api/projects/{projectID}/github/repositories:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [GitHub Integration]
+      operationId: listProjectGitHubRepositories
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: GitHub repositories attached to the project.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GitHubRepository"
+        "403":
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [GitHub Integration]
+      operationId: linkProjectGitHubRepository
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: "#/components/requestBodies/LinkGitHubRepository"
+      responses:
+        "201":
+          description: GitHub repository attached to the project.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubRepository"
+        "400":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
+  /api/projects/{projectID}/github/repositories/{repositoryID}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/GitHubRepositoryID"
+    delete:
+      tags: [GitHub Integration]
+      operationId: deleteProjectGitHubRepository
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: GitHub repository link deleted.
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/projects/{projectID}/github/repositories/{repositoryID}/sync:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/GitHubRepositoryID"
+    post:
+      tags: [GitHub Integration]
+      operationId: syncProjectGitHubRepository
+      security:
+        - bearerAuth: []
+      responses:
+        "202":
+          description: Recent commits imported and linked to mentioned tickets.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubSyncResult"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
   /api/projects/{projectID}/tickets:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
@@ -923,6 +1002,27 @@ paths:
       responses:
         "204":
           description: Link removed.
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/tickets/{ticketID}/github/commits:
+    parameters:
+      - $ref: "#/components/parameters/TicketID"
+    get:
+      tags: [GitHub Integration]
+      operationId: listTicketGitHubCommits
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Imported GitHub commits linked to the ticket.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GitHubCommit"
+        "403":
+          $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
   /api/tickets/{ticketID}/comments:
@@ -1240,6 +1340,12 @@ paths:
     $ref: "#/paths/~1api~1projects~1{projectID}~1roles~1{roleID}"
   /api/v1/projects/{projectID}/members/{userID}:
     $ref: "#/paths/~1api~1projects~1{projectID}~1members~1{userID}"
+  /api/v1/projects/{projectID}/github/repositories:
+    $ref: "#/paths/~1api~1projects~1{projectID}~1github~1repositories"
+  /api/v1/projects/{projectID}/github/repositories/{repositoryID}:
+    $ref: "#/paths/~1api~1projects~1{projectID}~1github~1repositories~1{repositoryID}"
+  /api/v1/projects/{projectID}/github/repositories/{repositoryID}/sync:
+    $ref: "#/paths/~1api~1projects~1{projectID}~1github~1repositories~1{repositoryID}~1sync"
   /api/v1/invites/{inviteID}/accept:
     $ref: "#/paths/~1api~1invites~1{inviteID}~1accept"
   /api/v1/invites/{inviteID}/reject:
@@ -1256,6 +1362,8 @@ paths:
     $ref: "#/paths/~1api~1tickets~1{ticketID}~1links"
   /api/v1/links/{linkID}:
     $ref: "#/paths/~1api~1links~1{linkID}"
+  /api/v1/tickets/{ticketID}/github/commits:
+    $ref: "#/paths/~1api~1tickets~1{ticketID}~1github~1commits"
   /api/v1/tickets/{ticketID}/comments:
     $ref: "#/paths/~1api~1tickets~1{ticketID}~1comments"
   /api/v1/comments/{commentID}:
@@ -1486,6 +1594,13 @@ components:
       schema:
         type: string
         format: uuid
+    GitHubRepositoryID:
+      name: repositoryID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     InviteID:
       name: inviteID
       in: path
@@ -1624,6 +1739,20 @@ components:
                 type: string
               description:
                 type: string
+    LinkGitHubRepository:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [owner, name]
+            properties:
+              owner:
+                type: string
+                example: antonovs105
+              name:
+                type: string
+                example: project-management-system-go
     CreateTicket:
       required: true
       content:
@@ -1815,6 +1944,92 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
   schemas:
+    GitHubCommit:
+      type: object
+      required: [id, repository_id, sha, short_sha, message, author_name, author_email, html_url, ticket_ids, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        repository_id:
+          type: string
+          format: uuid
+        sha:
+          type: string
+        short_sha:
+          type: string
+        message:
+          type: string
+        author_name:
+          type: string
+        author_email:
+          type: string
+        authored_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        html_url:
+          type: string
+          format: uri
+        ticket_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    GitHubRepository:
+      type: object
+      required: [id, project_id, owner, name, full_name, html_url, default_branch, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        owner:
+          type: string
+        name:
+          type: string
+        full_name:
+          type: string
+        html_url:
+          type: string
+          format: uri
+        default_branch:
+          type: string
+        last_synced_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        created_by:
+          type:
+            - string
+            - "null"
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    GitHubSyncResult:
+      type: object
+      required: [repository, imported, linked]
+      properties:
+        repository:
+          $ref: "#/components/schemas/GitHubRepository"
+        imported:
+          type: integer
+        linked:
+          type: integer
     AdminAuditAction:
       type: string
       enum:

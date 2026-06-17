@@ -28,6 +28,7 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteinbox"
 	"github.com/antonovs105/project-management-system-go/internal/adminaudit"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
+	"github.com/antonovs105/project-management-system-go/internal/githubintegration"
 	authMiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
 	"github.com/antonovs105/project-management-system-go/internal/observability"
 	"github.com/antonovs105/project-management-system-go/internal/project"
@@ -114,6 +115,9 @@ var requiredDatabaseTables = []string{
 	"activity_deliveries",
 	"oauth_identities",
 	"oauth_login_codes",
+	"project_github_repositories",
+	"github_commits",
+	"github_commit_ticket_links",
 }
 
 // appRole selects which server responsibilities this process owns.
@@ -129,6 +133,7 @@ type ApiServer struct {
 	projectHandler    *project.Handler
 	ticketHandler     *ticket.Handler
 	commentHandler    *comment.Handler
+	githubHandler     *githubintegration.Handler
 	apHandler         *activitypub.Handler
 	c2sHandler        *c2s.Handler
 	inboxHandler      *remoteinbox.Handler
@@ -428,6 +433,10 @@ func main() {
 	commentService := comment.NewService(commentRepo, ticketService, apConfig)
 	commentHandler := comment.NewHandler(commentService)
 
+	githubClient := githubintegration.NewHTTPClient(githubintegration.WithToken(os.Getenv("GITHUB_API_TOKEN")))
+	githubService := githubintegration.NewService(githubintegration.NewRepository(db), projectService, githubClient)
+	githubHandler := githubintegration.NewHandler(githubService)
+
 	c2sHandler := c2s.NewHandler(db, apConfig, ticketService, commentService)
 
 	// Remote ActivityPub signing/discovery dependencies
@@ -522,6 +531,7 @@ func main() {
 		projectHandler:    projectHandler,
 		ticketHandler:     ticketHandler,
 		commentHandler:    commentHandler,
+		githubHandler:     githubHandler,
 		apHandler:         apHandler,
 		c2sHandler:        c2sHandler,
 		inboxHandler:      inboxHandler,
@@ -781,6 +791,7 @@ func registerAuthenticatedAPIRoutes(api *echo.Group, server *ApiServer, jwtSecre
 	server.projectHandler.RegisterRoutes(api)
 	server.ticketHandler.RegisterRoutes(api)
 	server.commentHandler.RegisterRoutes(api)
+	server.githubHandler.RegisterRoutes(api)
 	server.deliveryHandler.RegisterRoutes(api)
 	server.moderationHandler.RegisterRoutes(api)
 	server.auditHandler.RegisterRoutes(api)

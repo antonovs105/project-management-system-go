@@ -8,7 +8,10 @@ import {
   Download,
   FileJson,
   Flame,
+  Github,
+  GitBranch,
   History,
+  RefreshCw,
   ListChecks,
   Mail,
   Pencil,
@@ -30,6 +33,7 @@ import { compactId, initials, relativeDate } from "../../lib/format";
 import { queryKeys } from "../../lib/queryKeys";
 import type {
   ID,
+  GitHubRepository,
   Project,
   ProjectDeliverySummary,
   ProjectInvite,
@@ -212,6 +216,15 @@ function actorSubtitle(handle: string, email?: string): string {
     return `${handle} / ${email}`;
   }
   return handle || "No handle";
+}
+
+function parseRepositoryRef(value: string): { owner: string; name: string } | null {
+  const normalized = value.trim().replace(/^https:\/\/github\.com\//i, "").replace(/\.git$/i, "");
+  const [owner, name] = normalized.split("/");
+  if (!owner?.trim() || !name?.trim()) {
+    return null;
+  }
+  return { owner: owner.trim(), name: name.trim() };
 }
 
 function InviteStatusBadge({ status }: { status: ProjectInvite["status"] }) {
@@ -908,6 +921,157 @@ function ProjectMemberActions({ project }: { project: Project }) {
   );
 }
 
+function GitHubRepositoryManager({ projectId }: { projectId: ID }) {
+  const queryClient = useQueryClient();
+  const [repoRef, setRepoRef] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const repositories = useQuery({
+    queryKey: queryKeys.githubRepositories(projectId),
+    queryFn: () => api.listGitHubRepositories(projectId),
+  });
+
+  const linkRepository = useMutation({
+    mutationFn: () => {
+      const parsed = parseRepositoryRef(repoRef);
+      if (!parsed) {
+        throw new Error("Use owner/repository.");
+      }
+      return api.linkGitHubRepository(projectId, parsed);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.githubRepositories(projectId) });
+      setRepoRef("");
+      setFormError(null);
+      toast.success("GitHub repository linked");
+    },
+    onError: (error) => setFormError(errorMessage(error, "Repository link failed.")),
+  });
+
+  const syncRepository = useMutation({
+    mutationFn: (repositoryId: ID) => api.syncGitHubRepository(projectId, repositoryId),
+    onSuccess: async (result) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.githubRepositories(projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.ticketGitHubCommitsScope }),
+      ]);
+      toast.success(`GitHub sync imported ${result.imported} commits and linked ${result.linked}.`);
+    },
+    onError: (error) => toast.error(errorMessage(error, "GitHub sync failed.")),
+  });
+
+  const deleteRepository = useMutation({
+    mutationFn: (repositoryId: ID) => api.deleteGitHubRepository(projectId, repositoryId),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.githubRepositories(projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.ticketGitHubCommitsScope }),
+      ]);
+      toast.success("GitHub repository removed");
+    },
+    onError: (error) => toast.error(errorMessage(error, "Repository removal failed.")),
+  });
+
+  function submitRepository(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFormError(null);
+    linkRepository.mutate();
+  }
+
+  const repoRows = repositories.data || [];
+
+  return (
+    <Panel className="overflow-hidden">
+      <div className="flex flex-col gap-3 px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="flex items-center gap-2 text-base font-semibold text-zinc-950">
+            <Github size={17} />
+            GitHub Repositories
+          </h2>
+          <p className="mt-1 text-sm text-zinc-500">Project repositories, imported commits, and ticket references.</p>
+        </div>
+        <form className="flex flex-col gap-2 sm:flex-row" onSubmit={submitRepository}>
+          <TextField
+            label="Repository"
+            className="min-w-64"
+            placeholder="owner/repository"
+            value={repoRef}
+            onChange={(event) => setRepoRef(event.target.value)}
+          />
+          <Button type="submit" tone="primary" className="self-end" disabled={linkRepository.isPending || !repoRef.trim()}>
+            <Plus size={16} />
+            Link
+          </Button>
+        </form>
+      </div>
+
+      {formError ? (
+        <div className="border-t border-zinc-100 p-4">
+          <ErrorState title="Could not link repository" body={formError} />
+        </div>
+      ) : null}
+
+      <div className="border-t border-zinc-100 p-4">
+        {repositories.isLoading ? <LoadingState label="Loading GitHub repositories" /> : null}
+        {repositories.isError ? (
+          <ErrorState title="Could not load GitHub repositories" body={errorMessage(repositories.error, "Repository request failed.")} />
+        ) : null}
+        {!repositories.isLoading && !repositories.isError && repoRows.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-zinc-300 px-4 py-6 text-sm text-zinc-500">No GitHub repositories linked.</div>
+        ) : null}
+        <div className="grid gap-2">
+          {repoRows.map((repo: GitHubRepository) => {
+            const syncing = syncRepository.isPending && syncRepository.variables === repo.id;
+            const removing = deleteRepository.isPending && deleteRepository.variables === repo.id;
+            return (
+              <div key={repo.id} className="rounded-xl border border-zinc-200 px-3 py-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="min-w-0">
+                    <a
+                      className="inline-flex max-w-full items-center gap-2 truncate text-sm font-semibold text-zinc-950 underline-offset-4 hover:underline"
+                      href={repo.html_url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <Github size={15} className="shrink-0" />
+                      <span className="truncate">{repo.full_name}</span>
+                    </a>
+                    <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-zinc-500">
+                      <span className="inline-flex items-center gap-1">
+                        <GitBranch size={13} />
+                        {repo.default_branch || "default"}
+                      </span>
+                      <span>{repo.last_synced_at ? `Synced ${relativeDate(repo.last_synced_at)}` : "Never synced"}</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button onClick={() => syncRepository.mutate(repo.id)} disabled={syncing || removing}>
+                      <RefreshCw size={16} />
+                      {syncing ? "Syncing" : "Sync"}
+                    </Button>
+                    <Button
+                      tone="danger"
+                      onClick={() => {
+                        if (window.confirm(`Remove ${repo.full_name}?`)) {
+                          deleteRepository.mutate(repo.id);
+                        }
+                      }}
+                      disabled={syncing || removing}
+                    >
+                      <Trash2 size={16} />
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
 export function ProjectSettingsPanel({ project, tickets }: { project: Project; tickets: Ticket[] }) {
   return (
     <div className="space-y-4">
@@ -930,6 +1094,7 @@ export function ProjectSettingsPanel({ project, tickets }: { project: Project; t
         </div>
       </Panel>
 
+      <GitHubRepositoryManager projectId={project.id} />
       <ProjectRoleManager projectId={project.id} />
       <ProjectMemberActions project={project} />
     </div>

@@ -15,6 +15,9 @@ import type {
   FederationRemoteActor,
   FederationRemoteFollow,
   FollowRemoteActorResult,
+  GitHubCommit,
+  GitHubRepository,
+  GitHubSyncResult,
   GraphData,
   ID,
   InstanceRole,
@@ -119,6 +122,11 @@ export interface CreateProjectRolePayload {
   name: string;
   description?: string;
   permissions: ProjectPermission[];
+}
+
+export interface LinkGitHubRepositoryPayload {
+  owner: string;
+  name: string;
 }
 
 export interface UpdateProjectRolePayload {
@@ -314,6 +322,25 @@ export const api = {
     await http.delete(`${apiPrefix}/projects/${projectId}`);
   },
 
+  async listGitHubRepositories(projectId: ID): Promise<GitHubRepository[]> {
+    const { data } = await http.get<GitHubRepository[] | null>(`${apiPrefix}/projects/${projectId}/github/repositories`);
+    return asArray(data);
+  },
+
+  async linkGitHubRepository(projectId: ID, payload: LinkGitHubRepositoryPayload): Promise<GitHubRepository> {
+    const { data } = await http.post<GitHubRepository>(`${apiPrefix}/projects/${projectId}/github/repositories`, payload);
+    return data;
+  },
+
+  async deleteGitHubRepository(projectId: ID, repositoryId: ID): Promise<void> {
+    await http.delete(`${apiPrefix}/projects/${projectId}/github/repositories/${repositoryId}`);
+  },
+
+  async syncGitHubRepository(projectId: ID, repositoryId: ID): Promise<GitHubSyncResult> {
+    const { data } = await http.post<GitHubSyncResult>(`${apiPrefix}/projects/${projectId}/github/repositories/${repositoryId}/sync`);
+    return data;
+  },
+
   async inviteProjectMember(projectId: ID, payload: AddProjectMemberPayload): Promise<ProjectInvite> {
     const { data } = await http.post<ProjectInvite>(`${apiPrefix}/projects/${projectId}/members`, payload);
     return data;
@@ -404,6 +431,11 @@ export const api = {
 
   async removeTicketLink(linkId: ID): Promise<void> {
     await http.delete(`${apiPrefix}/links/${linkId}`);
+  },
+
+  async listTicketGitHubCommits(ticketId: ID): Promise<GitHubCommit[]> {
+    const { data } = await http.get<GitHubCommit[] | null>(`${apiPrefix}/tickets/${ticketId}/github/commits`);
+    return asArray(data);
   },
 
   async listComments(ticketId: ID): Promise<Comment[]> {

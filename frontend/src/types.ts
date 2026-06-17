@@ -203,6 +203,41 @@ export interface ProjectDeliverySummary {
   can_retry: boolean;
 }
 
+export interface GitHubRepository {
+  id: ID;
+  project_id: ID;
+  owner: string;
+  name: string;
+  full_name: string;
+  html_url: string;
+  default_branch: string;
+  last_synced_at?: string | null;
+  created_by?: ID | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GitHubCommit {
+  id: ID;
+  repository_id: ID;
+  sha: string;
+  short_sha: string;
+  message: string;
+  author_name: string;
+  author_email: string;
+  authored_at?: string | null;
+  html_url: string;
+  ticket_ids: ID[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GitHubSyncResult {
+  repository: GitHubRepository;
+  imported: number;
+  linked: number;
+}
+
 export interface DomainBlock {
   id: ID;
   domain: string;

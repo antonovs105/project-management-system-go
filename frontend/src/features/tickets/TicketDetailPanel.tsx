@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link2, MessageSquare, Save, Trash2, Unlink, X } from "lucide-react";
+import { Github, Link2, MessageSquare, Save, Trash2, Unlink, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
@@ -7,7 +7,7 @@ import { api, errorMessage, type UpdateTicketPayload } from "../../lib/api";
 import { ticketLinkTypes, ticketPriorities, ticketStatuses, ticketTypes } from "../../lib/constants";
 import { compactId, relativeDate } from "../../lib/format";
 import { queryKeys } from "../../lib/queryKeys";
-import type { ID, Ticket, TicketPriority, TicketStatus, TicketType } from "../../types";
+import type { GitHubCommit, ID, Ticket, TicketPriority, TicketStatus, TicketType } from "../../types";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Button, ErrorState, IconButton, LoadingState, SelectField, TextAreaField, TextField } from "../../components/ui";
 
@@ -234,6 +234,52 @@ function TicketLinksPanel({ projectId, ticketId, tickets }: { projectId: ID; tic
   );
 }
 
+function commitTitle(message: string): string {
+  return message.split(/\r?\n/)[0] || "Commit";
+}
+
+function TicketGitHubCommitsPanel({ ticketId }: { ticketId: ID }) {
+  const commits = useQuery({
+    queryKey: queryKeys.ticketGitHubCommits(ticketId),
+    queryFn: () => api.listTicketGitHubCommits(ticketId),
+  });
+
+  return (
+    <section className="border-t border-slate-200 pt-5">
+      <div className="mb-3 flex items-center gap-2">
+        <Github size={18} className="text-slate-500" />
+        <h3 className="font-semibold text-slate-950">GitHub Commits</h3>
+      </div>
+      {commits.isLoading ? <LoadingState label="Loading GitHub commits" /> : null}
+      {commits.isError ? (
+        <ErrorState title="Could not load GitHub commits" body={errorMessage(commits.error, "GitHub commit request failed.")} />
+      ) : null}
+      <div className="space-y-2">
+        {commits.data?.map((commit: GitHubCommit) => (
+          <a
+            key={commit.id}
+            className="block rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 transition hover:border-slate-300 hover:bg-white"
+            href={commit.html_url}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium text-slate-950">{commitTitle(commit.message)}</div>
+                <div className="mt-1 text-xs text-slate-500">
+                  {commit.author_name || "Unknown author"} / {commit.authored_at ? relativeDate(commit.authored_at) : "unknown date"}
+                </div>
+              </div>
+              <code className="shrink-0 rounded-md bg-white px-1.5 py-0.5 text-xs text-slate-600">{commit.short_sha}</code>
+            </div>
+          </a>
+        ))}
+        {commits.data?.length === 0 ? <p className="text-sm text-slate-500">No linked GitHub commits yet.</p> : null}
+      </div>
+    </section>
+  );
+}
+
 export function TicketDetailPanel({
   projectId,
   ticketId,
@@ -322,6 +368,8 @@ export function TicketDetailPanel({
               />
 
               <TicketLinksPanel projectId={projectId} ticketId={ticketId} tickets={tickets} />
+
+              <TicketGitHubCommitsPanel ticketId={ticketId} />
 
               <section className="border-t border-slate-200 pt-5">
                 <div className="mb-3 flex items-center gap-2">
