@@ -212,6 +212,11 @@ export interface GitHubRepository {
   html_url: string;
   default_branch: string;
   last_synced_at?: string | null;
+  last_sync_error: string;
+  last_webhook_at?: string | null;
+  commit_count: number;
+  linked_commit_count: number;
+  manual_link_count: number;
   created_by?: ID | null;
   created_at: string;
   updated_at: string;
@@ -220,6 +225,8 @@ export interface GitHubRepository {
 export interface GitHubCommit {
   id: ID;
   repository_id: ID;
+  repository_full_name: string;
+  repository_html_url: string;
   sha: string;
   short_sha: string;
   message: string;
@@ -228,6 +235,7 @@ export interface GitHubCommit {
   authored_at?: string | null;
   html_url: string;
   ticket_ids: ID[];
+  link_source: "" | "message" | "manual";
   created_at: string;
   updated_at: string;
 }

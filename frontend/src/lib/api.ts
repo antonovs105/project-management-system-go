@@ -129,6 +129,17 @@ export interface LinkGitHubRepositoryPayload {
   name: string;
 }
 
+export interface ListGitHubCommitsFilters {
+  repository_id?: ID;
+  q?: string;
+  unlinked?: boolean;
+  limit?: number;
+}
+
+export interface LinkGitHubCommitPayload {
+  commit_id: ID;
+}
+
 export interface UpdateProjectRolePayload {
   name?: string;
   description?: string;
@@ -341,6 +352,13 @@ export const api = {
     return data;
   },
 
+  async listProjectGitHubCommits(projectId: ID, filters: ListGitHubCommitsFilters = {}): Promise<GitHubCommit[]> {
+    const { data } = await http.get<GitHubCommit[] | null>(`${apiPrefix}/projects/${projectId}/github/commits`, {
+      params: filters,
+    });
+    return asArray(data);
+  },
+
   async inviteProjectMember(projectId: ID, payload: AddProjectMemberPayload): Promise<ProjectInvite> {
     const { data } = await http.post<ProjectInvite>(`${apiPrefix}/projects/${projectId}/members`, payload);
     return data;
@@ -436,6 +454,15 @@ export const api = {
   async listTicketGitHubCommits(ticketId: ID): Promise<GitHubCommit[]> {
     const { data } = await http.get<GitHubCommit[] | null>(`${apiPrefix}/tickets/${ticketId}/github/commits`);
     return asArray(data);
+  },
+
+  async linkTicketGitHubCommit(ticketId: ID, payload: LinkGitHubCommitPayload): Promise<GitHubCommit> {
+    const { data } = await http.post<GitHubCommit>(`${apiPrefix}/tickets/${ticketId}/github/commits`, payload);
+    return data;
+  },
+
+  async unlinkTicketGitHubCommit(ticketId: ID, commitId: ID): Promise<void> {
+    await http.delete(`${apiPrefix}/tickets/${ticketId}/github/commits/${commitId}`);
   },
 
   async listComments(ticketId: ID): Promise<Comment[]> {

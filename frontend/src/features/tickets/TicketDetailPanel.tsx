@@ -238,41 +238,120 @@ function commitTitle(message: string): string {
   return message.split(/\r?\n/)[0] || "Commit";
 }
 
-function TicketGitHubCommitsPanel({ ticketId }: { ticketId: ID }) {
+function TicketGitHubCommitsPanel({ projectId, ticketId }: { projectId: ID; ticketId: ID }) {
+  const queryClient = useQueryClient();
+  const [commitId, setCommitId] = useState("");
+
   const commits = useQuery({
     queryKey: queryKeys.ticketGitHubCommits(ticketId),
     queryFn: () => api.listTicketGitHubCommits(ticketId),
   });
 
+  const projectCommits = useQuery({
+    queryKey: queryKeys.projectGitHubCommits(projectId, "ticket-picker"),
+    queryFn: () => api.listProjectGitHubCommits(projectId, { limit: 100 }),
+  });
+
+  const linkedCommitIds = useMemo(() => new Set(commits.data?.map((commit) => commit.id) || []), [commits.data]);
+  const candidates = (projectCommits.data || []).filter((commit) => !linkedCommitIds.has(commit.id));
+
+  async function refreshGitHubLinks() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.ticketGitHubCommits(ticketId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectGitHubCommitsScope(projectId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.githubRepositories(projectId) }),
+    ]);
+  }
+
+  const linkCommit = useMutation({
+    mutationFn: () => api.linkTicketGitHubCommit(ticketId, { commit_id: commitId }),
+    onSuccess: async () => {
+      await refreshGitHubLinks();
+      setCommitId("");
+      toast.success("GitHub commit linked");
+    },
+    onError: (error) => toast.error(errorMessage(error, "Could not link GitHub commit.")),
+  });
+
+  const unlinkCommit = useMutation({
+    mutationFn: (targetCommitId: ID) => api.unlinkTicketGitHubCommit(ticketId, targetCommitId),
+    onSuccess: async () => {
+      await refreshGitHubLinks();
+      toast.success("GitHub commit unlinked");
+    },
+    onError: (error) => toast.error(errorMessage(error, "Could not unlink GitHub commit.")),
+  });
+
   return (
     <section className="border-t border-slate-200 pt-5">
-      <div className="mb-3 flex items-center gap-2">
-        <Github size={18} className="text-slate-500" />
-        <h3 className="font-semibold text-slate-950">GitHub Commits</h3>
+      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex items-center gap-2">
+          <Github size={18} className="text-slate-500" />
+          <h3 className="font-semibold text-slate-950">GitHub Commits</h3>
+        </div>
+        <form
+          className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]"
+          onSubmit={(event) => {
+            event.preventDefault();
+            linkCommit.mutate();
+          }}
+        >
+          <SelectField label="Imported commit" value={commitId} onChange={(event) => setCommitId(event.target.value)}>
+            <option value="">Select commit</option>
+            {candidates.map((commit) => (
+              <option key={commit.id} value={commit.id}>
+                {commit.short_sha} / {commitTitle(commit.message)}
+              </option>
+            ))}
+          </SelectField>
+          <Button className="self-end" type="submit" tone="primary" disabled={linkCommit.isPending || !commitId}>
+            <Link2 size={16} />
+            Link
+          </Button>
+        </form>
       </div>
+      {projectCommits.isError ? (
+        <ErrorState title="Could not load imported commits" body={errorMessage(projectCommits.error, "Project commit request failed.")} />
+      ) : null}
       {commits.isLoading ? <LoadingState label="Loading GitHub commits" /> : null}
       {commits.isError ? (
         <ErrorState title="Could not load GitHub commits" body={errorMessage(commits.error, "GitHub commit request failed.")} />
       ) : null}
       <div className="space-y-2">
         {commits.data?.map((commit: GitHubCommit) => (
-          <a
+          <div
             key={commit.id}
-            className="block rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 transition hover:border-slate-300 hover:bg-white"
-            href={commit.html_url}
-            target="_blank"
-            rel="noreferrer"
+            className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 transition hover:border-slate-300 hover:bg-white"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="truncate text-sm font-medium text-slate-950">{commitTitle(commit.message)}</div>
+                <a
+                  className="truncate text-sm font-medium text-slate-950 underline-offset-4 hover:underline"
+                  href={commit.html_url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {commitTitle(commit.message)}
+                </a>
                 <div className="mt-1 text-xs text-slate-500">
-                  {commit.author_name || "Unknown author"} / {commit.authored_at ? relativeDate(commit.authored_at) : "unknown date"}
+                  {commit.repository_full_name || "GitHub"} / {commit.author_name || "Unknown author"} /{" "}
+                  {commit.authored_at ? relativeDate(commit.authored_at) : "unknown date"}
                 </div>
               </div>
-              <code className="shrink-0 rounded-md bg-white px-1.5 py-0.5 text-xs text-slate-600">{commit.short_sha}</code>
+              <div className="flex shrink-0 items-center gap-2">
+                <code className="rounded-md bg-white px-1.5 py-0.5 text-xs text-slate-600">{commit.short_sha}</code>
+                <Button
+                  tone="danger"
+                  className="h-8 px-2 text-xs"
+                  disabled={unlinkCommit.isPending && unlinkCommit.variables === commit.id}
+                  onClick={() => unlinkCommit.mutate(commit.id)}
+                >
+                  <Unlink size={14} />
+                  Unlink
+                </Button>
+              </div>
             </div>
-          </a>
+          </div>
         ))}
         {commits.data?.length === 0 ? <p className="text-sm text-slate-500">No linked GitHub commits yet.</p> : null}
       </div>
@@ -369,7 +448,7 @@ export function TicketDetailPanel({
 
               <TicketLinksPanel projectId={projectId} ticketId={ticketId} tickets={tickets} />
 
-              <TicketGitHubCommitsPanel ticketId={ticketId} />
+              <TicketGitHubCommitsPanel projectId={projectId} ticketId={ticketId} />
 
               <section className="border-t border-slate-200 pt-5">
                 <div className="mb-3 flex items-center gap-2">

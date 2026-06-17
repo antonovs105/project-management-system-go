@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
+  AlertTriangle,
   BarChart3,
   CheckCircle2,
   Clock3,
@@ -10,6 +11,7 @@ import {
   Flame,
   Github,
   GitBranch,
+  Link2,
   History,
   RefreshCw,
   ListChecks,
@@ -33,6 +35,7 @@ import { compactId, initials, relativeDate } from "../../lib/format";
 import { queryKeys } from "../../lib/queryKeys";
 import type {
   ID,
+  GitHubCommit,
   GitHubRepository,
   Project,
   ProjectDeliverySummary,
@@ -207,6 +210,76 @@ function invitesToCSV(invites: ProjectInviteInspection[]): string {
   return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function githubRepositoriesToCSV(repositories: GitHubRepository[]): string {
+  const header = [
+    "id",
+    "project_id",
+    "full_name",
+    "html_url",
+    "default_branch",
+    "last_synced_at",
+    "last_webhook_at",
+    "last_sync_error",
+    "commit_count",
+    "linked_commit_count",
+    "manual_link_count",
+    "created_at",
+    "updated_at",
+  ];
+  const rows = repositories.map((repo) => [
+    repo.id,
+    repo.project_id,
+    repo.full_name,
+    repo.html_url,
+    repo.default_branch,
+    repo.last_synced_at,
+    repo.last_webhook_at,
+    repo.last_sync_error,
+    repo.commit_count,
+    repo.linked_commit_count,
+    repo.manual_link_count,
+    repo.created_at,
+    repo.updated_at,
+  ]);
+  return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+function githubCommitsToCSV(commits: GitHubCommit[]): string {
+  const header = [
+    "id",
+    "repository_id",
+    "repository_full_name",
+    "sha",
+    "short_sha",
+    "message",
+    "author_name",
+    "author_email",
+    "authored_at",
+    "html_url",
+    "ticket_ids",
+    "link_source",
+    "created_at",
+    "updated_at",
+  ];
+  const rows = commits.map((commit) => [
+    commit.id,
+    commit.repository_id,
+    commit.repository_full_name,
+    commit.sha,
+    commit.short_sha,
+    commit.message,
+    commit.author_name,
+    commit.author_email,
+    commit.authored_at,
+    commit.html_url,
+    commit.ticket_ids.join(" "),
+    commit.link_source,
+    commit.created_at,
+    commit.updated_at,
+  ]);
+  return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function actorTitle(name: string, username: string, handle: string): string {
   return name || username || handle || "Unknown actor";
 }
@@ -225,6 +298,10 @@ function parseRepositoryRef(value: string): { owner: string; name: string } | nu
     return null;
   }
   return { owner: owner.trim(), name: name.trim() };
+}
+
+function commitTitle(message: string): string {
+  return message.split(/\r?\n/)[0] || "Commit";
 }
 
 function InviteStatusBadge({ status }: { status: ProjectInvite["status"] }) {
@@ -924,12 +1001,27 @@ function ProjectMemberActions({ project }: { project: Project }) {
 function GitHubRepositoryManager({ projectId }: { projectId: ID }) {
   const queryClient = useQueryClient();
   const [repoRef, setRepoRef] = useState("");
+  const [commitSearch, setCommitSearch] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 
   const repositories = useQuery({
     queryKey: queryKeys.githubRepositories(projectId),
     queryFn: () => api.listGitHubRepositories(projectId),
   });
+
+  const commitSearchValue = commitSearch.trim();
+  const commits = useQuery({
+    queryKey: queryKeys.projectGitHubCommits(projectId, commitSearchValue || "recent"),
+    queryFn: () => api.listProjectGitHubCommits(projectId, { q: commitSearchValue || undefined, limit: 50 }),
+  });
+
+  async function refreshGitHubData() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.githubRepositories(projectId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectGitHubCommitsScope(projectId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.ticketGitHubCommitsScope }),
+    ]);
+  }
 
   const linkRepository = useMutation({
     mutationFn: () => {
@@ -940,7 +1032,7 @@ function GitHubRepositoryManager({ projectId }: { projectId: ID }) {
       return api.linkGitHubRepository(projectId, parsed);
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.githubRepositories(projectId) });
+      await refreshGitHubData();
       setRepoRef("");
       setFormError(null);
       toast.success("GitHub repository linked");
@@ -951,10 +1043,7 @@ function GitHubRepositoryManager({ projectId }: { projectId: ID }) {
   const syncRepository = useMutation({
     mutationFn: (repositoryId: ID) => api.syncGitHubRepository(projectId, repositoryId),
     onSuccess: async (result) => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.githubRepositories(projectId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.ticketGitHubCommitsScope }),
-      ]);
+      await refreshGitHubData();
       toast.success(`GitHub sync imported ${result.imported} commits and linked ${result.linked}.`);
     },
     onError: (error) => toast.error(errorMessage(error, "GitHub sync failed.")),
@@ -963,10 +1052,7 @@ function GitHubRepositoryManager({ projectId }: { projectId: ID }) {
   const deleteRepository = useMutation({
     mutationFn: (repositoryId: ID) => api.deleteGitHubRepository(projectId, repositoryId),
     onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.githubRepositories(projectId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.ticketGitHubCommitsScope }),
-      ]);
+      await refreshGitHubData();
       toast.success("GitHub repository removed");
     },
     onError: (error) => toast.error(errorMessage(error, "Repository removal failed.")),
@@ -979,6 +1065,32 @@ function GitHubRepositoryManager({ projectId }: { projectId: ID }) {
   }
 
   const repoRows = repositories.data || [];
+  const commitRows = commits.data || [];
+  const totalCommits = repoRows.reduce((sum, repo) => sum + repo.commit_count, 0);
+  const linkedCommits = repoRows.reduce((sum, repo) => sum + repo.linked_commit_count, 0);
+  const manualLinks = repoRows.reduce((sum, repo) => sum + repo.manual_link_count, 0);
+  const latestWebhook = repoRows
+    .map((repo) => repo.last_webhook_at)
+    .filter(Boolean)
+    .sort()
+    .at(-1);
+
+  function exportGitHubJSON() {
+    const report = {
+      generated_at: new Date().toISOString(),
+      repositories: repoRows,
+      commits: commitRows,
+    };
+    downloadText(`github-integration-${projectId}.json`, "application/json", `${JSON.stringify(report, null, 2)}\n`);
+  }
+
+  function exportGitHubCSV() {
+    downloadText(`github-repositories-${projectId}.csv`, "text/csv", `${githubRepositoriesToCSV(repoRows)}\n`);
+  }
+
+  function exportCommitsCSV() {
+    downloadText(`github-commits-${projectId}.csv`, "text/csv", `${githubCommitsToCSV(commitRows)}\n`);
+  }
 
   return (
     <Panel className="overflow-hidden">
@@ -988,7 +1100,7 @@ function GitHubRepositoryManager({ projectId }: { projectId: ID }) {
             <Github size={17} />
             GitHub Repositories
           </h2>
-          <p className="mt-1 text-sm text-zinc-500">Project repositories, imported commits, and ticket references.</p>
+          <p className="mt-1 text-sm text-zinc-500">Project repositories, imported commits, ticket references, and sync health.</p>
         </div>
         <form className="flex flex-col gap-2 sm:flex-row" onSubmit={submitRepository}>
           <TextField
@@ -1003,6 +1115,14 @@ function GitHubRepositoryManager({ projectId }: { projectId: ID }) {
             Link
           </Button>
         </form>
+      </div>
+
+      <div className="grid gap-3 border-t border-zinc-100 p-4 sm:grid-cols-2 xl:grid-cols-5">
+        <MetricPill icon={<Github size={14} />} label="Repos" value={repositories.isLoading ? "..." : repoRows.length} />
+        <MetricPill icon={<History size={14} />} label="Commits" value={repositories.isLoading ? "..." : totalCommits} />
+        <MetricPill icon={<Link2 size={14} />} label="Linked" value={repositories.isLoading ? "..." : linkedCommits} />
+        <MetricPill icon={<Pencil size={14} />} label="Manual" value={repositories.isLoading ? "..." : manualLinks} />
+        <MetricPill icon={<Clock3 size={14} />} label="Webhook" value={latestWebhook ? relativeDate(latestWebhook) : "none"} />
       </div>
 
       {formError ? (
@@ -1042,7 +1162,16 @@ function GitHubRepositoryManager({ projectId }: { projectId: ID }) {
                         {repo.default_branch || "default"}
                       </span>
                       <span>{repo.last_synced_at ? `Synced ${relativeDate(repo.last_synced_at)}` : "Never synced"}</span>
+                      <span>{repo.last_webhook_at ? `Webhook ${relativeDate(repo.last_webhook_at)}` : "No webhook"}</span>
+                      <span>{repo.commit_count} commits</span>
+                      <span>{repo.linked_commit_count} linked</span>
                     </div>
+                    {repo.last_sync_error ? (
+                      <div className="mt-2 flex items-center gap-1 text-xs text-red-600">
+                        <AlertTriangle size={13} />
+                        <span className="line-clamp-1">{repo.last_sync_error}</span>
+                      </div>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button onClick={() => syncRepository.mutate(repo.id)} disabled={syncing || removing}>
@@ -1066,6 +1195,71 @@ function GitHubRepositoryManager({ projectId }: { projectId: ID }) {
               </div>
             );
           })}
+        </div>
+      </div>
+
+      <div className="border-t border-zinc-100 p-4">
+        <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-950">Recent Commits</h3>
+            <p className="mt-1 text-xs text-zinc-500">Imported commit activity across linked repositories.</p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <TextField
+              label="Search"
+              className="min-w-64"
+              placeholder="message, SHA, author"
+              value={commitSearch}
+              onChange={(event) => setCommitSearch(event.target.value)}
+            />
+            <Button className="self-end" onClick={exportGitHubCSV} disabled={repoRows.length === 0}>
+              <Download size={15} />
+              Repos CSV
+            </Button>
+            <Button className="self-end" onClick={exportCommitsCSV} disabled={commitRows.length === 0}>
+              <Download size={15} />
+              Commits CSV
+            </Button>
+            <Button className="self-end" onClick={exportGitHubJSON}>
+              <FileJson size={15} />
+              JSON
+            </Button>
+          </div>
+        </div>
+
+        {commits.isLoading ? <LoadingState label="Loading GitHub commits" /> : null}
+        {commits.isError ? (
+          <ErrorState title="Could not load GitHub commits" body={errorMessage(commits.error, "Commit request failed.")} />
+        ) : null}
+        {!commits.isLoading && !commits.isError && commitRows.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-zinc-300 px-4 py-6 text-sm text-zinc-500">No imported commits found.</div>
+        ) : null}
+        <div className="divide-y divide-zinc-100 rounded-xl border border-zinc-200">
+          {commitRows.map((commit) => (
+            <div key={commit.id} className="grid gap-3 p-3 lg:grid-cols-[1fr_auto] lg:items-center">
+              <div className="min-w-0">
+                <a
+                  className="line-clamp-1 text-sm font-medium text-zinc-950 underline-offset-4 hover:underline"
+                  href={commit.html_url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {commitTitle(commit.message)}
+                </a>
+                <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-zinc-500">
+                  <span>{commit.repository_full_name}</span>
+                  <span>{commit.author_name || "Unknown author"}</span>
+                  <span>{commit.authored_at ? relativeDate(commit.authored_at) : "unknown date"}</span>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                <code className="rounded-md bg-zinc-50 px-1.5 py-0.5 text-xs text-zinc-600">{commit.short_sha}</code>
+                <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
+                  {commit.ticket_ids.length} tickets
+                </span>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </Panel>

@@ -7,6 +7,8 @@ export const queryKeys = {
   project: (projectId: ID) => ["project", projectId] as const,
   projectRoles: (projectId: ID) => ["projectRoles", projectId] as const,
   githubRepositories: (projectId: ID) => ["githubRepositories", projectId] as const,
+  projectGitHubCommitsScope: (projectId: ID) => ["projectGitHubCommits", projectId] as const,
+  projectGitHubCommits: (projectId: ID, filtersKey = "all") => ["projectGitHubCommits", projectId, filtersKey] as const,
   projectMembers: (projectId: ID) => ["projectMembers", projectId] as const,
   projectInvitesScope: (projectId: ID) => ["projectInvites", projectId] as const,
   projectInvites: (projectId: ID, status?: string) => ["projectInvites", projectId, status || "all"] as const,
