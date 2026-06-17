@@ -207,8 +207,8 @@ function TicketLinksPanel({ projectId, ticketId, tickets }: { projectId: ID; tic
         <Link2 size={18} className="text-slate-500" />
         <h3 className="font-semibold text-slate-950">Links</h3>
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <form className="grid gap-3" onSubmit={submitLink}>
+      <div className="grid min-w-0 gap-5">
+        <form className="grid min-w-0 gap-3" onSubmit={submitLink}>
           {addLink.isError ? <ErrorState title="Could not link ticket" body={errorMessage(addLink.error, "Link request failed.")} /> : null}
           <SelectField label="Target" value={targetTicketId} onChange={(event) => setTargetTicketId(event.target.value)}>
             <option value="">Select ticket</option>
@@ -229,18 +229,18 @@ function TicketLinksPanel({ projectId, ticketId, tickets }: { projectId: ID; tic
               </option>
             ))}
           </SelectField>
-          <Button type="submit" tone="primary" disabled={addLink.isPending || !targetTicketId}>
+          <Button className="w-full" type="submit" tone="primary" disabled={addLink.isPending || !targetTicketId}>
             <Link2 size={16} />
             Add link
           </Button>
         </form>
 
-        <form className="grid gap-3" onSubmit={submitRemove}>
+        <form className="grid min-w-0 gap-3 border-t border-slate-200 pt-4" onSubmit={submitRemove}>
           {removeLink.isError ? (
             <ErrorState title="Could not remove link" body={errorMessage(removeLink.error, "Remove link request failed.")} />
           ) : null}
           <TextField label="Link ID" value={linkId} onChange={(event) => setLinkId(event.target.value)} />
-          <Button type="submit" tone="danger" disabled={removeLink.isPending || !linkId.trim()}>
+          <Button className="w-full" type="submit" tone="danger" disabled={removeLink.isPending || !linkId.trim()}>
             <Unlink size={16} />
             Remove link
           </Button>

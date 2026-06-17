@@ -87,10 +87,10 @@ export function TextField({
   hint?: string;
 } & InputHTMLAttributes<HTMLInputElement>) {
   return (
-    <label className={cx("grid gap-1.5 text-sm", className)}>
+    <label className={cx("grid min-w-0 gap-1.5 text-sm", className)}>
       <span className="font-medium text-zinc-800">{label}</span>
       <input
-        className="focus-ring h-10 rounded-xl border border-zinc-200 bg-white px-3 text-sm text-zinc-950 shadow-sm placeholder:text-zinc-400"
+        className="focus-ring h-10 w-full min-w-0 rounded-xl border border-zinc-200 bg-white px-3 text-sm text-zinc-950 shadow-sm placeholder:text-zinc-400"
         {...props}
       />
       {hint ? <span className="text-xs text-zinc-500">{hint}</span> : null}
@@ -108,10 +108,10 @@ export function TextAreaField({
   hint?: string;
 } & TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
-    <label className={cx("grid gap-1.5 text-sm", className)}>
+    <label className={cx("grid min-w-0 gap-1.5 text-sm", className)}>
       <span className="font-medium text-zinc-800">{label}</span>
       <textarea
-        className="focus-ring min-h-24 resize-y rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-950 shadow-sm placeholder:text-zinc-400"
+        className="focus-ring min-h-24 w-full min-w-0 resize-y rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-950 shadow-sm placeholder:text-zinc-400"
         {...props}
       />
       {hint ? <span className="text-xs text-zinc-500">{hint}</span> : null}
@@ -129,10 +129,10 @@ export function SelectField({
   children: ReactNode;
 } & SelectHTMLAttributes<HTMLSelectElement>) {
   return (
-    <label className={cx("grid gap-1.5 text-sm", className)}>
+    <label className={cx("grid min-w-0 gap-1.5 text-sm", className)}>
       <span className="font-medium text-zinc-800">{label}</span>
       <select
-        className="focus-ring h-10 rounded-xl border border-zinc-200 bg-white px-3 text-sm text-zinc-950 shadow-sm"
+        className="focus-ring h-10 w-full min-w-0 rounded-xl border border-zinc-200 bg-white px-3 text-sm text-zinc-950 shadow-sm"
         {...props}
       >
         {children}
