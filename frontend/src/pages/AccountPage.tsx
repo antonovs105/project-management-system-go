@@ -7,6 +7,7 @@ import { Button, ErrorState, Panel, TextField } from "../components/ui";
 import { api, errorMessage } from "../lib/api";
 import { compactId } from "../lib/format";
 import { useI18n } from "../lib/i18n-context";
+import { fieldLimits } from "../lib/limits";
 import { useAuthStore } from "../store/auth";
 
 export function AccountPage() {
@@ -31,6 +32,16 @@ export function AccountPage() {
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError(null);
+    const passwordLength = Array.from(newPassword).length;
+    const passwordBytes = new TextEncoder().encode(newPassword).length;
+    if (passwordLength < fieldLimits.passwordMinLength) {
+      setFormError(t("validation.passwordTooShort", { min: fieldLimits.passwordMinLength }));
+      return;
+    }
+    if (passwordBytes > fieldLimits.passwordMaxBytes) {
+      setFormError(t("validation.passwordTooLong", { max: fieldLimits.passwordMaxBytes }));
+      return;
+    }
     if (newPassword !== confirmPassword) {
       setFormError(t("account.passwordMismatch"));
       return;
@@ -93,7 +104,9 @@ export function AccountPage() {
             value={newPassword}
             onChange={(event) => setNewPassword(event.target.value)}
             autoComplete="new-password"
-            minLength={6}
+            minLength={fieldLimits.passwordMinLength}
+            maxLength={fieldLimits.passwordMaxLength}
+            hint={t("validation.passwordHint", { min: fieldLimits.passwordMinLength })}
             required
           />
           <TextField
@@ -102,7 +115,8 @@ export function AccountPage() {
             value={confirmPassword}
             onChange={(event) => setConfirmPassword(event.target.value)}
             autoComplete="new-password"
-            minLength={6}
+            minLength={fieldLimits.passwordMinLength}
+            maxLength={fieldLimits.passwordMaxLength}
             required
           />
           <div className="flex justify-end">

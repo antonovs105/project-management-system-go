@@ -11,6 +11,7 @@ import { TicketDetailPanel } from "../features/tickets/TicketDetailPanel";
 import { TicketFormModal } from "../features/tickets/TicketFormModal";
 import { api, errorMessage, projectTicketEventsURL } from "../lib/api";
 import { relativeDate } from "../lib/format";
+import { fieldLimits } from "../lib/limits";
 import { queryKeys } from "../lib/queryKeys";
 import { useAuthStore } from "../store/auth";
 import type { ID, Ticket, TicketEvent, TicketStatus } from "../types";
@@ -411,11 +412,18 @@ export function ProjectWorkspace() {
               {deleteProject.isError ? (
                 <ErrorState title="Could not delete project" body={errorMessage(deleteProject.error, "Project delete failed.")} />
               ) : null}
-              <TextField label="Name" value={projectName} onChange={(event) => setProjectName(event.target.value)} required />
+              <TextField
+                label="Name"
+                value={projectName}
+                onChange={(event) => setProjectName(event.target.value)}
+                maxLength={fieldLimits.projectNameMaxLength}
+                required
+              />
               <TextAreaField
                 label="Description"
                 value={projectDescription}
                 onChange={(event) => setProjectDescription(event.target.value)}
+                maxLength={fieldLimits.projectDescriptionMaxLength}
               />
             </div>
           </Modal>

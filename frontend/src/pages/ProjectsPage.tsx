@@ -6,6 +6,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, errorMessage } from "../lib/api";
 import { relativeDate } from "../lib/format";
 import { useI18n } from "../lib/i18n-context";
+import { fieldLimits } from "../lib/limits";
 import { queryKeys } from "../lib/queryKeys";
 import { Button, EmptyState, ErrorState, LoadingState, Modal, Panel, TextAreaField, TextField } from "../components/ui";
 
@@ -128,11 +129,18 @@ export function ProjectsPage() {
           {createProject.isError ? (
             <ErrorState title={t("projects.createFailed")} body={errorMessage(createProject.error, t("projects.createFailedBody"))} />
           ) : null}
-          <TextField label={t("projects.name")} value={name} onChange={(event) => setName(event.target.value)} required />
+          <TextField
+            label={t("projects.name")}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            maxLength={fieldLimits.projectNameMaxLength}
+            required
+          />
           <TextAreaField
             label={t("projects.description")}
             value={description}
             onChange={(event) => setDescription(event.target.value)}
+            maxLength={fieldLimits.projectDescriptionMaxLength}
             placeholder={t("projects.descriptionPlaceholder")}
           />
         </div>

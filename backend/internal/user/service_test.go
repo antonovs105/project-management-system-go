@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -243,6 +244,18 @@ func TestService_ChangePassword(t *testing.T) {
 		err := service.ChangePassword(ctx, userID, oldPassword, "short")
 
 		assert.ErrorIs(t, err, ErrInvalidUserInput)
+		mockRepo.AssertNotCalled(t, "GetUserByID")
+		mockRepo.AssertNotCalled(t, "UpdatePasswordHash")
+	})
+
+	t.Run("RejectsOversizedNewPassword", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, []byte("secret"), cfg)
+
+		err := service.ChangePassword(ctx, userID, oldPassword, strings.Repeat("x", maxPasswordBytes+1))
+
+		assert.ErrorIs(t, err, ErrInvalidUserInput)
+		assert.Contains(t, err.Error(), "password must be at most 72 bytes")
 		mockRepo.AssertNotCalled(t, "GetUserByID")
 		mockRepo.AssertNotCalled(t, "UpdatePasswordHash")
 	})

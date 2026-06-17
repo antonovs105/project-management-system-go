@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { api, errorMessage, type UpdateTicketPayload } from "../../lib/api";
 import { ticketLinkTypes, ticketPriorities, ticketStatuses, ticketTypes } from "../../lib/constants";
 import { compactId, relativeDate } from "../../lib/format";
+import { fieldLimits } from "../../lib/limits";
 import { queryKeys } from "../../lib/queryKeys";
 import type { GitHubCommit, ID, Ticket, TicketPriority, TicketStatus, TicketType } from "../../types";
 import { StatusBadge } from "../../components/StatusBadge";
@@ -88,7 +89,13 @@ function TicketEditor({
       {deleteTicket.isError ? (
         <ErrorState title="Could not delete ticket" body={errorMessage(deleteTicket.error, "Ticket delete failed.")} />
       ) : null}
-      <TextField label="Title" value={title} onChange={(event) => setTitle(event.target.value)} required />
+      <TextField
+        label="Title"
+        value={title}
+        onChange={(event) => setTitle(event.target.value)}
+        maxLength={fieldLimits.ticketTitleMaxLength}
+        required
+      />
       <div className="grid gap-4 sm:grid-cols-3">
         <SelectField label="Status" value={status} onChange={(event) => setStatus(event.target.value as TicketStatus)}>
           {ticketStatuses.map((item) => (
@@ -123,7 +130,12 @@ function TicketEditor({
         </SelectField>
       ) : null}
       <TextField label="Assignee ID" value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)} />
-      <TextAreaField label="Description" value={description} onChange={(event) => setDescription(event.target.value)} />
+      <TextAreaField
+        label="Description"
+        value={description}
+        onChange={(event) => setDescription(event.target.value)}
+        maxLength={fieldLimits.ticketDescriptionMaxLength}
+      />
       <div className="flex justify-between gap-2">
         <Button
           tone="danger"

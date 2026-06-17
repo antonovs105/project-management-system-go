@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
@@ -82,6 +83,10 @@ const (
 	defaultTicketListLimit = 100
 	// maxTicketListLimit is the largest accepted ticket list size.
 	maxTicketListLimit = 500
+	// maxTicketTitleLength is the longest accepted ticket title.
+	maxTicketTitleLength = 120
+	// maxTicketDescriptionLength is the longest accepted ticket description.
+	maxTicketDescriptionLength = 4000
 )
 
 // ticketRanks defines allowed parent-child ordering for ticket hierarchy.
@@ -114,9 +119,14 @@ func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, pro
 		return nil, err
 	}
 
-	req.Title = strings.TrimSpace(req.Title)
-	if req.Title == "" {
-		return nil, invalidTicketInput("title is required")
+	var err error
+	req.Title, err = normalizeRequiredTicketText(req.Title, "title", maxTicketTitleLength)
+	if err != nil {
+		return nil, err
+	}
+	req.Description, err = normalizeOptionalTicketText(req.Description, "description", maxTicketDescriptionLength)
+	if err != nil {
+		return nil, err
 	}
 
 	rank, ok := ticketRanks[req.Type]
@@ -279,11 +289,18 @@ func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, tic
 	}
 
 	if req.Title != nil {
-		trimmedTitle := strings.TrimSpace(*req.Title)
-		if trimmedTitle == "" {
-			return invalidTicketInput("title is required")
+		trimmedTitle, err := normalizeRequiredTicketText(*req.Title, "title", maxTicketTitleLength)
+		if err != nil {
+			return err
 		}
 		req.Title = &trimmedTitle
+	}
+	if req.Description != nil {
+		description, err := normalizeOptionalTicketText(*req.Description, "description", maxTicketDescriptionLength)
+		if err != nil {
+			return err
+		}
+		req.Description = &description
 	}
 	if req.Status != nil && !ticketStatuses[*req.Status] {
 		return invalidTicketInput("invalid ticket status")
@@ -328,6 +345,24 @@ func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, tic
 // invalidTicketInput wraps a validation message with the ticket input sentinel.
 func invalidTicketInput(message string) error {
 	return fmt.Errorf("%w: %s", ErrInvalidTicketInput, message)
+}
+
+// normalizeRequiredTicketText trims text and enforces ticket-service length limits.
+func normalizeRequiredTicketText(value, label string, maxLength int) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", invalidTicketInput(label + " is required")
+	}
+	return normalizeOptionalTicketText(trimmed, label, maxLength)
+}
+
+// normalizeOptionalTicketText trims text and rejects unexpectedly large values.
+func normalizeOptionalTicketText(value, label string, maxLength int) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if utf8.RuneCountInString(trimmed) > maxLength {
+		return "", invalidTicketInput(fmt.Sprintf("%s must be at most %d characters", label, maxLength))
+	}
+	return trimmed, nil
 }
 
 // normalizeTicketListLimit bounds ticket list sizes.

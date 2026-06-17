@@ -8,6 +8,7 @@ import { Button, ErrorState, Panel, TextField } from "../components/ui";
 import { api, errorMessage, oauthStartURL } from "../lib/api";
 import { useI18n } from "../lib/i18n-context";
 import { sessionFromToken } from "../lib/jwt";
+import { fieldLimits } from "../lib/limits";
 import { queryKeys } from "../lib/queryKeys";
 import { useAuthStore } from "../store/auth";
 import type { OAuthProvider } from "../types";
@@ -79,6 +80,16 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
     event.preventDefault();
     setFormError(null);
     if (mode === "register") {
+      const passwordLength = Array.from(password).length;
+      const passwordBytes = new TextEncoder().encode(password).length;
+      if (passwordLength < fieldLimits.passwordMinLength) {
+        setFormError(t("validation.passwordTooShort", { min: fieldLimits.passwordMinLength }));
+        return;
+      }
+      if (passwordBytes > fieldLimits.passwordMaxBytes) {
+        setFormError(t("validation.passwordTooLong", { max: fieldLimits.passwordMaxBytes }));
+        return;
+      }
       register.mutate({ username: username.trim(), email: email.trim(), password });
       return;
     }
@@ -180,7 +191,9 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
               onChange={(event) => setPassword(event.target.value)}
               autoComplete={mode === "login" ? "current-password" : "new-password"}
               required
-              minLength={6}
+              minLength={mode === "register" ? fieldLimits.passwordMinLength : undefined}
+              maxLength={fieldLimits.passwordMaxLength}
+              hint={mode === "register" ? t("validation.passwordHint", { min: fieldLimits.passwordMinLength }) : undefined}
             />
             <Button type="submit" tone="primary" className="w-full" disabled={pending}>
               {pending ? t("common.working") : mode === "login" ? t("actions.signIn") : t("actions.createAccount")}

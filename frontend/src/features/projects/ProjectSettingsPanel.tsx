@@ -32,6 +32,7 @@ import { Button, ErrorState, LoadingState, Modal, Panel, SelectField, TextAreaFi
 import { api, errorMessage } from "../../lib/api";
 import { projectPermissionGroups, ticketPriorities, ticketStatuses } from "../../lib/constants";
 import { compactId, initials, relativeDate } from "../../lib/format";
+import { fieldLimits } from "../../lib/limits";
 import { queryKeys } from "../../lib/queryKeys";
 import type {
   ID,
@@ -658,8 +659,19 @@ function ProjectRoleManager({ projectId }: { projectId: ID }) {
           {updateRole.isError ? (
             <ErrorState title="Could not update role" body={errorMessage(updateRole.error, "Role update failed.")} />
           ) : null}
-          <TextField label="Name" value={name} onChange={(event) => setName(event.target.value)} required />
-          <TextAreaField label="Description" value={description} onChange={(event) => setDescription(event.target.value)} />
+          <TextField
+            label="Name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            maxLength={fieldLimits.projectRoleNameMaxLength}
+            required
+          />
+          <TextAreaField
+            label="Description"
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            maxLength={fieldLimits.projectRoleDescriptionMaxLength}
+          />
           <PermissionPicker value={permissions} onChange={setPermissions} />
         </div>
       </Modal>

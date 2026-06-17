@@ -3,6 +3,7 @@ package project
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,6 +53,62 @@ func TestService_CreateProject(t *testing.T) {
 
 		assert.ErrorIs(t, err, ErrInvalidProjectInput)
 		assert.Nil(t, p)
+	})
+
+	t.Run("RejectsOversizedName", func(t *testing.T) {
+		p, err := service.CreateProject(ctx, strings.Repeat("x", maxProjectNameLength+1), desc, userID)
+
+		assert.ErrorIs(t, err, ErrInvalidProjectInput)
+		assert.Nil(t, p)
+		assert.Contains(t, err.Error(), "name must be at most")
+	})
+
+	t.Run("RejectsOversizedDescription", func(t *testing.T) {
+		p, err := service.CreateProject(ctx, name, strings.Repeat("x", maxProjectDescriptionLength+1), userID)
+
+		assert.ErrorIs(t, err, ErrInvalidProjectInput)
+		assert.Nil(t, p)
+		assert.Contains(t, err.Error(), "description must be at most")
+	})
+}
+
+func TestService_UpdateProjectValidatesMetadataLength(t *testing.T) {
+	ctx := context.Background()
+	projectID := "project-1"
+	userID := "user-1"
+
+	t.Run("RejectsOversizedName", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+		longName := strings.Repeat("x", maxProjectNameLength+1)
+
+		mockRepo.On("GetByID", ctx, projectID).Return(&Project{ID: projectID, Name: "Test Project", OwnerID: userID}, nil).Once()
+		mockRepo.On("HasPermission", ctx, projectID, userID, PermissionProjectRead).Return(true, nil).Once()
+		mockRepo.On("HasPermission", ctx, projectID, userID, PermissionProjectUpdate).Return(true, nil).Once()
+
+		err := service.UpdateProject(ctx, projectID, userID, UpdateProjectRequest{Name: &longName})
+
+		assert.ErrorIs(t, err, ErrInvalidProjectInput)
+		assert.Contains(t, err.Error(), "name must be at most")
+		mockRepo.AssertNotCalled(t, "Update", mock.Anything, mock.Anything, mock.Anything)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("RejectsOversizedDescription", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+		longDescription := strings.Repeat("x", maxProjectDescriptionLength+1)
+
+		mockRepo.On("GetByID", ctx, projectID).Return(&Project{ID: projectID, Name: "Test Project", OwnerID: userID}, nil).Once()
+		mockRepo.On("HasPermission", ctx, projectID, userID, PermissionProjectRead).Return(true, nil).Once()
+		mockRepo.On("HasPermission", ctx, projectID, userID, PermissionProjectUpdate).Return(true, nil).Once()
+
+		err := service.UpdateProject(ctx, projectID, userID, UpdateProjectRequest{Description: &longDescription})
+
+		assert.ErrorIs(t, err, ErrInvalidProjectInput)
+		assert.Contains(t, err.Error(), "description must be at most")
+		mockRepo.AssertNotCalled(t, "Update", mock.Anything, mock.Anything, mock.Anything)
+		mockRepo.AssertExpectations(t)
 	})
 }
 

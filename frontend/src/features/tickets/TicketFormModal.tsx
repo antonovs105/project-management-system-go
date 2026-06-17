@@ -4,6 +4,7 @@ import type { FormEvent } from "react";
 import { api, errorMessage } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { ticketPriorities, ticketTypes } from "../../lib/constants";
+import { fieldLimits } from "../../lib/limits";
 import type { ID, Ticket, TicketPriority, TicketType } from "../../types";
 import { Button, ErrorState, Modal, SelectField, TextAreaField, TextField } from "../../components/ui";
 
@@ -92,7 +93,13 @@ export function TicketFormModal({
         {createTicket.isError ? (
           <ErrorState title="Could not create ticket" body={errorMessage(createTicket.error, "Ticket creation failed.")} />
         ) : null}
-        <TextField label="Title" value={title} onChange={(event) => setTitle(event.target.value)} required />
+        <TextField
+          label="Title"
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          maxLength={fieldLimits.ticketTitleMaxLength}
+          required
+        />
         <div className="grid gap-4 sm:grid-cols-2">
           <SelectField label="Type" value={type} onChange={(event) => setType(event.target.value as TicketType)}>
             {ticketTypes.map((item) => (
@@ -128,6 +135,7 @@ export function TicketFormModal({
           label="Description"
           value={description}
           onChange={(event) => setDescription(event.target.value)}
+          maxLength={fieldLimits.ticketDescriptionMaxLength}
           placeholder="What needs to happen?"
         />
       </div>

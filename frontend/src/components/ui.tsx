@@ -226,7 +226,7 @@ export function Modal({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/50 p-4 backdrop-blur-sm">
+    <div className="fixed left-0 top-0 z-50 flex h-dvh w-screen items-center justify-center overflow-y-auto bg-zinc-950/60 p-4 backdrop-blur-sm">
       {formId ? (
         <form
           id={formId}

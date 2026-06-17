@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/golang-jwt/jwt/v5"
@@ -76,6 +77,10 @@ const (
 	defaultAdminListLimit = 100
 	// maxAdminListLimit is the largest accepted admin user list size.
 	maxAdminListLimit = 500
+	// minPasswordLength is the shortest accepted local password.
+	minPasswordLength = 8
+	// maxPasswordBytes is bcrypt's maximum accepted password input length.
+	maxPasswordBytes = 72
 
 	// OAuthProviderGoogle is the provider key for Google OpenID Connect login.
 	OAuthProviderGoogle = "google"
@@ -511,10 +516,14 @@ func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
 
-// validatePassword enforces the local minimum password policy.
+// validatePassword enforces the local password length policy.
 func validatePassword(password string) error {
-	if len(password) < 8 {
-		return invalidUserInput("password must be at least 8 characters")
+	passwordLength := utf8.RuneCountInString(password)
+	if passwordLength < minPasswordLength {
+		return invalidUserInput(fmt.Sprintf("password must be at least %d characters", minPasswordLength))
+	}
+	if len(password) > maxPasswordBytes {
+		return invalidUserInput(fmt.Sprintf("password must be at most %d bytes", maxPasswordBytes))
 	}
 	return nil
 }

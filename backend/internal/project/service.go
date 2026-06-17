@@ -8,6 +8,7 @@ import (
 	"log"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
@@ -21,6 +22,14 @@ const (
 	defaultProjectListLimit = 100
 	// maxProjectListLimit is the largest accepted project list size.
 	maxProjectListLimit = 500
+	// maxProjectNameLength is the longest accepted human-readable project name.
+	maxProjectNameLength = 120
+	// maxProjectDescriptionLength is the longest accepted project description.
+	maxProjectDescriptionLength = 4000
+	// maxProjectRoleNameLength is the longest accepted project-local role name.
+	maxProjectRoleNameLength = 80
+	// maxProjectRoleDescriptionLength is the longest accepted project-local role description.
+	maxProjectRoleDescriptionLength = 1000
 )
 
 // Service contains project board, membership, and invite workflows.
@@ -50,9 +59,13 @@ func (s *Service) SetDelivery(delivery DeliveryEnqueuer) {
 
 // CreateProject creates a project actor, owner membership, and Create activity.
 func (s *Service) CreateProject(ctx context.Context, name, description string, userID string) (*Project, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return nil, invalidProjectInput("name is required")
+	name, err := normalizeRequiredProjectText(name, "name", maxProjectNameLength)
+	if err != nil {
+		return nil, err
+	}
+	description, err = normalizeOptionalProjectText(description, "description", maxProjectDescriptionLength)
+	if err != nil {
+		return nil, err
 	}
 
 	projectID, err := activitypub.NewID()
@@ -201,14 +214,19 @@ func (s *Service) UpdateProject(ctx context.Context, projectID, userID string, r
 	}
 
 	if req.Name != nil {
-		trimmedName := strings.TrimSpace(*req.Name)
-		if trimmedName == "" {
-			return invalidProjectInput("name is required")
+		trimmedName, err := normalizeRequiredProjectText(*req.Name, "name", maxProjectNameLength)
+		if err != nil {
+			return err
 		}
 		req.Name = &trimmedName
 		projectToUpdate.Name = *req.Name
 	}
 	if req.Description != nil {
+		description, err := normalizeOptionalProjectText(*req.Description, "description", maxProjectDescriptionLength)
+		if err != nil {
+			return err
+		}
+		req.Description = &description
 		projectToUpdate.Description = *req.Description
 	}
 
@@ -417,9 +435,13 @@ func (s *Service) CreateProjectRole(ctx context.Context, projectID, userID strin
 	if err := s.RequireProjectPermission(ctx, projectID, userID, PermissionRolesManage, "insufficient permissions: missing roles.manage"); err != nil {
 		return nil, err
 	}
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		return nil, invalidProjectInput("role name is required")
+	name, err := normalizeRequiredProjectText(req.Name, "role name", maxProjectRoleNameLength)
+	if err != nil {
+		return nil, err
+	}
+	description, err := normalizeOptionalProjectText(req.Description, "role description", maxProjectRoleDescriptionLength)
+	if err != nil {
+		return nil, err
 	}
 	permissions, err := normalizePermissions(req.Permissions)
 	if err != nil {
@@ -429,7 +451,7 @@ func (s *Service) CreateProjectRole(ctx context.Context, projectID, userID strin
 		ProjectID:   projectID,
 		Key:         normalizeRoleKey(name),
 		Name:        name,
-		Description: strings.TrimSpace(req.Description),
+		Description: description,
 		Permissions: permissions,
 	}
 	if err := s.repo.CreateRole(ctx, role); err != nil {
@@ -453,14 +475,18 @@ func (s *Service) UpdateProjectRole(ctx context.Context, projectID, userID, role
 		}
 	}
 	if req.Name != nil {
-		name := strings.TrimSpace(*req.Name)
-		if name == "" {
-			return nil, invalidProjectInput("role name is required")
+		name, err := normalizeRequiredProjectText(*req.Name, "role name", maxProjectRoleNameLength)
+		if err != nil {
+			return nil, err
 		}
 		role.Name = name
 	}
 	if req.Description != nil {
-		role.Description = strings.TrimSpace(*req.Description)
+		description, err := normalizeOptionalProjectText(*req.Description, "role description", maxProjectRoleDescriptionLength)
+		if err != nil {
+			return nil, err
+		}
+		role.Description = description
 	}
 	if req.Permissions != nil {
 		permissions, err := normalizePermissions(*req.Permissions)
@@ -564,6 +590,24 @@ func normalizeRoleKey(name string) string {
 // invalidProjectInput wraps a validation message with the project input sentinel.
 func invalidProjectInput(message string) error {
 	return fmt.Errorf("%w: %s", ErrInvalidProjectInput, message)
+}
+
+// normalizeRequiredProjectText trims text and enforces project-service length limits.
+func normalizeRequiredProjectText(value, label string, maxLength int) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", invalidProjectInput(label + " is required")
+	}
+	return normalizeOptionalProjectText(trimmed, label, maxLength)
+}
+
+// normalizeOptionalProjectText trims text and rejects unexpectedly large values.
+func normalizeOptionalProjectText(value, label string, maxLength int) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if utf8.RuneCountInString(trimmed) > maxLength {
+		return "", invalidProjectInput(fmt.Sprintf("%s must be at most %d characters", label, maxLength))
+	}
+	return trimmed, nil
 }
 
 // normalizeProjectListLimit bounds project list sizes.

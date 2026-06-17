@@ -3,6 +3,7 @@ package ticket
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,6 +89,30 @@ func TestService_CreateTicket(t *testing.T) {
 		assert.Nil(t, ticket)
 		assert.Contains(t, err.Error(), "invalid ticket priority")
 	})
+
+	t.Run("RejectsOversizedTitle", func(t *testing.T) {
+		mockProject.On("HasProjectPermission", ctx, projectID, reporterID, project.PermissionTicketsCreate).Return(true, nil).Once()
+		invalidReq := req
+		invalidReq.Title = strings.Repeat("x", maxTicketTitleLength+1)
+
+		ticket, err := service.CreateTicket(ctx, invalidReq, projectID, reporterID)
+
+		assert.ErrorIs(t, err, ErrInvalidTicketInput)
+		assert.Nil(t, ticket)
+		assert.Contains(t, err.Error(), "title must be at most")
+	})
+
+	t.Run("RejectsOversizedDescription", func(t *testing.T) {
+		mockProject.On("HasProjectPermission", ctx, projectID, reporterID, project.PermissionTicketsCreate).Return(true, nil).Once()
+		invalidReq := req
+		invalidReq.Description = strings.Repeat("x", maxTicketDescriptionLength+1)
+
+		ticket, err := service.CreateTicket(ctx, invalidReq, projectID, reporterID)
+
+		assert.ErrorIs(t, err, ErrInvalidTicketInput)
+		assert.Nil(t, ticket)
+		assert.Contains(t, err.Error(), "description must be at most")
+	})
 }
 
 func TestService_GetTicketByID(t *testing.T) {
@@ -158,6 +183,67 @@ func TestService_UpdateTicketValidatesFields(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidTicketInput)
 	assert.Contains(t, err.Error(), "title is required")
 	mockRepo.AssertNotCalled(t, "Update")
+}
+
+func TestService_UpdateTicketValidatesMetadataLength(t *testing.T) {
+	ctx := context.Background()
+	projectID := "project-1"
+	ticketID := "ticket-1"
+	actorID := "member-1"
+
+	t.Run("RejectsOversizedTitle", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		mockProject := new(MockProjectChecker)
+		service := NewService(mockRepo, mockProject, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+		longTitle := strings.Repeat("x", maxTicketTitleLength+1)
+
+		mockRepo.On("GetByID", ctx, ticketID).Return(&Ticket{
+			ID:          ticketID,
+			ProjectID:   projectID,
+			Title:       "Ticket",
+			Description: "Description",
+			Status:      "open",
+			Priority:    "medium",
+			Type:        "task",
+		}, nil).Once()
+		mockProject.On("GetProjectByID", ctx, projectID, actorID).Return(&project.Project{ID: projectID}, nil).Once()
+		mockProject.On("HasProjectPermission", ctx, projectID, actorID, project.PermissionTicketsUpdate).Return(true, nil).Once()
+
+		err := service.UpdateTicket(ctx, UpdateTicketRequest{Title: &longTitle}, ticketID, actorID)
+
+		assert.ErrorIs(t, err, ErrInvalidTicketInput)
+		assert.Contains(t, err.Error(), "title must be at most")
+		mockRepo.AssertNotCalled(t, "Update", mock.Anything, mock.Anything, mock.Anything)
+		mockRepo.AssertExpectations(t)
+		mockProject.AssertExpectations(t)
+	})
+
+	t.Run("RejectsOversizedDescription", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		mockProject := new(MockProjectChecker)
+		service := NewService(mockRepo, mockProject, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+		longDescription := strings.Repeat("x", maxTicketDescriptionLength+1)
+
+		mockRepo.On("GetByID", ctx, ticketID).Return(&Ticket{
+			ID:          ticketID,
+			ProjectID:   projectID,
+			Title:       "Ticket",
+			Description: "Description",
+			Status:      "open",
+			Priority:    "medium",
+			Type:        "task",
+		}, nil).Once()
+		mockProject.On("GetProjectByID", ctx, projectID, actorID).Return(&project.Project{ID: projectID}, nil).Once()
+		mockProject.On("HasProjectPermission", ctx, projectID, actorID, project.PermissionTicketsUpdate).Return(true, nil).Once()
+
+		err := service.UpdateTicket(ctx, UpdateTicketRequest{Description: &longDescription}, ticketID, actorID)
+
+		assert.ErrorIs(t, err, ErrInvalidTicketInput)
+		assert.Contains(t, err.Error(), "description must be at most")
+		mockRepo.AssertNotCalled(t, "Update", mock.Anything, mock.Anything, mock.Anything)
+		mockRepo.AssertExpectations(t)
+		mockProject.AssertExpectations(t)
+	})
 }
 
 func TestService_UpdateTicketUsesActingUser(t *testing.T) {

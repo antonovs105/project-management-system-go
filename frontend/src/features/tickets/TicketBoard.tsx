@@ -11,7 +11,7 @@ import {
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { ticketStatuses } from "../../lib/constants";
 import type { ID, Ticket, TicketStatus } from "../../types";
@@ -37,8 +37,10 @@ function TicketCard({ ticket, onOpen }: { ticket: Ticket; onOpen: (ticketId: ID)
         transition,
         opacity: isDragging ? 0.45 : 1,
       }}
-      className="focus-ring w-full rounded-2xl text-left"
+      className="focus-ring w-full cursor-grab touch-none rounded-2xl text-left active:cursor-grabbing"
       onClick={() => onOpen(ticket.id)}
+      {...attributes}
+      {...listeners}
     >
       <Panel className="group p-3 transition hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-md">
         <div className="flex items-start gap-2">
@@ -51,9 +53,7 @@ function TicketCard({ ticket, onOpen }: { ticket: Ticket; onOpen: (ticketId: ID)
             {ticket.description ? <p className="mt-2 line-clamp-2 text-xs text-zinc-500">{ticket.description}</p> : null}
           </div>
           <span
-            className="flex h-7 w-7 shrink-0 touch-none items-center justify-center rounded-xl text-zinc-300 transition group-hover:text-zinc-500 hover:bg-zinc-100"
-            {...attributes}
-            {...listeners}
+            className="pointer-events-none flex h-7 w-7 shrink-0 items-center justify-center rounded-xl text-zinc-300 transition group-hover:text-zinc-500"
             aria-label="Drag ticket"
           >
             <GripVertical size={16} />
@@ -117,16 +117,36 @@ export function TicketBoard({
   emptyAction?: ReactNode;
 }) {
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
+  const [pendingMoves, setPendingMoves] = useState<Record<ID, TicketStatus>>({});
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
+  useEffect(() => {
+    setPendingMoves((current) => {
+      const next = { ...current };
+      const ticketIds = new Set(tickets.map((ticket) => ticket.id));
+      for (const ticketId of Object.keys(next)) {
+        if (!ticketIds.has(ticketId)) {
+          delete next[ticketId];
+        }
+      }
+      for (const ticket of tickets) {
+        if (next[ticket.id] === ticket.status) {
+          delete next[ticket.id];
+        }
+      }
+      return Object.keys(next).length === Object.keys(current).length ? current : next;
+    });
+  }, [tickets]);
 
   const grouped = useMemo(() => {
     const columns = new Map<TicketStatus, Ticket[]>();
     ticketStatuses.forEach((status) => columns.set(status.id, []));
     tickets.forEach((ticket) => {
-      columns.get(ticket.status)?.push(ticket);
+      const status = pendingMoves[ticket.id] || ticket.status;
+      columns.get(status)?.push({ ...ticket, status });
     });
     return columns;
-  }, [tickets]);
+  }, [pendingMoves, tickets]);
 
   function handleDragStart(event: DragStartEvent) {
     const ticket = tickets.find((item) => item.id === String(event.active.id));
@@ -145,6 +165,7 @@ export function TicketBoard({
 
     const targetStatus = ticketStatuses.find((status) => status.id === overId)?.id;
     if (targetStatus && targetStatus !== ticket.status) {
+      setPendingMoves((current) => ({ ...current, [ticket.id]: targetStatus }));
       onMoveTicket(ticket.id, targetStatus);
     }
     setActiveTicket(null);
