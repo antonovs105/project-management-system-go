@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Github, Link2, MessageSquare, Save, Trash2, Unlink, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { api, errorMessage, type UpdateTicketPayload } from "../../lib/api";
 import { ticketLinkTypes, ticketPriorities, ticketStatuses, ticketTypes } from "../../lib/constants";
@@ -418,7 +419,7 @@ export function TicketDetailPanel({
     }
   }
 
-  return (
+  return createPortal(
     <div className="fixed left-0 top-0 z-40 flex h-dvh w-screen justify-end overflow-hidden bg-slate-950/40">
       <button type="button" aria-label="Close ticket panel" className="hidden flex-1 md:block" onClick={onClose} />
       <aside className="flex h-dvh w-full max-w-2xl flex-col overflow-hidden bg-white shadow-xl">
@@ -512,6 +513,7 @@ export function TicketDetailPanel({
           ) : null}
         </div>
       </aside>
-    </div>
+    </div>,
+    document.body,
   );
 }

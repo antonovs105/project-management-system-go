@@ -1,5 +1,6 @@
 import type { FormEventHandler, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
 import { X } from "lucide-react";
+import { createPortal } from "react-dom";
 
 type Tone = "primary" | "secondary" | "danger" | "ghost";
 
@@ -225,7 +226,7 @@ export function Modal({
     </>
   );
 
-  return (
+  return createPortal(
     <div className="fixed left-0 top-0 z-50 flex h-dvh w-screen items-center justify-center overflow-y-auto bg-zinc-950/60 p-4 backdrop-blur-sm">
       {formId ? (
         <form
@@ -238,6 +239,7 @@ export function Modal({
       ) : (
         <div className="max-h-[90vh] w-full max-w-xl overflow-auto rounded-3xl bg-white shadow-2xl">{content}</div>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
