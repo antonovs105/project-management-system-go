@@ -419,9 +419,9 @@ export function TicketDetailPanel({
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-slate-950/30">
+    <div className="fixed left-0 top-0 z-40 flex h-dvh w-screen justify-end overflow-hidden bg-slate-950/40">
       <button type="button" aria-label="Close ticket panel" className="hidden flex-1 md:block" onClick={onClose} />
-      <aside className="flex h-full w-full max-w-2xl flex-col overflow-hidden bg-white shadow-xl">
+      <aside className="flex h-dvh w-full max-w-2xl flex-col overflow-hidden bg-white shadow-xl">
         <header className="flex items-start justify-between border-b border-slate-200 px-5 py-4">
           <div className="min-w-0">
             <div className="mb-2 flex flex-wrap gap-1.5">
