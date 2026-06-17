@@ -154,13 +154,9 @@ func (s *Service) ListUserProjects(ctx context.Context, userID string, options P
 	return s.repo.ListByOwnerID(ctx, userID, options)
 }
 
-// ListProjectMembers returns project members visible to project membership managers.
+// ListProjectMembers returns project members visible to project participants.
 func (s *Service) ListProjectMembers(ctx context.Context, projectID, userID string, options ProjectListOptions) ([]ProjectMember, error) {
-	if err := s.RequireAnyProjectPermission(ctx, projectID, userID, []string{
-		PermissionMembersInvite,
-		PermissionMembersRemove,
-		PermissionRolesManage,
-	}, "insufficient permissions: missing member management permission"); err != nil {
+	if err := s.RequireProjectPermission(ctx, projectID, userID, PermissionProjectRead, "project not found or access denied"); err != nil {
 		return nil, err
 	}
 	options.Limit = normalizeProjectListLimit(options.Limit)

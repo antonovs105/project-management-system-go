@@ -352,6 +352,9 @@ func (s *Service) ChangePassword(ctx context.Context, userID, currentPassword, n
 	if strings.TrimSpace(currentPassword) == "" {
 		return invalidUserInput("current password is required")
 	}
+	if err := validatePassword(currentPassword); err != nil {
+		return err
+	}
 	if err := validatePassword(newPassword); err != nil {
 		return err
 	}

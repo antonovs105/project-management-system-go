@@ -151,17 +151,17 @@ func TestService_GetProjectByID(t *testing.T) {
 	})
 }
 
-func TestService_ListProjectMembersRequiresMembershipManagement(t *testing.T) {
+func TestService_ListProjectMembersRequiresProjectRead(t *testing.T) {
 	ctx := context.Background()
 	projectID := "project-1"
 	userID := "manager-1"
 
-	t.Run("allowed by invite permission", func(t *testing.T) {
+	t.Run("allowed by project read permission", func(t *testing.T) {
 		mockRepo := new(MockRepository)
 		service := NewService(mockRepo, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
 		expected := []ProjectMember{{UserID: "member-1", ProjectID: projectID, Role: RoleDeveloper}}
 
-		mockRepo.On("HasPermission", ctx, projectID, userID, PermissionMembersInvite).Return(true, nil).Once()
+		mockRepo.On("HasPermission", ctx, projectID, userID, PermissionProjectRead).Return(true, nil).Once()
 		mockRepo.On("ListMembers", ctx, projectID, ProjectListOptions{Limit: defaultProjectListLimit, Offset: 0}).Return(expected, nil).Once()
 
 		members, err := service.ListProjectMembers(ctx, projectID, userID, ProjectListOptions{})
@@ -171,19 +171,17 @@ func TestService_ListProjectMembersRequiresMembershipManagement(t *testing.T) {
 		mockRepo.AssertExpectations(t)
 	})
 
-	t.Run("denied without member management permission", func(t *testing.T) {
+	t.Run("denied without project read permission", func(t *testing.T) {
 		mockRepo := new(MockRepository)
 		service := NewService(mockRepo, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
 
-		mockRepo.On("HasPermission", ctx, projectID, userID, PermissionMembersInvite).Return(false, nil).Once()
-		mockRepo.On("HasPermission", ctx, projectID, userID, PermissionMembersRemove).Return(false, nil).Once()
-		mockRepo.On("HasPermission", ctx, projectID, userID, PermissionRolesManage).Return(false, nil).Once()
+		mockRepo.On("HasPermission", ctx, projectID, userID, PermissionProjectRead).Return(false, nil).Once()
 
 		members, err := service.ListProjectMembers(ctx, projectID, userID, ProjectListOptions{})
 
 		assert.Error(t, err)
 		assert.Nil(t, members)
-		assert.Contains(t, err.Error(), "insufficient permissions")
+		assert.Contains(t, err.Error(), "project not found or access denied")
 		mockRepo.AssertNotCalled(t, "ListMembers", mock.Anything, mock.Anything, mock.Anything)
 		mockRepo.AssertExpectations(t)
 	})

@@ -5,9 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	"github.com/antonovs105/project-management-system-go/internal/lexorank"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -17,6 +20,7 @@ type Repository interface {
 	ListByProjectID(ctx context.Context, projectID string, options TicketListOptions) ([]Ticket, error)
 	GetByID(ctx context.Context, id string) (*Ticket, error)
 	Update(ctx context.Context, ticket *Ticket, actorID string) ([]string, error)
+	Move(ctx context.Context, ticketID, actorID, status string, beforeTicketID, afterTicketID *string) (*Ticket, []string, error)
 	Delete(ctx context.Context, id string, actorID string) (*DeleteResult, error)
 	CreateLink(ctx context.Context, link *TicketLink) error
 	GetLinkByID(ctx context.Context, linkID string) (*TicketLink, error)
@@ -44,13 +48,18 @@ func (r *PgRepository) Create(ctx context.Context, ticket *Ticket) ([]string, er
 	defer tx.Rollback()
 
 	ticket.IsResolved = ticket.Status == "done"
+	rank, err := r.rankAtEnd(ctx, tx, ticket.ProjectID, ticket.Status, "")
+	if err != nil {
+		return nil, err
+	}
+	ticket.Rank = rank
 	if _, err := tx.NamedExecContext(ctx, `
 		INSERT INTO tickets (
-			id, ap_id, title, description, status, priority, type, parent_id,
+			id, ap_id, title, description, status, priority, type, rank, parent_id,
 			project_id, reporter_id, is_resolved, resolved_at, resolved_by_actor_id
 		)
 		VALUES (
-			:id, :ap_id, :title, :description, :status, :priority, :type, :parent_id,
+			:id, :ap_id, :title, :description, :status, :priority, :type, :rank, :parent_id,
 			:project_id, :reporter_id, :is_resolved,
 			CASE WHEN :is_resolved THEN now() ELSE NULL END,
 			CASE WHEN :is_resolved THEN CAST(:reporter_id AS uuid) ELSE NULL END
@@ -94,12 +103,35 @@ func (r *PgRepository) Create(ctx context.Context, ticket *Ticket) ([]string, er
 // ListByProjectID returns tickets for a project.
 func (r *PgRepository) ListByProjectID(ctx context.Context, projectID string, options TicketListOptions) ([]Ticket, error) {
 	tickets := make([]Ticket, 0)
+	conditions := []string{"t.project_id = $1"}
+	args := []any{projectID}
+	if options.AssigneeID != nil {
+		args = append(args, *options.AssigneeID)
+		conditions = append(conditions, fmt.Sprintf("ta.actor_id = $%d::uuid", len(args)))
+	}
+	if options.Unassigned {
+		conditions = append(conditions, "ta.actor_id IS NULL")
+	}
+	args = append(args, options.Limit, options.Offset)
+	limitPos := len(args) - 1
+	offsetPos := len(args)
+
 	query := ticketSelectBase() + `
-		WHERE t.project_id = $1
-		ORDER BY t.created_at DESC
-		LIMIT $2 OFFSET $3
+		WHERE ` + strings.Join(conditions, " AND ") + `
+		ORDER BY
+			CASE t.status
+				WHEN 'open' THEN 1
+				WHEN 'in_progress' THEN 2
+				WHEN 'review' THEN 3
+				WHEN 'done' THEN 4
+				ELSE 5
+			END ASC,
+			t.rank ASC,
+			t.created_at ASC,
+			t.id ASC
+		LIMIT $` + fmt.Sprint(limitPos) + ` OFFSET $` + fmt.Sprint(offsetPos) + `
 	`
-	if err := r.db.SelectContext(ctx, &tickets, query, projectID, options.Limit, options.Offset); err != nil {
+	if err := r.db.SelectContext(ctx, &tickets, query, args...); err != nil {
 		return nil, err
 	}
 	return tickets, nil
@@ -121,9 +153,12 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket, actorID strin
 	}
 	defer tx.Rollback()
 
-	var wasResolved bool
-	if err := tx.GetContext(ctx, &wasResolved, `
-		SELECT is_resolved
+	var current struct {
+		Status     string `db:"status"`
+		IsResolved bool   `db:"is_resolved"`
+	}
+	if err := tx.GetContext(ctx, &current, `
+		SELECT status, is_resolved
 		FROM tickets
 		WHERE id = $1
 		FOR UPDATE
@@ -143,6 +178,13 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket, actorID strin
 			return nil, err
 		}
 	}
+	if current.Status != ticket.Status {
+		rank, err := r.rankAtEnd(ctx, tx, ticket.ProjectID, ticket.Status, ticket.ID)
+		if err != nil {
+			return nil, err
+		}
+		ticket.Rank = rank
+	}
 
 	ticket.IsResolved = ticket.Status == "done"
 	result, err := tx.ExecContext(ctx, `
@@ -153,16 +195,17 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket, actorID strin
 			status = $4,
 			priority = $5,
 			type = $6,
-			parent_id = $7,
-			is_resolved = $8,
+			rank = $7,
+			parent_id = $8,
+			is_resolved = $9,
 			resolved_at = CASE
-				WHEN $8 AND resolved_at IS NULL THEN now()
-				WHEN NOT $8 THEN NULL
+				WHEN $9 AND resolved_at IS NULL THEN now()
+				WHEN NOT $9 THEN NULL
 				ELSE resolved_at
 			END,
 			resolved_by_actor_id = CASE
-				WHEN $8 AND NOT $9 THEN CAST($10 AS uuid)
-				WHEN $8 THEN resolved_by_actor_id
+				WHEN $9 AND NOT $10 THEN CAST($11 AS uuid)
+				WHEN $9 THEN resolved_by_actor_id
 				ELSE NULL
 			END
 		WHERE id = $1
@@ -173,9 +216,10 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket, actorID strin
 		ticket.Status,
 		ticket.Priority,
 		ticket.Type,
+		ticket.Rank,
 		ticket.ParentID,
 		ticket.IsResolved,
-		wasResolved,
+		current.IsResolved,
 		actorID,
 	)
 	if err != nil {
@@ -226,6 +270,82 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket, actorID strin
 		return nil, err
 	}
 	return activityIDs, nil
+}
+
+// Move changes a ticket status and rank using neighbor ticket boundaries.
+func (r *PgRepository) Move(ctx context.Context, ticketID, actorID, status string, beforeTicketID, afterTicketID *string) (*Ticket, []string, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+
+	var current struct {
+		ProjectID  string `db:"project_id"`
+		IsResolved bool   `db:"is_resolved"`
+		ReporterID string `db:"reporter_id"`
+	}
+	if err := tx.GetContext(ctx, &current, `
+		SELECT project_id::text, is_resolved, reporter_id::text
+		FROM tickets
+		WHERE id = $1
+		FOR UPDATE
+	`, ticketID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, errors.New("ticket to move not found")
+		}
+		return nil, nil, err
+	}
+
+	rank, err := r.rankBetween(ctx, tx, current.ProjectID, status, ticketID, beforeTicketID, afterTicketID)
+	if err != nil {
+		return nil, nil, err
+	}
+	isResolved := status == "done"
+	result, err := tx.ExecContext(ctx, `
+		UPDATE tickets
+		SET
+			status = $2,
+			rank = $3,
+			is_resolved = $4,
+			resolved_at = CASE
+				WHEN $4 AND resolved_at IS NULL THEN now()
+				WHEN NOT $4 THEN NULL
+				ELSE resolved_at
+			END,
+			resolved_by_actor_id = CASE
+				WHEN $4 AND NOT $5 THEN CAST($6 AS uuid)
+				WHEN $4 THEN resolved_by_actor_id
+				ELSE NULL
+			END
+		WHERE id = $1
+	`, ticketID, status, rank, isResolved, current.IsResolved, actorID)
+	if err != nil {
+		return nil, nil, err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, nil, err
+	}
+	if rowsAffected == 0 {
+		return nil, nil, errors.New("ticket to move not found")
+	}
+
+	moved, err := r.getByIDInTx(ctx, tx, ticketID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := r.writeTicketObject(ctx, tx, moved); err != nil {
+		return nil, nil, err
+	}
+	activityID, err := r.writeTicketActivity(ctx, tx, "Update", moved, actorID, moved.APID, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, nil, err
+	}
+	return moved, []string{activityID}, nil
 }
 
 // Delete removes a ticket and tombstones its related ActivityPub objects.
@@ -400,6 +520,156 @@ func (r *PgRepository) GetLinksByProjectID(ctx context.Context, projectID string
 	return links, nil
 }
 
+// getByIDInTx loads a ticket projection inside an existing transaction.
+func (r *PgRepository) getByIDInTx(ctx context.Context, tx *sqlx.Tx, id string) (*Ticket, error) {
+	var t Ticket
+	query := ticketSelectBase() + ` WHERE t.id = $1`
+	if err := tx.GetContext(ctx, &t, query, id); err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+// rankAtEnd returns a rank after the current last ticket in a status group.
+func (r *PgRepository) rankAtEnd(ctx context.Context, tx *sqlx.Tx, projectID, status, excludedTicketID string) (string, error) {
+	if err := lockTicketRankGroup(ctx, tx, projectID, status); err != nil {
+		return "", err
+	}
+	rank, err := rankAtEndLocked(ctx, tx, projectID, status, excludedTicketID)
+	if errors.Is(err, lexorank.ErrNoSpace) {
+		if err := rebalanceStatusRanks(ctx, tx, projectID, status, excludedTicketID); err != nil {
+			return "", err
+		}
+		return rankAtEndLocked(ctx, tx, projectID, status, excludedTicketID)
+	}
+	return rank, err
+}
+
+// rankBetween returns a rank between optional before and after boundary tickets.
+func (r *PgRepository) rankBetween(ctx context.Context, tx *sqlx.Tx, projectID, status, ticketID string, beforeTicketID, afterTicketID *string) (string, error) {
+	if err := lockTicketRankGroup(ctx, tx, projectID, status); err != nil {
+		return "", err
+	}
+	rank, err := rankBetweenLocked(ctx, tx, projectID, status, ticketID, beforeTicketID, afterTicketID)
+	if errors.Is(err, lexorank.ErrNoSpace) {
+		if err := rebalanceStatusRanks(ctx, tx, projectID, status, ticketID); err != nil {
+			return "", err
+		}
+		return rankBetweenLocked(ctx, tx, projectID, status, ticketID, beforeTicketID, afterTicketID)
+	}
+	return rank, err
+}
+
+// rankAtEndLocked computes an end rank after the caller has locked the rank group.
+func rankAtEndLocked(ctx context.Context, tx *sqlx.Tx, projectID, status, excludedTicketID string) (string, error) {
+	query := `
+		SELECT rank
+		FROM tickets
+		WHERE project_id = $1
+			AND status = $2
+			AND ($3 = '' OR id <> $3::uuid)
+		ORDER BY rank DESC, created_at DESC, id DESC
+		LIMIT 1
+		FOR UPDATE
+	`
+	var lastRank string
+	if err := tx.GetContext(ctx, &lastRank, query, projectID, status, excludedTicketID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return lexorank.Initial(), nil
+		}
+		return "", err
+	}
+	return lexorank.Between(lastRank, "")
+}
+
+// rankBetweenLocked computes a neighbor rank after the caller has locked the rank group.
+func rankBetweenLocked(ctx context.Context, tx *sqlx.Tx, projectID, status, ticketID string, beforeTicketID, afterTicketID *string) (string, error) {
+	if beforeTicketID != nil && afterTicketID != nil && strings.TrimSpace(*beforeTicketID) == strings.TrimSpace(*afterTicketID) {
+		return "", invalidTicketInput("move boundaries must be different tickets")
+	}
+	if beforeTicketID == nil && afterTicketID == nil {
+		return rankAtEndLocked(ctx, tx, projectID, status, ticketID)
+	}
+
+	var prevRank string
+	if afterTicketID != nil {
+		rank, err := boundaryRank(ctx, tx, projectID, status, ticketID, *afterTicketID, "after")
+		if err != nil {
+			return "", err
+		}
+		prevRank = rank
+	}
+	var nextRank string
+	if beforeTicketID != nil {
+		rank, err := boundaryRank(ctx, tx, projectID, status, ticketID, *beforeTicketID, "before")
+		if err != nil {
+			return "", err
+		}
+		nextRank = rank
+	}
+	rank, err := lexorank.Between(prevRank, nextRank)
+	if err != nil && !errors.Is(err, lexorank.ErrNoSpace) {
+		return "", invalidTicketInput("move boundaries are not in board order")
+	}
+	return rank, err
+}
+
+// boundaryRank validates a move boundary ticket and returns its rank.
+func boundaryRank(ctx context.Context, tx *sqlx.Tx, projectID, status, movingTicketID, boundaryTicketID, label string) (string, error) {
+	boundaryTicketID = strings.TrimSpace(boundaryTicketID)
+	if boundaryTicketID == "" {
+		return "", invalidTicketInput(label + " ticket id is required")
+	}
+	if boundaryTicketID == movingTicketID {
+		return "", invalidTicketInput("ticket cannot be moved relative to itself")
+	}
+
+	var rank string
+	if err := tx.GetContext(ctx, &rank, `
+		SELECT rank
+		FROM tickets
+		WHERE id = $1
+			AND project_id = $2
+			AND status = $3
+		FOR UPDATE
+	`, boundaryTicketID, projectID, status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", invalidTicketInput(label + " ticket must be in the target status")
+		}
+		return "", err
+	}
+	return rank, nil
+}
+
+// lockTicketRankGroup serializes rank mutations for one project status column.
+func lockTicketRankGroup(ctx context.Context, tx *sqlx.Tx, projectID, status string) error {
+	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, projectID+":"+status)
+	return err
+}
+
+// rebalanceStatusRanks redistributes ranks when a status group has no midpoint.
+func rebalanceStatusRanks(ctx context.Context, tx *sqlx.Tx, projectID, status, excludedTicketID string) error {
+	ids := make([]string, 0)
+	if err := tx.SelectContext(ctx, &ids, `
+		SELECT id::text
+		FROM tickets
+		WHERE project_id = $1
+			AND status = $2
+			AND ($3 = '' OR id <> $3::uuid)
+		ORDER BY rank ASC, created_at ASC, id ASC
+		FOR UPDATE
+	`, projectID, status, excludedTicketID); err != nil {
+		return err
+	}
+	ranks := lexorank.EvenlySpaced(len(ids))
+	for index, id := range ids {
+		if _, err := tx.ExecContext(ctx, `UPDATE tickets SET rank = $2 WHERE id = $1`, id, ranks[index]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // writeTicketObject writes the current ForgeFed Ticket JSON-LD snapshot.
 func (r *PgRepository) writeTicketObject(ctx context.Context, tx *sqlx.Tx, ticket *Ticket) error {
 	projectAPID, err := lookupActorAPID(ctx, tx, ticket.ProjectID)
@@ -519,6 +789,7 @@ func ticketSelectBase() string {
 			t.status,
 			t.priority,
 			t.type,
+			t.rank,
 			t.parent_id::text,
 			t.project_id::text,
 			t.reporter_id::text,

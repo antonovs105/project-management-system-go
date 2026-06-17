@@ -8,21 +8,30 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { GripVertical, UserRound } from "lucide-react";
+import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { ticketStatuses } from "../../lib/constants";
-import type { ID, Ticket, TicketStatus } from "../../types";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EmptyState, Panel } from "../../components/ui";
+import { ticketStatuses } from "../../lib/constants";
+import type { ID, ProjectMember, Ticket, TicketStatus } from "../../types";
+import { projectMemberLabel } from "./MemberAssigneeSelect";
 
 function columnTitle(status: TicketStatus): string {
   return ticketStatuses.find((item) => item.id === status)?.label || status;
 }
 
-function TicketCard({ ticket, onOpen }: { ticket: Ticket; onOpen: (ticketId: ID) => void }) {
+function TicketCard({
+  ticket,
+  members,
+  onOpen,
+}: {
+  ticket: Ticket;
+  members: ProjectMember[];
+  onOpen: (ticketId: ID) => void;
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: ticket.id,
     data: { ticket },
@@ -51,6 +60,10 @@ function TicketCard({ ticket, onOpen }: { ticket: Ticket; onOpen: (ticketId: ID)
             </div>
             <h3 className="line-clamp-2 text-sm font-semibold leading-5 text-zinc-950">{ticket.title}</h3>
             {ticket.description ? <p className="mt-2 line-clamp-2 text-xs text-zinc-500">{ticket.description}</p> : null}
+            <div className="mt-3 flex items-center gap-1.5 text-xs text-zinc-500">
+              <UserRound size={13} />
+              <span className="truncate">{projectMemberLabel(members, ticket.assignee_id)}</span>
+            </div>
           </div>
           <span
             className="pointer-events-none flex h-7 w-7 shrink-0 items-center justify-center rounded-xl text-zinc-300 transition group-hover:text-zinc-500"
@@ -67,10 +80,12 @@ function TicketCard({ ticket, onOpen }: { ticket: Ticket; onOpen: (ticketId: ID)
 function BoardColumn({
   status,
   tickets,
+  members,
   onOpen,
 }: {
   status: TicketStatus;
   tickets: Ticket[];
+  members: ProjectMember[];
   onOpen: (ticketId: ID) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
@@ -92,7 +107,7 @@ function BoardColumn({
       >
         <SortableContext items={tickets.map((ticket) => ticket.id)} strategy={verticalListSortingStrategy}>
           {tickets.map((ticket) => (
-            <TicketCard key={ticket.id} ticket={ticket} onOpen={onOpen} />
+            <TicketCard key={ticket.id} ticket={ticket} members={members} onOpen={onOpen} />
           ))}
         </SortableContext>
         {tickets.length === 0 ? (
@@ -105,48 +120,46 @@ function BoardColumn({
   );
 }
 
+function neighbors(items: Ticket[], ticketId: ID) {
+  const index = items.findIndex((item) => item.id === ticketId);
+  return {
+    beforeTicketId: index >= 0 ? items[index + 1]?.id || null : null,
+    afterTicketId: index >= 0 ? items[index - 1]?.id || null : null,
+  };
+}
+
 export function TicketBoard({
   tickets,
+  members,
   onOpenTicket,
   onMoveTicket,
   emptyAction,
 }: {
   tickets: Ticket[];
+  members: ProjectMember[];
   onOpenTicket: (ticketId: ID) => void;
-  onMoveTicket: (ticketId: ID, status: TicketStatus) => void;
+  onMoveTicket: (ticketId: ID, status: TicketStatus, beforeTicketId: ID | null, afterTicketId: ID | null) => void;
   emptyAction?: ReactNode;
 }) {
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
-  const [pendingMoves, setPendingMoves] = useState<Record<ID, TicketStatus>>({});
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-
-  useEffect(() => {
-    setPendingMoves((current) => {
-      const next = { ...current };
-      const ticketIds = new Set(tickets.map((ticket) => ticket.id));
-      for (const ticketId of Object.keys(next)) {
-        if (!ticketIds.has(ticketId)) {
-          delete next[ticketId];
-        }
-      }
-      for (const ticket of tickets) {
-        if (next[ticket.id] === ticket.status) {
-          delete next[ticket.id];
-        }
-      }
-      return Object.keys(next).length === Object.keys(current).length ? current : next;
-    });
-  }, [tickets]);
 
   const grouped = useMemo(() => {
     const columns = new Map<TicketStatus, Ticket[]>();
     ticketStatuses.forEach((status) => columns.set(status.id, []));
     tickets.forEach((ticket) => {
-      const status = pendingMoves[ticket.id] || ticket.status;
-      columns.get(status)?.push({ ...ticket, status });
+      columns.get(ticket.status)?.push(ticket);
     });
     return columns;
-  }, [pendingMoves, tickets]);
+  }, [tickets]);
+
+  function statusFromOverId(overId: string): TicketStatus | null {
+    const status = ticketStatuses.find((item) => item.id === overId)?.id;
+    if (status) {
+      return status;
+    }
+    return tickets.find((ticket) => ticket.id === overId)?.status || null;
+  }
 
   function handleDragStart(event: DragStartEvent) {
     const ticket = tickets.find((item) => item.id === String(event.active.id));
@@ -156,17 +169,48 @@ export function TicketBoard({
   function handleDragEnd(event: DragEndEvent) {
     const activeId = String(event.active.id);
     const overId = event.over?.id ? String(event.over.id) : "";
-
     const ticket = tickets.find((item) => item.id === activeId);
     if (!ticket || !overId) {
       setActiveTicket(null);
       return;
     }
 
-    const targetStatus = ticketStatuses.find((status) => status.id === overId)?.id;
-    if (targetStatus && targetStatus !== ticket.status) {
-      setPendingMoves((current) => ({ ...current, [ticket.id]: targetStatus }));
-      onMoveTicket(ticket.id, targetStatus);
+    const targetStatus = statusFromOverId(overId);
+    if (!targetStatus) {
+      setActiveTicket(null);
+      return;
+    }
+
+    const targetOriginal = grouped.get(targetStatus) || [];
+    let nextTarget: Ticket[];
+    if (targetStatus === ticket.status) {
+      const oldIndex = targetOriginal.findIndex((item) => item.id === activeId);
+      const newIndex = targetOriginal.findIndex((item) => item.id === overId);
+      if (oldIndex < 0) {
+        setActiveTicket(null);
+        return;
+      }
+      nextTarget =
+        newIndex >= 0 ? arrayMove(targetOriginal, oldIndex, newIndex) : [...targetOriginal.filter((item) => item.id !== activeId), ticket];
+    } else {
+      const withoutActive = targetOriginal.filter((item) => item.id !== activeId);
+      const overIndex = withoutActive.findIndex((item) => item.id === overId);
+      const insertIndex = overIndex >= 0 ? overIndex : withoutActive.length;
+      nextTarget = [
+        ...withoutActive.slice(0, insertIndex),
+        { ...ticket, status: targetStatus },
+        ...withoutActive.slice(insertIndex),
+      ];
+    }
+
+    const previousNeighbors = neighbors(grouped.get(ticket.status) || [], ticket.id);
+    const nextNeighbors = neighbors(nextTarget, ticket.id);
+    if (
+      targetStatus !== ticket.status ||
+      previousNeighbors.beforeTicketId !== nextNeighbors.beforeTicketId ||
+      previousNeighbors.afterTicketId !== nextNeighbors.afterTicketId
+    ) {
+      onMoveTicket(ticket.id, targetStatus, nextNeighbors.beforeTicketId, nextNeighbors.afterTicketId);
     }
     setActiveTicket(null);
   }
@@ -179,7 +223,13 @@ export function TicketBoard({
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="flex gap-4 overflow-x-auto pb-3">
         {ticketStatuses.map((status) => (
-          <BoardColumn key={status.id} status={status.id} tickets={grouped.get(status.id) || []} onOpen={onOpenTicket} />
+          <BoardColumn
+            key={status.id}
+            status={status.id}
+            tickets={grouped.get(status.id) || []}
+            members={members}
+            onOpen={onOpenTicket}
+          />
         ))}
       </div>
       <DragOverlay dropAnimation={null}>

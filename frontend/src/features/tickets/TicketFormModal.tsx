@@ -5,8 +5,9 @@ import { api, errorMessage } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { ticketPriorities, ticketTypes } from "../../lib/constants";
 import { fieldLimits } from "../../lib/limits";
-import type { ID, Ticket, TicketPriority, TicketType } from "../../types";
+import type { ID, ProjectMember, Ticket, TicketPriority, TicketType } from "../../types";
 import { Button, ErrorState, Modal, SelectField, TextAreaField, TextField } from "../../components/ui";
+import { MemberAssigneeSelect } from "./MemberAssigneeSelect";
 
 function parentCandidates(type: TicketType, tickets: Ticket[]): Ticket[] {
   if (type === "task") {
@@ -21,11 +22,13 @@ function parentCandidates(type: TicketType, tickets: Ticket[]): Ticket[] {
 export function TicketFormModal({
   projectId,
   tickets,
+  members,
   open,
   onClose,
 }: {
   projectId: ID;
   tickets: Ticket[];
+  members: ProjectMember[];
   open: boolean;
   onClose: () => void;
 }) {
@@ -130,7 +133,7 @@ export function TicketFormModal({
             ))}
           </SelectField>
         ) : null}
-        <TextField label="Assignee ID" value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)} />
+        <MemberAssigneeSelect members={members} value={assigneeId} onChange={setAssigneeId} />
         <TextAreaField
           label="Description"
           value={description}

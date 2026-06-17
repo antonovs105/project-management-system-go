@@ -32,8 +32,18 @@ export function AccountPage() {
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError(null);
+    const currentPasswordLength = Array.from(currentPassword).length;
+    const currentPasswordBytes = new TextEncoder().encode(currentPassword).length;
     const passwordLength = Array.from(newPassword).length;
     const passwordBytes = new TextEncoder().encode(newPassword).length;
+    if (currentPasswordLength < fieldLimits.passwordMinLength) {
+      setFormError(t("validation.passwordTooShort", { min: fieldLimits.passwordMinLength }));
+      return;
+    }
+    if (currentPasswordBytes > fieldLimits.passwordMaxBytes) {
+      setFormError(t("validation.passwordTooLong", { max: fieldLimits.passwordMaxBytes }));
+      return;
+    }
     if (passwordLength < fieldLimits.passwordMinLength) {
       setFormError(t("validation.passwordTooShort", { min: fieldLimits.passwordMinLength }));
       return;
@@ -96,6 +106,9 @@ export function AccountPage() {
             value={currentPassword}
             onChange={(event) => setCurrentPassword(event.target.value)}
             autoComplete="current-password"
+            minLength={fieldLimits.passwordMinLength}
+            maxLength={fieldLimits.passwordMaxLength}
+            hint={t("validation.passwordHint", { min: fieldLimits.passwordMinLength })}
             required
           />
           <TextField

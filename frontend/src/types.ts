@@ -107,6 +107,7 @@ export interface Ticket {
   status: TicketStatus;
   priority: TicketPriority;
   type: TicketType;
+  rank: string;
   parent_id: ID | null;
   project_id: ID;
   reporter_id: ID;
@@ -124,6 +125,21 @@ export interface TicketEvent {
   project_id: ID;
   ticket_id?: ID;
   occurred_at: string;
+}
+
+export type NotificationType = "ticket.assigned";
+
+export interface Notification {
+  id: ID;
+  user_id: ID;
+  actor_id?: ID;
+  project_id?: ID;
+  ticket_id?: ID;
+  type: NotificationType;
+  title: string;
+  body: string;
+  read_at?: string;
+  created_at: string;
 }
 
 export interface Comment {

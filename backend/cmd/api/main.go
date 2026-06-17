@@ -30,6 +30,7 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/comment"
 	"github.com/antonovs105/project-management-system-go/internal/githubintegration"
 	authMiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
+	"github.com/antonovs105/project-management-system-go/internal/notification"
 	"github.com/antonovs105/project-management-system-go/internal/observability"
 	"github.com/antonovs105/project-management-system-go/internal/project"
 	"github.com/antonovs105/project-management-system-go/internal/secrets"
@@ -118,6 +119,7 @@ var requiredDatabaseTables = []string{
 	"project_github_repositories",
 	"github_commits",
 	"github_commit_ticket_links",
+	"notifications",
 }
 
 // appRole selects which server responsibilities this process owns.
@@ -125,24 +127,25 @@ type appRole string
 
 // ApiServer wires database-backed services into the HTTP server.
 type ApiServer struct {
-	db                *sqlx.DB
-	redisAddr         string
-	metrics           *observability.Metrics
-	metricsToken      string
-	userHandler       *user.Handler
-	projectHandler    *project.Handler
-	ticketHandler     *ticket.Handler
-	commentHandler    *comment.Handler
-	githubHandler     *githubintegration.Handler
-	apHandler         *activitypub.Handler
-	c2sHandler        *c2s.Handler
-	inboxHandler      *remoteinbox.Handler
-	federationHandler *apfederation.Handler
-	moderationHandler *apmoderation.Handler
-	deliveryHandler   *delivery.Handler
-	auditHandler      *adminaudit.Handler
-	deliverySvc       *delivery.Service
-	wfHandler         *webfinger.Handler
+	db                  *sqlx.DB
+	redisAddr           string
+	metrics             *observability.Metrics
+	metricsToken        string
+	userHandler         *user.Handler
+	projectHandler      *project.Handler
+	ticketHandler       *ticket.Handler
+	commentHandler      *comment.Handler
+	notificationHandler *notification.Handler
+	githubHandler       *githubintegration.Handler
+	apHandler           *activitypub.Handler
+	c2sHandler          *c2s.Handler
+	inboxHandler        *remoteinbox.Handler
+	federationHandler   *apfederation.Handler
+	moderationHandler   *apmoderation.Handler
+	deliveryHandler     *delivery.Handler
+	auditHandler        *adminaudit.Handler
+	deliverySvc         *delivery.Service
+	wfHandler           *webfinger.Handler
 }
 
 // signatureActorVerifier adapts HTTP signature verification to ActivityPub authorization.
@@ -431,6 +434,14 @@ func main() {
 	ticketService.SetEventPublisher(ticketEvents)
 	ticketHandler := ticket.NewHandler(ticketService, ticket.WithEventSubscriber(ticketEvents))
 
+	notificationEvents := notification.NewEventHub()
+	notificationService := notification.NewService(
+		notification.NewRepository(db),
+		notification.WithEventPublisher(notificationEvents),
+	)
+	ticketService.SetNotificationSink(notificationService)
+	notificationHandler := notification.NewHandler(notificationService, notification.WithEventSubscriber(notificationEvents))
+
 	commentRepo := comment.NewRepository(db, apConfig)
 	commentService := comment.NewService(commentRepo, ticketService, apConfig)
 	commentHandler := comment.NewHandler(commentService)
@@ -528,24 +539,25 @@ func main() {
 	wfHandler := webfinger.NewHandler(wfService)
 
 	server := &ApiServer{
-		db:                db,
-		redisAddr:         redisAddr,
-		metrics:           metrics,
-		metricsToken:      metricsToken,
-		userHandler:       userHandler,
-		projectHandler:    projectHandler,
-		ticketHandler:     ticketHandler,
-		commentHandler:    commentHandler,
-		githubHandler:     githubHandler,
-		apHandler:         apHandler,
-		c2sHandler:        c2sHandler,
-		inboxHandler:      inboxHandler,
-		federationHandler: federationHandler,
-		moderationHandler: moderationHandler,
-		deliveryHandler:   deliveryHandler,
-		auditHandler:      auditHandler,
-		deliverySvc:       deliveryService,
-		wfHandler:         wfHandler,
+		db:                  db,
+		redisAddr:           redisAddr,
+		metrics:             metrics,
+		metricsToken:        metricsToken,
+		userHandler:         userHandler,
+		projectHandler:      projectHandler,
+		ticketHandler:       ticketHandler,
+		commentHandler:      commentHandler,
+		notificationHandler: notificationHandler,
+		githubHandler:       githubHandler,
+		apHandler:           apHandler,
+		c2sHandler:          c2sHandler,
+		inboxHandler:        inboxHandler,
+		federationHandler:   federationHandler,
+		moderationHandler:   moderationHandler,
+		deliveryHandler:     deliveryHandler,
+		auditHandler:        auditHandler,
+		deliverySvc:         deliveryService,
+		wfHandler:           wfHandler,
 	}
 
 	if !role.runsAPI() {
@@ -797,6 +809,7 @@ func registerAuthenticatedAPIRoutes(api *echo.Group, server *ApiServer, jwtSecre
 	server.projectHandler.RegisterRoutes(api)
 	server.ticketHandler.RegisterRoutes(api)
 	server.commentHandler.RegisterRoutes(api)
+	server.notificationHandler.RegisterRoutes(api)
 	server.githubHandler.RegisterRoutes(api)
 	server.deliveryHandler.RegisterRoutes(api)
 	server.moderationHandler.RegisterRoutes(api)

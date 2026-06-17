@@ -44,6 +44,19 @@ func (m *MockRepository) Update(ctx context.Context, ticket *Ticket, actorID str
 	return args.Get(0).([]string), args.Error(1)
 }
 
+func (m *MockRepository) Move(ctx context.Context, ticketID, actorID, status string, beforeTicketID, afterTicketID *string) (*Ticket, []string, error) {
+	args := m.Called(ctx, ticketID, actorID, status, beforeTicketID, afterTicketID)
+	var moved *Ticket
+	if args.Get(0) != nil {
+		moved = args.Get(0).(*Ticket)
+	}
+	var activityIDs []string
+	if args.Get(1) != nil {
+		activityIDs = args.Get(1).([]string)
+	}
+	return moved, activityIDs, args.Error(2)
+}
+
 func (m *MockRepository) Delete(ctx context.Context, id string, actorID string) (*DeleteResult, error) {
 	args := m.Called(ctx, id, actorID)
 	if args.Get(0) == nil {

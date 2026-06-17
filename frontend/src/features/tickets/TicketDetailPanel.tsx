@@ -9,9 +9,10 @@ import { ticketLinkTypes, ticketPriorities, ticketStatuses, ticketTypes } from "
 import { compactId, relativeDate } from "../../lib/format";
 import { fieldLimits } from "../../lib/limits";
 import { queryKeys } from "../../lib/queryKeys";
-import type { GitHubCommit, ID, Ticket, TicketPriority, TicketStatus, TicketType } from "../../types";
+import type { GitHubCommit, ID, ProjectMember, Ticket, TicketPriority, TicketStatus, TicketType } from "../../types";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Button, ErrorState, IconButton, LoadingState, SelectField, TextAreaField, TextField } from "../../components/ui";
+import { MemberAssigneeSelect } from "./MemberAssigneeSelect";
 
 function parentCandidates(type: TicketType, ticketId: ID, tickets: Ticket[]): Ticket[] {
   if (type === "task") {
@@ -27,11 +28,13 @@ function TicketEditor({
   projectId,
   ticket,
   tickets,
+  members,
   onClose,
 }: {
   projectId: ID;
   ticket: Ticket;
   tickets: Ticket[];
+  members: ProjectMember[];
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -130,7 +133,7 @@ function TicketEditor({
           ))}
         </SelectField>
       ) : null}
-      <TextField label="Assignee ID" value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)} />
+      <MemberAssigneeSelect members={members} value={assigneeId} onChange={setAssigneeId} />
       <TextAreaField
         label="Description"
         value={description}
@@ -376,11 +379,13 @@ export function TicketDetailPanel({
   projectId,
   ticketId,
   tickets,
+  members,
   onClose,
 }: {
   projectId: ID;
   ticketId: ID;
   tickets: Ticket[];
+  members: ProjectMember[];
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -456,6 +461,7 @@ export function TicketDetailPanel({
                 projectId={projectId}
                 ticket={ticket.data}
                 tickets={tickets}
+                members={members}
                 onClose={onClose}
               />
 

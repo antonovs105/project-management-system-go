@@ -11,6 +11,7 @@ type Ticket struct {
 	Status      string    `db:"status" json:"status"`
 	Priority    string    `db:"priority" json:"priority"`
 	Type        string    `db:"type" json:"type"`
+	Rank        string    `db:"rank" json:"rank"`
 	ParentID    *string   `db:"parent_id" json:"parent_id"`
 	ProjectID   string    `db:"project_id" json:"project_id"`
 	ReporterID  string    `db:"reporter_id" json:"reporter_id"`
@@ -31,8 +32,10 @@ type TicketLink struct {
 
 // TicketListOptions contains pagination for ticket list responses.
 type TicketListOptions struct {
-	Limit  int
-	Offset int
+	Limit      int
+	Offset     int
+	AssigneeID *string
+	Unassigned bool
 }
 
 // DeleteResult carries the ActivityPub side effects produced by ticket deletion.

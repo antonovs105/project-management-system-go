@@ -24,7 +24,7 @@ func TestProductionDeclarationsHaveGoDoc(t *testing.T) {
 		}
 		if entry.IsDir() {
 			switch entry.Name() {
-			case ".git", ".gocache", "vendor":
+			case ".git", ".gocache", ".gotmp", "vendor":
 				return filepath.SkipDir
 			default:
 				return nil

@@ -6,16 +6,18 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ProjectDeliveriesPanel } from "../features/projects/ProjectDeliveriesPanel";
 import { ProjectSettingsPanel } from "../features/projects/ProjectSettingsPanel";
+import { projectMemberLabel } from "../features/tickets/MemberAssigneeSelect";
 import { TicketBoard } from "../features/tickets/TicketBoard";
 import { TicketDetailPanel } from "../features/tickets/TicketDetailPanel";
 import { TicketFormModal } from "../features/tickets/TicketFormModal";
 import { api, errorMessage, projectTicketEventsURL } from "../lib/api";
+import { ticketStatuses } from "../lib/constants";
 import { relativeDate } from "../lib/format";
 import { fieldLimits } from "../lib/limits";
 import { queryKeys } from "../lib/queryKeys";
 import { useAuthStore } from "../store/auth";
 import type { ID, Ticket, TicketEvent, TicketStatus } from "../types";
-import { Button, ErrorState, LoadingState, Modal, Panel, TextAreaField, TextField } from "../components/ui";
+import { Button, ErrorState, LoadingState, Modal, Panel, SelectField, TextAreaField, TextField } from "../components/ui";
 
 const ProjectGraph = lazy(() =>
   import("../features/graph/ProjectGraph").then((module) => ({ default: module.ProjectGraph })),
@@ -53,6 +55,36 @@ function SummaryItem({ icon, label, value }: { icon: ReactNode; label: string; v
   );
 }
 
+function moveTicketsOptimistically(
+  tickets: Ticket[],
+  ticketId: ID,
+  status: TicketStatus,
+  beforeTicketId: ID | null,
+  afterTicketId: ID | null,
+): Ticket[] {
+  const moving = tickets.find((ticket) => ticket.id === ticketId);
+  if (!moving) {
+    return tickets;
+  }
+  const withoutMoving = tickets.filter((ticket) => ticket.id !== ticketId);
+  const byStatus = new Map<TicketStatus, Ticket[]>();
+  ticketStatuses.forEach((item) => byStatus.set(item.id, withoutMoving.filter((ticket) => ticket.status === item.id)));
+
+  const target = [...(byStatus.get(status) || [])];
+  let insertIndex = target.length;
+  if (beforeTicketId) {
+    const beforeIndex = target.findIndex((ticket) => ticket.id === beforeTicketId);
+    insertIndex = beforeIndex >= 0 ? beforeIndex : insertIndex;
+  } else if (afterTicketId) {
+    const afterIndex = target.findIndex((ticket) => ticket.id === afterTicketId);
+    insertIndex = afterIndex >= 0 ? afterIndex + 1 : insertIndex;
+  }
+  target.splice(Math.max(0, Math.min(insertIndex, target.length)), 0, { ...moving, status });
+  byStatus.set(status, target);
+
+  return ticketStatuses.flatMap((item) => byStatus.get(item.id) || []);
+}
+
 function parseSSEMessage(raw: string): { event: string; data: string } | null {
   let event = "message";
   const data: string[] = [];
@@ -80,11 +112,13 @@ export function ProjectWorkspace() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const token = useAuthStore((state) => state.token);
+  const user = useAuthStore((state) => state.user);
   const [createTicketOpen, setCreateTicketOpen] = useState(false);
   const [selectedTicketId, setSelectedTicketId] = useState<ID | null>(null);
   const [editProjectOpen, setEditProjectOpen] = useState(false);
   const [projectName, setProjectName] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
+  const [assigneeFilter, setAssigneeFilter] = useState("all");
   const activeProjectId = projectId || "";
 
   const view = viewFromPath(location.pathname);
@@ -101,6 +135,12 @@ export function ProjectWorkspace() {
     enabled: Boolean(projectId),
   });
 
+  const members = useQuery({
+    queryKey: queryKeys.projectMembers(activeProjectId),
+    queryFn: () => api.listProjectMembers(activeProjectId),
+    enabled: Boolean(projectId),
+  });
+
   const ticketStats = useMemo(() => {
     const currentTickets = tickets.data || [];
     return {
@@ -110,6 +150,20 @@ export function ProjectWorkspace() {
       done: currentTickets.filter((ticket) => ticket.status === "done").length,
     };
   }, [tickets.data]);
+
+  const visibleTickets = useMemo(() => {
+    const currentTickets = tickets.data || [];
+    if (assigneeFilter === "all") {
+      return currentTickets;
+    }
+    if (assigneeFilter === "me") {
+      return user?.userId ? currentTickets.filter((ticket) => ticket.assignee_id === user.userId) : [];
+    }
+    if (assigneeFilter === "unassigned") {
+      return currentTickets.filter((ticket) => !ticket.assignee_id);
+    }
+    return currentTickets.filter((ticket) => ticket.assignee_id === assigneeFilter);
+  }, [assigneeFilter, tickets.data, user?.userId]);
 
   const graph = useQuery({
     queryKey: queryKeys.graph(activeProjectId),
@@ -205,13 +259,28 @@ export function ProjectWorkspace() {
     };
   }, [activeProjectId, queryClient, token]);
 
-  const updateTicketStatus = useMutation({
-    mutationFn: ({ ticketId, status }: { ticketId: ID; status: TicketStatus }) => api.updateTicket(ticketId, { status }),
-    onMutate: async ({ ticketId, status }) => {
+  const moveTicket = useMutation({
+    mutationFn: ({
+      ticketId,
+      status,
+      beforeTicketId,
+      afterTicketId,
+    }: {
+      ticketId: ID;
+      status: TicketStatus;
+      beforeTicketId: ID | null;
+      afterTicketId: ID | null;
+    }) =>
+      api.moveTicket(ticketId, {
+        status,
+        before_ticket_id: beforeTicketId,
+        after_ticket_id: afterTicketId,
+      }),
+    onMutate: async ({ ticketId, status, beforeTicketId, afterTicketId }) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.tickets(activeProjectId) });
       const previous = queryClient.getQueryData<Ticket[]>(queryKeys.tickets(activeProjectId));
       queryClient.setQueryData<Ticket[]>(queryKeys.tickets(activeProjectId), (current = []) =>
-        current.map((ticket) => (ticket.id === ticketId ? { ...ticket, status } : ticket)),
+        moveTicketsOptimistically(current, ticketId, status, beforeTicketId, afterTicketId),
       );
       return { previous };
     },
@@ -321,7 +390,7 @@ export function ProjectWorkspace() {
               </Link>
             </div>
             <div className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-sm text-zinc-500 shadow-sm">
-              {tickets.data?.length || 0} tickets
+              {visibleTickets.length} / {tickets.data?.length || 0} tickets
             </div>
           </div>
 
@@ -331,17 +400,42 @@ export function ProjectWorkspace() {
           ) : null}
 
           {view === "board" && tickets.data ? (
-            <TicketBoard
-              tickets={tickets.data}
-              onOpenTicket={setSelectedTicketId}
-              onMoveTicket={(ticketId, status) => updateTicketStatus.mutate({ ticketId, status })}
-              emptyAction={
-                <Button tone="primary" onClick={() => setCreateTicketOpen(true)}>
-                  <Plus size={16} />
-                  Create ticket
-                </Button>
-              }
-            />
+            <div className="grid gap-3">
+              <div className="flex flex-col gap-3 rounded-3xl border border-zinc-200 bg-white p-3 shadow-sm sm:flex-row sm:items-end sm:justify-between">
+                <SelectField
+                  className="min-w-64"
+                  label="Assignee filter"
+                  value={assigneeFilter}
+                  onChange={(event) => setAssigneeFilter(event.target.value)}
+                >
+                  <option value="all">All tickets</option>
+                  <option value="me">My tickets</option>
+                  <option value="unassigned">Unassigned</option>
+                  {(members.data || []).map((member) => (
+                    <option key={member.user_id} value={member.user_id}>
+                      {projectMemberLabel(members.data || [], member.user_id)}
+                    </option>
+                  ))}
+                </SelectField>
+                {members.isError ? (
+                  <div className="text-sm text-red-600">{errorMessage(members.error, "Could not load project members.")}</div>
+                ) : null}
+              </div>
+              <TicketBoard
+                tickets={visibleTickets}
+                members={members.data || []}
+                onOpenTicket={setSelectedTicketId}
+                onMoveTicket={(ticketId, status, beforeTicketId, afterTicketId) =>
+                  moveTicket.mutate({ ticketId, status, beforeTicketId, afterTicketId })
+                }
+                emptyAction={
+                  <Button tone="primary" onClick={() => setCreateTicketOpen(true)}>
+                    <Plus size={16} />
+                    Create ticket
+                  </Button>
+                }
+              />
+            </div>
           ) : null}
 
           {view === "graph" ? (
@@ -363,6 +457,7 @@ export function ProjectWorkspace() {
           <TicketFormModal
             projectId={activeProjectId}
             tickets={tickets.data || []}
+            members={members.data || []}
             open={createTicketOpen}
             onClose={() => setCreateTicketOpen(false)}
           />
@@ -372,6 +467,7 @@ export function ProjectWorkspace() {
               projectId={activeProjectId}
               ticketId={selectedTicketId}
               tickets={tickets.data || []}
+              members={members.data || []}
               onClose={() => setSelectedTicketId(null)}
             />
           ) : null}

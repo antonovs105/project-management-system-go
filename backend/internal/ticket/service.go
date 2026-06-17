@@ -27,6 +27,7 @@ type Service struct {
 	apConfig       activitypub.Config
 	delivery       DeliveryEnqueuer
 	events         EventPublisher
+	notifications  NotificationSink
 }
 
 // DeliveryEnqueuer queues federation deliveries created by ticket actions.
@@ -34,6 +35,11 @@ type DeliveryEnqueuer interface {
 	Enqueue(ctx context.Context, activityID string, targetInboxURL string) (*apdelivery.Delivery, error)
 	EnqueueProjectFollowers(ctx context.Context, projectID string, activityIDs ...string) error
 	EnqueueProjectTicketRecipients(ctx context.Context, projectID string, ticketID string, activityIDs ...string) error
+}
+
+// NotificationSink receives local user notifications caused by ticket workflows.
+type NotificationSink interface {
+	NotifyTicketAssigned(ctx context.Context, assigneeID, actorID string, ticket Ticket) error
 }
 
 // NewService creates a ticket service.
@@ -55,6 +61,11 @@ func (s *Service) SetEventPublisher(events EventPublisher) {
 	s.events = events
 }
 
+// SetNotificationSink attaches the local notification sink used by assignment workflows.
+func (s *Service) SetNotificationSink(notifications NotificationSink) {
+	s.notifications = notifications
+}
+
 // GetProjectRole returns a user's role in a project through the project service.
 func (s *Service) GetProjectRole(ctx context.Context, projectID, userID string) (string, error) {
 	return s.projectService.GetProjectRole(ctx, projectID, userID)
@@ -73,6 +84,13 @@ type CreateTicketRequest struct {
 	Type        string
 	ParentID    *string
 	AssigneeID  *string
+}
+
+// MoveTicketRequest contains the target board position for a ticket.
+type MoveTicketRequest struct {
+	Status         string
+	BeforeTicketID *string
+	AfterTicketID  *string
 }
 
 // ErrInvalidTicketInput reports malformed ticket-management input.
@@ -194,6 +212,7 @@ func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, pro
 	}
 	s.enqueueProjectTicketRecipients(ctx, projectID, t.ID, activityIDs...)
 	s.publishTicketEvent(Event{Type: EventTicketCreated, ProjectID: projectID, TicketID: t.ID})
+	s.notifyTicketAssigned(ctx, reporterID, t)
 
 	return t, nil
 }
@@ -242,6 +261,7 @@ func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, tic
 	if err != nil {
 		return err
 	}
+	previousAssigneeID := ticketToUpdate.AssigneeID
 	if err := s.requireProjectPermission(ctx, ticketToUpdate.ProjectID, userID, project.PermissionTicketsUpdate, "insufficient permissions: missing tickets.update"); err != nil {
 		return err
 	}
@@ -339,7 +359,34 @@ func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, tic
 	}
 	s.enqueueProjectTicketRecipients(ctx, ticketToUpdate.ProjectID, ticketToUpdate.ID, activityIDs...)
 	s.publishTicketEvent(Event{Type: EventTicketUpdated, ProjectID: ticketToUpdate.ProjectID, TicketID: ticketToUpdate.ID})
+	if assigneeChanged(previousAssigneeID, ticketToUpdate.AssigneeID) {
+		s.notifyTicketAssigned(ctx, userID, ticketToUpdate)
+	}
 	return nil
+}
+
+// MoveTicket reorders a ticket within or across board status groups.
+func (s *Service) MoveTicket(ctx context.Context, req MoveTicketRequest, ticketID, userID string) (*Ticket, error) {
+	ticketToMove, err := s.GetTicketByID(ctx, ticketID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireProjectPermission(ctx, ticketToMove.ProjectID, userID, project.PermissionTicketsUpdate, "insufficient permissions: missing tickets.update"); err != nil {
+		return nil, err
+	}
+	if req.Status == "" {
+		req.Status = ticketToMove.Status
+	}
+	if !ticketStatuses[req.Status] {
+		return nil, invalidTicketInput("invalid ticket status")
+	}
+	moved, activityIDs, err := s.repo.Move(ctx, ticketID, userID, req.Status, req.BeforeTicketID, req.AfterTicketID)
+	if err != nil {
+		return nil, err
+	}
+	s.enqueueProjectTicketRecipients(ctx, moved.ProjectID, moved.ID, activityIDs...)
+	s.publishTicketEvent(Event{Type: EventTicketUpdated, ProjectID: moved.ProjectID, TicketID: moved.ID})
+	return moved, nil
 }
 
 // invalidTicketInput wraps a validation message with the ticket input sentinel.
@@ -640,4 +687,26 @@ func (s *Service) publishTicketEvent(event Event) {
 		return
 	}
 	s.events.PublishTicketEvent(event)
+}
+
+// notifyTicketAssigned creates a local notification for newly assigned users.
+func (s *Service) notifyTicketAssigned(ctx context.Context, actorID string, ticket *Ticket) {
+	if s.notifications == nil || ticket == nil || ticket.AssigneeID == nil || *ticket.AssigneeID == "" || *ticket.AssigneeID == actorID {
+		return
+	}
+	if err := s.notifications.NotifyTicketAssigned(ctx, *ticket.AssigneeID, actorID, *ticket); err != nil {
+		log.Printf("failed to create assignment notification for ticket %s assignee %s: %v", ticket.ID, *ticket.AssigneeID, err)
+	}
+}
+
+// assigneeChanged reports whether a single-assignee value changed.
+func assigneeChanged(before, after *string) bool {
+	switch {
+	case before == nil && after == nil:
+		return false
+	case before == nil || after == nil:
+		return true
+	default:
+		return *before != *after
+	}
 }

@@ -22,6 +22,19 @@ func (p *testEventPublisher) PublishTicketEvent(event Event) {
 	p.events = append(p.events, event)
 }
 
+type testNotificationSink struct {
+	assignments []Ticket
+	assignees   []string
+	actors      []string
+}
+
+func (s *testNotificationSink) NotifyTicketAssigned(_ context.Context, assigneeID, actorID string, ticket Ticket) error {
+	s.assignees = append(s.assignees, assigneeID)
+	s.actors = append(s.actors, actorID)
+	s.assignments = append(s.assignments, ticket)
+	return nil
+}
+
 func TestService_CreateTicket(t *testing.T) {
 	mockRepo := new(MockRepository)
 	mockProject := new(MockProjectChecker)
@@ -285,6 +298,92 @@ func TestService_UpdateTicketUsesActingUser(t *testing.T) {
 	assert.Equal(t, EventTicketUpdated, events.events[0].Type)
 	assert.Equal(t, projectID, events.events[0].ProjectID)
 	assert.Equal(t, ticketID, events.events[0].TicketID)
+	mockRepo.AssertExpectations(t)
+	mockProject.AssertExpectations(t)
+}
+
+func TestService_UpdateTicketNotifiesNewAssignee(t *testing.T) {
+	mockRepo := new(MockRepository)
+	mockProject := new(MockProjectChecker)
+	service := NewService(mockRepo, mockProject, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+	notifications := &testNotificationSink{}
+	service.SetNotificationSink(notifications)
+
+	ctx := context.Background()
+	projectID := "project-1"
+	ticketID := "ticket-1"
+	actorID := "member-1"
+	assigneeID := "member-2"
+	assigneePtr := &assigneeID
+
+	storedTicket := &Ticket{
+		ID:          ticketID,
+		ProjectID:   projectID,
+		ReporterID:  "reporter-1",
+		Title:       "Ticket",
+		Description: "Description",
+		Status:      "open",
+		Priority:    "medium",
+		Type:        "task",
+	}
+
+	mockRepo.On("GetByID", ctx, ticketID).Return(storedTicket, nil).Once()
+	mockProject.On("GetProjectByID", ctx, projectID, actorID).Return(&project.Project{ID: projectID}, nil).Once()
+	mockProject.On("HasProjectPermission", ctx, projectID, actorID, project.PermissionTicketsUpdate).Return(true, nil).Once()
+	mockRepo.On("Update", ctx, mock.MatchedBy(func(t *Ticket) bool {
+		return t.ID == ticketID && t.AssigneeID != nil && *t.AssigneeID == assigneeID
+	}), actorID).Return([]string{"activity-1"}, nil).Once()
+
+	err := service.UpdateTicket(ctx, UpdateTicketRequest{AssigneeID: &assigneePtr}, ticketID, actorID)
+
+	require.NoError(t, err)
+	require.Len(t, notifications.assignments, 1)
+	assert.Equal(t, assigneeID, notifications.assignees[0])
+	assert.Equal(t, actorID, notifications.actors[0])
+	assert.Equal(t, ticketID, notifications.assignments[0].ID)
+	mockRepo.AssertExpectations(t)
+	mockProject.AssertExpectations(t)
+}
+
+func TestService_MoveTicket(t *testing.T) {
+	mockRepo := new(MockRepository)
+	mockProject := new(MockProjectChecker)
+	service := NewService(mockRepo, mockProject, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+	events := &testEventPublisher{}
+	service.SetEventPublisher(events)
+
+	ctx := context.Background()
+	projectID := "project-1"
+	ticketID := "ticket-1"
+	actorID := "member-1"
+	status := "review"
+	beforeID := "ticket-2"
+
+	storedTicket := &Ticket{
+		ID:          ticketID,
+		ProjectID:   projectID,
+		ReporterID:  "reporter-1",
+		Title:       "Ticket",
+		Description: "Description",
+		Status:      "open",
+		Priority:    "medium",
+		Type:        "task",
+	}
+	movedTicket := *storedTicket
+	movedTicket.Status = status
+
+	mockRepo.On("GetByID", ctx, ticketID).Return(storedTicket, nil).Once()
+	mockProject.On("GetProjectByID", ctx, projectID, actorID).Return(&project.Project{ID: projectID}, nil).Once()
+	mockProject.On("HasProjectPermission", ctx, projectID, actorID, project.PermissionTicketsUpdate).Return(true, nil).Once()
+	mockRepo.On("Move", ctx, ticketID, actorID, status, &beforeID, (*string)(nil)).Return(&movedTicket, []string{"activity-1"}, nil).Once()
+
+	moved, err := service.MoveTicket(ctx, MoveTicketRequest{Status: status, BeforeTicketID: &beforeID}, ticketID, actorID)
+
+	require.NoError(t, err)
+	require.NotNil(t, moved)
+	assert.Equal(t, status, moved.Status)
+	require.Len(t, events.events, 1)
+	assert.Equal(t, EventTicketUpdated, events.events[0].Type)
 	mockRepo.AssertExpectations(t)
 	mockProject.AssertExpectations(t)
 }

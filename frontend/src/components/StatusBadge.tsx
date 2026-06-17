@@ -18,13 +18,13 @@ function statusClass(status: TicketStatus): string {
 function priorityClass(priority: TicketPriority): string {
   switch (priority) {
     case "urgent":
-      return "border-zinc-950 bg-zinc-950 text-white";
+      return "border-red-600 bg-red-600 text-white";
     case "high":
-      return "border-zinc-300 bg-zinc-200 text-zinc-950";
+      return "border-orange-300 bg-orange-100 text-orange-900";
     case "medium":
-      return "border-zinc-200 bg-white text-zinc-700";
+      return "border-amber-300 bg-amber-50 text-amber-900";
     default:
-      return "border-zinc-200 bg-zinc-50 text-zinc-500";
+      return "border-emerald-200 bg-emerald-50 text-emerald-800";
   }
 }
 

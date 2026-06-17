@@ -16,6 +16,7 @@ import {
 import { useState } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { LanguageSwitcher } from "../../components/LanguageSwitcher";
+import { NotificationBell } from "../../components/NotificationBell";
 import { api } from "../../lib/api";
 import { initials } from "../../lib/format";
 import { useI18n } from "../../lib/i18n-context";
@@ -174,10 +175,8 @@ export function AppLayout() {
             <span className="text-sm font-medium text-zinc-500">{t("layout.workspace")}</span>
           </div>
           <div className="flex items-center gap-2">
+            <NotificationBell />
             <LanguageSwitcher />
-            <div className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-500 shadow-sm">
-              {user?.userId.slice(0, 8)}
-            </div>
           </div>
         </header>
 

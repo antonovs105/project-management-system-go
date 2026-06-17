@@ -21,6 +21,7 @@ import type {
   GraphData,
   ID,
   InstanceRole,
+  Notification,
   OAuthProvider,
   Project,
   ProjectDelivery,
@@ -106,6 +107,12 @@ export interface UpdateTicketPayload {
   assignee_id?: ID | null;
 }
 
+export interface MoveTicketPayload {
+  status: TicketStatus;
+  before_ticket_id?: ID | null;
+  after_ticket_id?: ID | null;
+}
+
 export interface ChangePasswordPayload {
   current_password: string;
   new_password: string;
@@ -174,6 +181,12 @@ export interface AdminAuditFilters {
 export interface DeliveryFilters {
   state?: DeliveryState | "";
   limit?: number;
+}
+
+export interface NotificationFilters {
+  unread?: boolean;
+  limit?: number;
+  offset?: number;
 }
 
 export interface ProjectInviteFilters {
@@ -256,6 +269,10 @@ export function oauthStartURL(provider: OAuthProvider): string {
 
 export function projectTicketEventsURL(projectId: ID): string {
   return apiURL(`${apiPrefix}/projects/${projectId}/tickets/events`);
+}
+
+export function notificationsEventsURL(): string {
+  return apiURL(`${apiPrefix}/me/notifications/events`);
 }
 
 export const api = {
@@ -425,9 +442,9 @@ export const api = {
     await http.delete(`${apiPrefix}/projects/${projectId}/roles/${roleId}`);
   },
 
-  async listTickets(projectId: ID): Promise<Ticket[]> {
+  async listTickets(projectId: ID, filters: { assignee?: "me" | "unassigned"; assignee_id?: ID } = {}): Promise<Ticket[]> {
     const { data } = await http.get<Ticket[] | null>(`${apiPrefix}/projects/${projectId}/tickets`, {
-      params: { limit: 500, offset: 0 },
+      params: { limit: 500, offset: 0, ...filters },
     });
     return asArray(data);
   },
@@ -446,8 +463,29 @@ export const api = {
     await http.patch(`${apiPrefix}/tickets/${ticketId}`, payload);
   },
 
+  async moveTicket(ticketId: ID, payload: MoveTicketPayload): Promise<Ticket> {
+    const { data } = await http.post<Ticket>(`${apiPrefix}/tickets/${ticketId}/move`, payload);
+    return data;
+  },
+
   async deleteTicket(ticketId: ID): Promise<void> {
     await http.delete(`${apiPrefix}/tickets/${ticketId}`);
+  },
+
+  async listNotifications(filters: NotificationFilters = {}): Promise<Notification[]> {
+    const { data } = await http.get<Notification[] | null>(`${apiPrefix}/me/notifications`, {
+      params: { limit: 50, offset: 0, ...filters },
+    });
+    return asArray(data);
+  },
+
+  async markNotificationRead(notificationId: ID): Promise<Notification> {
+    const { data } = await http.patch<Notification>(`${apiPrefix}/me/notifications/${notificationId}/read`);
+    return data;
+  },
+
+  async markAllNotificationsRead(): Promise<void> {
+    await http.post(`${apiPrefix}/me/notifications/read-all`);
   },
 
   async addTicketLink(ticketId: ID, payload: AddTicketLinkPayload): Promise<void> {

@@ -46,6 +46,7 @@ func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.GET("/projects/:projectID/tickets/events", h.StreamEvents)
 	api.GET("/tickets/:id", h.Get)
 	api.PATCH("/tickets/:id", h.Update)
+	api.POST("/tickets/:id/move", h.Move)
 	api.DELETE("/tickets/:id", h.Delete)
 	api.GET("/projects/:projectID/graph", h.GetGraph)
 	api.POST("/tickets/:id/links", h.AddLink)
@@ -181,6 +182,13 @@ type updateTicketRequest struct {
 	AssigneeID  **string `json:"assignee_id"`
 }
 
+// moveTicketRequest is the JSON payload for moving a ticket on the board.
+type moveTicketRequest struct {
+	Status         string  `json:"status"`
+	BeforeTicketID *string `json:"before_ticket_id"`
+	AfterTicketID  *string `json:"after_ticket_id"`
+}
+
 // Get returns a ticket by ID.
 func (h *Handler) Get(c echo.Context) error {
 	ticketID, ok := uuidParam(c, "id", "ticket id")
@@ -226,6 +234,33 @@ func (h *Handler) Update(c echo.Context) error {
 		return writeTicketError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// Move reorders a ticket within or across board status groups.
+func (h *Handler) Move(c echo.Context) error {
+	ticketID, ok := uuidParam(c, "id", "ticket id")
+	if !ok {
+		return nil
+	}
+	userID := c.Get("userID").(string)
+
+	var req moveTicketRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	if err := validateMoveTicketIDs(req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	moved, err := h.service.MoveTicket(c.Request().Context(), MoveTicketRequest{
+		Status:         req.Status,
+		BeforeTicketID: req.BeforeTicketID,
+		AfterTicketID:  req.AfterTicketID,
+	}, ticketID, userID)
+	if err != nil {
+		return writeTicketError(c, err)
+	}
+	return c.JSON(http.StatusOK, moved)
 }
 
 // Delete removes a ticket.
@@ -320,7 +355,25 @@ func ticketListOptions(c echo.Context) (TicketListOptions, error) {
 	if err != nil {
 		return TicketListOptions{}, ErrInvalidTicketInput
 	}
-	return TicketListOptions{Limit: limit, Offset: offset}, nil
+	options := TicketListOptions{Limit: limit, Offset: offset}
+	assignee := strings.TrimSpace(c.QueryParam("assignee"))
+	assigneeID := strings.TrimSpace(c.QueryParam("assignee_id"))
+	switch {
+	case assignee == "me":
+		value := c.Get("userID").(string)
+		options.AssigneeID = &value
+	case assignee == "unassigned":
+		options.Unassigned = true
+	case assignee != "":
+		return TicketListOptions{}, ErrInvalidTicketInput
+	}
+	if assigneeID != "" {
+		if options.Unassigned || options.AssigneeID != nil || !validUUID(assigneeID) {
+			return TicketListOptions{}, ErrInvalidTicketInput
+		}
+		options.AssigneeID = &assigneeID
+	}
+	return options, nil
 }
 
 // validateCreateTicketIDs validates optional UUID references in create requests.
@@ -340,6 +393,17 @@ func validateUpdateTicketIDs(req updateTicketRequest) error {
 		return ErrInvalidTicketInput
 	}
 	if req.AssigneeID != nil && *req.AssigneeID != nil && !validUUID(**req.AssigneeID) {
+		return ErrInvalidTicketInput
+	}
+	return nil
+}
+
+// validateMoveTicketIDs validates optional move boundary UUIDs.
+func validateMoveTicketIDs(req moveTicketRequest) error {
+	if req.BeforeTicketID != nil && !validUUID(*req.BeforeTicketID) {
+		return ErrInvalidTicketInput
+	}
+	if req.AfterTicketID != nil && !validUUID(*req.AfterTicketID) {
 		return ErrInvalidTicketInput
 	}
 	return nil

@@ -14,6 +14,7 @@ export const queryKeys = {
   projectInvites: (projectId: ID, status?: string) => ["projectInvites", projectId, status || "all"] as const,
   myProjectInvitesScope: ["myProjectInvites"] as const,
   myProjectInvites: (status?: string) => ["myProjectInvites", status || "all"] as const,
+  notifications: ["notifications"] as const,
   projectDeliveries: (projectId: ID, state?: string) => ["projectDeliveries", projectId, state || "all"] as const,
   projectDeliverySummary: (projectId: ID) => ["projectDeliverySummary", projectId] as const,
   personalFederationInbox: ["personalFederationInbox"] as const,

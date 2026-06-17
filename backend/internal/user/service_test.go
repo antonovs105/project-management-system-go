@@ -225,6 +225,17 @@ func TestService_ChangePassword(t *testing.T) {
 		mockRepo.AssertExpectations(t)
 	})
 
+	t.Run("RejectsWeakCurrentPassword", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, []byte("secret"), cfg)
+
+		err := service.ChangePassword(ctx, userID, "short", newPassword)
+
+		assert.ErrorIs(t, err, ErrInvalidUserInput)
+		mockRepo.AssertNotCalled(t, "GetUserByID")
+		mockRepo.AssertNotCalled(t, "UpdatePasswordHash")
+	})
+
 	t.Run("RejectsSamePassword", func(t *testing.T) {
 		mockRepo := new(MockRepository)
 		service := NewService(mockRepo, []byte("secret"), cfg)
