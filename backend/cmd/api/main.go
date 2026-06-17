@@ -435,7 +435,10 @@ func main() {
 
 	githubClient := githubintegration.NewHTTPClient(githubintegration.WithToken(os.Getenv("GITHUB_API_TOKEN")))
 	githubService := githubintegration.NewService(githubintegration.NewRepository(db), projectService, githubClient)
-	githubHandler := githubintegration.NewHandler(githubService)
+	githubHandler := githubintegration.NewHandler(
+		githubService,
+		githubintegration.WithWebhookSecret(os.Getenv("GITHUB_WEBHOOK_SECRET")),
+	)
 
 	c2sHandler := c2s.NewHandler(db, apConfig, ticketService, commentService)
 
@@ -574,6 +577,7 @@ func main() {
 
 	server.userHandler.RegisterRoutes(e, newRateLimiter(authRateLimitPerSecond, authRateLimitBurst))
 	server.wfHandler.RegisterRoutes(e, newRateLimiter(discoveryRateLimitPerSecond, discoveryRateLimitBurst))
+	server.githubHandler.RegisterWebhookRoutes(e, newRateLimiter(authRateLimitPerSecond, authRateLimitBurst))
 
 	// Local ActivityPub JSON-LD read routes and signed remote inbox POST foundation.
 	server.apHandler.RegisterRoutes(e)

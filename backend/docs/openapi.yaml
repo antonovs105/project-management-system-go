@@ -13,6 +13,7 @@ tags:
   - name: Comments
   - name: Delivery
   - name: Federation
+  - name: GitHub Integration
   - name: Admin Audit
   - name: Federation Moderation
   - name: WebFinger
@@ -61,6 +62,45 @@ paths:
             text/plain:
               schema:
                 type: string
+        "401":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /webhooks/github:
+    post:
+      tags: [GitHub Integration]
+      operationId: handleGitHubWebhook
+      parameters:
+        - name: X-GitHub-Event
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-GitHub-Delivery
+          in: header
+          schema:
+            type: string
+        - name: X-Hub-Signature-256
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "202":
+          description: GitHub webhook accepted after HMAC verification.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubWebhookResult"
+        "400":
+          $ref: "#/components/responses/Error"
         "401":
           $ref: "#/components/responses/Error"
         "503":
@@ -875,6 +915,45 @@ paths:
           $ref: "#/components/responses/Error"
         "502":
           $ref: "#/components/responses/Error"
+  /api/projects/{projectID}/github/commits:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [GitHub Integration]
+      operationId: listProjectGitHubCommits
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: repository_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: q
+          in: query
+          schema:
+            type: string
+        - name: unlinked
+          in: query
+          schema:
+            type: boolean
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        "200":
+          description: Imported GitHub commits for a project.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GitHubCommit"
+        "403":
+          $ref: "#/components/responses/Error"
   /api/projects/{projectID}/tickets:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
@@ -1021,6 +1100,42 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/GitHubCommit"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [GitHub Integration]
+      operationId: linkTicketGitHubCommit
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: "#/components/requestBodies/LinkGitHubCommit"
+      responses:
+        "201":
+          description: Imported GitHub commit linked to the ticket.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubCommit"
+        "400":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/tickets/{ticketID}/github/commits/{commitID}:
+    parameters:
+      - $ref: "#/components/parameters/TicketID"
+      - $ref: "#/components/parameters/GitHubCommitID"
+    delete:
+      tags: [GitHub Integration]
+      operationId: unlinkTicketGitHubCommit
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: GitHub commit link removed from the ticket.
         "403":
           $ref: "#/components/responses/Error"
         "404":
@@ -1346,6 +1461,8 @@ paths:
     $ref: "#/paths/~1api~1projects~1{projectID}~1github~1repositories~1{repositoryID}"
   /api/v1/projects/{projectID}/github/repositories/{repositoryID}/sync:
     $ref: "#/paths/~1api~1projects~1{projectID}~1github~1repositories~1{repositoryID}~1sync"
+  /api/v1/projects/{projectID}/github/commits:
+    $ref: "#/paths/~1api~1projects~1{projectID}~1github~1commits"
   /api/v1/invites/{inviteID}/accept:
     $ref: "#/paths/~1api~1invites~1{inviteID}~1accept"
   /api/v1/invites/{inviteID}/reject:
@@ -1364,6 +1481,8 @@ paths:
     $ref: "#/paths/~1api~1links~1{linkID}"
   /api/v1/tickets/{ticketID}/github/commits:
     $ref: "#/paths/~1api~1tickets~1{ticketID}~1github~1commits"
+  /api/v1/tickets/{ticketID}/github/commits/{commitID}:
+    $ref: "#/paths/~1api~1tickets~1{ticketID}~1github~1commits~1{commitID}"
   /api/v1/tickets/{ticketID}/comments:
     $ref: "#/paths/~1api~1tickets~1{ticketID}~1comments"
   /api/v1/comments/{commentID}:
@@ -1601,6 +1720,13 @@ components:
       schema:
         type: string
         format: uuid
+    GitHubCommitID:
+      name: commitID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     InviteID:
       name: inviteID
       in: path
@@ -1753,6 +1879,17 @@ components:
               name:
                 type: string
                 example: project-management-system-go
+    LinkGitHubCommit:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [commit_id]
+            properties:
+              commit_id:
+                type: string
+                format: uuid
     CreateTicket:
       required: true
       content:
@@ -1946,7 +2083,21 @@ components:
   schemas:
     GitHubCommit:
       type: object
-      required: [id, repository_id, sha, short_sha, message, author_name, author_email, html_url, ticket_ids, created_at, updated_at]
+      required:
+        - id
+        - repository_id
+        - repository_full_name
+        - repository_html_url
+        - sha
+        - short_sha
+        - message
+        - author_name
+        - author_email
+        - html_url
+        - ticket_ids
+        - link_source
+        - created_at
+        - updated_at
       properties:
         id:
           type: string
@@ -1954,6 +2105,11 @@ components:
         repository_id:
           type: string
           format: uuid
+        repository_full_name:
+          type: string
+        repository_html_url:
+          type: string
+          format: uri
         sha:
           type: string
         short_sha:
@@ -1977,6 +2133,9 @@ components:
           items:
             type: string
             format: uuid
+        link_source:
+          type: string
+          enum: ["", message, manual]
         created_at:
           type: string
           format: date-time
@@ -1985,7 +2144,20 @@ components:
           format: date-time
     GitHubRepository:
       type: object
-      required: [id, project_id, owner, name, full_name, html_url, default_branch, created_at, updated_at]
+      required:
+        - id
+        - project_id
+        - owner
+        - name
+        - full_name
+        - html_url
+        - default_branch
+        - last_sync_error
+        - commit_count
+        - linked_commit_count
+        - manual_link_count
+        - created_at
+        - updated_at
       properties:
         id:
           type: string
@@ -2009,6 +2181,19 @@ components:
             - string
             - "null"
           format: date-time
+        last_sync_error:
+          type: string
+        last_webhook_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        commit_count:
+          type: integer
+        linked_commit_count:
+          type: integer
+        manual_link_count:
+          type: integer
         created_by:
           type:
             - string
@@ -2030,6 +2215,22 @@ components:
           type: integer
         linked:
           type: integer
+    GitHubWebhookResult:
+      type: object
+      required: [event, delivery_id, repositories, imported, linked, ignored]
+      properties:
+        event:
+          type: string
+        delivery_id:
+          type: string
+        repositories:
+          type: integer
+        imported:
+          type: integer
+        linked:
+          type: integer
+        ignored:
+          type: boolean
     AdminAuditAction:
       type: string
       enum:

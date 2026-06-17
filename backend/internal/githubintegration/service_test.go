@@ -2,6 +2,9 @@ package githubintegration
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"testing"
 	"time"
@@ -36,11 +39,16 @@ func (f fakeClient) ListCommits(context.Context, string, string, string, *time.T
 
 type fakeRepository struct {
 	repository   GitHubRepository
+	repositories []GitHubRepository
 	upsertedRepo *GitHubRepository
 	upserts      []GitHubCommit
 	linkSets     [][]string
 	resolvedRefs map[string]string
 	syncedAt     *time.Time
+	failedSync   string
+	webhookAt    *time.Time
+	linkedCommit *GitHubCommit
+	unlinked     bool
 }
 
 func (f *fakeRepository) UpsertRepository(_ context.Context, repo *GitHubRepository) error {
@@ -52,6 +60,13 @@ func (f *fakeRepository) UpsertRepository(_ context.Context, repo *GitHubReposit
 }
 
 func (f *fakeRepository) ListRepositories(context.Context, string) ([]GitHubRepository, error) {
+	return []GitHubRepository{f.repository}, nil
+}
+
+func (f *fakeRepository) ListRepositoriesByRemote(context.Context, string, string) ([]GitHubRepository, error) {
+	if f.repositories != nil {
+		return f.repositories, nil
+	}
 	return []GitHubRepository{f.repository}, nil
 }
 
@@ -68,6 +83,16 @@ func (f *fakeRepository) MarkRepositorySynced(_ context.Context, _ string, synce
 	return nil
 }
 
+func (f *fakeRepository) MarkRepositorySyncFailed(_ context.Context, _, message string) error {
+	f.failedSync = message
+	return nil
+}
+
+func (f *fakeRepository) MarkRepositoryWebhookReceived(_ context.Context, _ string, receivedAt time.Time) error {
+	f.webhookAt = &receivedAt
+	return nil
+}
+
 func (f *fakeRepository) UpsertCommitWithLinks(_ context.Context, commit *GitHubCommit, ticketIDs []string, _ string) (int, error) {
 	copy := *commit
 	copy.ID = "commit-" + commit.ShortSHA
@@ -76,8 +101,24 @@ func (f *fakeRepository) UpsertCommitWithLinks(_ context.Context, commit *GitHub
 	return len(ticketIDs), nil
 }
 
+func (f *fakeRepository) ListCommitsByProject(context.Context, string, CommitListOptions) ([]GitHubCommit, error) {
+	return nil, nil
+}
+
 func (f *fakeRepository) ListCommitsByTicket(context.Context, string, string) ([]GitHubCommit, error) {
 	return nil, nil
+}
+
+func (f *fakeRepository) LinkCommitToTicket(context.Context, string, string, string, string) (*GitHubCommit, error) {
+	if f.linkedCommit != nil {
+		return f.linkedCommit, nil
+	}
+	return &GitHubCommit{ID: "44444444-4444-4444-8444-444444444444"}, nil
+}
+
+func (f *fakeRepository) UnlinkCommitFromTicket(context.Context, string, string, string) error {
+	f.unlinked = true
+	return nil
 }
 
 func (f *fakeRepository) FindTicketIDsByReferences(_ context.Context, _ string, refs []string) (map[string]string, error) {
@@ -191,6 +232,115 @@ func TestService_SyncRepositoryImportsAndLinksCommits(t *testing.T) {
 	assert.Equal(t, []string{ticketID}, repo.linkSets[0])
 	assert.Empty(t, repo.linkSets[1])
 	assert.NotNil(t, repo.syncedAt)
+}
+
+func TestService_LinkCommitToTicketRequiresTicketUpdate(t *testing.T) {
+	projects := &fakeProjectChecker{}
+	repo := &fakeRepository{
+		linkedCommit: &GitHubCommit{ID: "44444444-4444-4444-8444-444444444444"},
+	}
+	service := NewService(repo, projects, fakeClient{})
+
+	commit, err := service.LinkCommitToTicket(
+		context.Background(),
+		"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+		"33333333-3333-4333-8333-333333333333",
+		"44444444-4444-4444-8444-444444444444",
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, commit)
+	assert.Equal(t, "tickets.update", projects.permission)
+	assert.Equal(t, "44444444-4444-4444-8444-444444444444", commit.ID)
+}
+
+func TestService_UnlinkCommitFromTicketRequiresTicketUpdate(t *testing.T) {
+	projects := &fakeProjectChecker{}
+	repo := &fakeRepository{}
+	service := NewService(repo, projects, fakeClient{})
+
+	err := service.UnlinkCommitFromTicket(
+		context.Background(),
+		"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+		"33333333-3333-4333-8333-333333333333",
+		"44444444-4444-4444-8444-444444444444",
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, "tickets.update", projects.permission)
+	assert.True(t, repo.unlinked)
+}
+
+func TestService_ProcessWebhookImportsPushCommits(t *testing.T) {
+	ticketID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	repo := &fakeRepository{
+		repositories: []GitHubRepository{
+			{
+				ID:        "11111111-1111-4111-8111-111111111111",
+				ProjectID: "22222222-2222-4222-8222-222222222222",
+				Owner:     "owner",
+				Name:      "repo",
+				FullName:  "owner/repo",
+			},
+		},
+		resolvedRefs: map[string]string{
+			"aaaaaaaa": ticketID,
+		},
+	}
+	service := NewService(repo, &fakeProjectChecker{}, fakeClient{})
+	body := []byte(`{
+		"ref": "refs/heads/main",
+		"repository": {
+			"name": "repo",
+			"full_name": "owner/repo",
+			"html_url": "https://github.com/owner/repo",
+			"default_branch": "main",
+			"owner": {"login": "owner"}
+		},
+		"commits": [
+			{
+				"id": "abcdef1234567890",
+				"message": "Fix #aaaaaaaa",
+				"timestamp": "2026-06-17T12:00:00Z",
+				"url": "https://github.com/owner/repo/commit/abcdef",
+				"author": {"name": "Dev", "email": "dev@example.test"}
+			}
+		]
+	}`)
+
+	result, err := service.ProcessWebhook(context.Background(), "push", "delivery-1", body)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "push", result.Event)
+	assert.Equal(t, 1, result.Repositories)
+	assert.Equal(t, 1, result.Imported)
+	assert.Equal(t, 1, result.Linked)
+	require.Len(t, repo.upserts, 1)
+	assert.Equal(t, []string{ticketID}, repo.linkSets[0])
+	assert.NotNil(t, repo.webhookAt)
+}
+
+func TestService_ProcessWebhookIgnoresUnsupportedEvent(t *testing.T) {
+	service := NewService(&fakeRepository{}, &fakeProjectChecker{}, fakeClient{})
+
+	result, err := service.ProcessWebhook(context.Background(), "issues", "delivery-1", []byte(`{}`))
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Ignored)
+	assert.Equal(t, "issues", result.Event)
+}
+
+func TestValidGitHubSignature(t *testing.T) {
+	body := []byte(`{"zen":"Keep it logically awesome."}`)
+	mac := hmac.New(sha256.New, []byte("secret"))
+	_, _ = mac.Write(body)
+	signature := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+
+	assert.True(t, validGitHubSignature("secret", signature, body))
+	assert.False(t, validGitHubSignature("secret", signature, []byte(`{}`)))
+	assert.False(t, validGitHubSignature("wrong", signature, body))
 }
 
 func TestTicketReferences(t *testing.T) {

@@ -3,6 +3,7 @@ package githubintegration
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"regexp"
 	"strings"
@@ -148,50 +149,14 @@ func (s *Service) SyncRepository(ctx context.Context, projectID, userID, reposit
 	}
 	remoteCommits, err := s.client.ListCommits(ctx, repo.Owner, repo.Name, repo.DefaultBranch, since, 100)
 	if err != nil {
+		_ = s.repo.MarkRepositorySyncFailed(ctx, repo.ID, err.Error())
 		return nil, err
 	}
 
-	prepared := make([]GitHubCommit, 0, len(remoteCommits))
-	allRefs := make([]string, 0)
-	for _, remote := range remoteCommits {
-		sha := strings.TrimSpace(remote.SHA)
-		if sha == "" {
-			continue
-		}
-		commit := GitHubCommit{
-			RepositoryID: repo.ID,
-			SHA:          sha,
-			ShortSHA:     shortSHA(sha),
-			Message:      strings.TrimSpace(remote.Message),
-			AuthorName:   strings.TrimSpace(remote.AuthorName),
-			AuthorEmail:  strings.TrimSpace(remote.AuthorEmail),
-			AuthoredAt:   remote.AuthoredAt,
-			HTMLURL:      strings.TrimSpace(remote.HTMLURL),
-		}
-		prepared = append(prepared, commit)
-		allRefs = append(allRefs, ticketReferences(commit.Message)...)
-	}
-
-	resolved, err := s.repo.FindTicketIDsByReferences(ctx, projectID, allRefs)
+	imported, linked, err := s.importRemoteCommits(ctx, projectID, repo.ID, remoteCommits, userID)
 	if err != nil {
+		_ = s.repo.MarkRepositorySyncFailed(ctx, repo.ID, err.Error())
 		return nil, err
-	}
-	imported := 0
-	linked := 0
-	for i := range prepared {
-		refs := ticketReferences(prepared[i].Message)
-		ticketIDs := make([]string, 0, len(refs))
-		for _, ref := range refs {
-			if ticketID := resolved[ref]; ticketID != "" {
-				ticketIDs = append(ticketIDs, ticketID)
-			}
-		}
-		newLinks, err := s.repo.UpsertCommitWithLinks(ctx, &prepared[i], ticketIDs, userID)
-		if err != nil {
-			return nil, err
-		}
-		imported++
-		linked += newLinks
 	}
 
 	now := time.Now().UTC()
@@ -200,6 +165,23 @@ func (s *Service) SyncRepository(ctx context.Context, projectID, userID, reposit
 	}
 	repo.LastSyncedAt = &now
 	return &SyncResult{Repository: *repo, Imported: imported, Linked: linked}, nil
+}
+
+// ListProjectCommits returns imported GitHub commits visible inside a project.
+func (s *Service) ListProjectCommits(ctx context.Context, projectID, userID string, options CommitListOptions) ([]GitHubCommit, error) {
+	if err := validateUUID(projectID); err != nil {
+		return nil, err
+	}
+	if options.RepositoryID != "" {
+		if err := validateUUID(options.RepositoryID); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.requireProjectRead(ctx, projectID, userID); err != nil {
+		return nil, err
+	}
+	options.Query = strings.TrimSpace(options.Query)
+	return s.repo.ListCommitsByProject(ctx, projectID, options)
 }
 
 // ListTicketCommits returns imported GitHub commits linked to a ticket.
@@ -220,6 +202,227 @@ func (s *Service) ListTicketCommits(ctx context.Context, ticketID, userID string
 	return s.repo.ListCommitsByTicket(ctx, projectID, ticketID)
 }
 
+// LinkCommitToTicket manually attaches an imported commit to a local ticket.
+func (s *Service) LinkCommitToTicket(ctx context.Context, ticketID, userID, commitID string) (*GitHubCommit, error) {
+	if err := validateUUID(ticketID); err != nil {
+		return nil, err
+	}
+	if err := validateUUID(commitID); err != nil {
+		return nil, err
+	}
+	projectID, err := s.repo.TicketProjectID(ctx, ticketID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if err := s.requireTicketsUpdate(ctx, projectID, userID); err != nil {
+		return nil, err
+	}
+	commit, err := s.repo.LinkCommitToTicket(ctx, projectID, ticketID, commitID, userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return commit, nil
+}
+
+// UnlinkCommitFromTicket removes a manual or imported commit link from a ticket.
+func (s *Service) UnlinkCommitFromTicket(ctx context.Context, ticketID, userID, commitID string) error {
+	if err := validateUUID(ticketID); err != nil {
+		return err
+	}
+	if err := validateUUID(commitID); err != nil {
+		return err
+	}
+	projectID, err := s.repo.TicketProjectID(ctx, ticketID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if err := s.requireTicketsUpdate(ctx, projectID, userID); err != nil {
+		return err
+	}
+	if err := s.repo.UnlinkCommitFromTicket(ctx, projectID, ticketID, commitID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	return nil
+}
+
+// ProcessWebhook imports commits from a verified GitHub webhook payload.
+func (s *Service) ProcessWebhook(ctx context.Context, event, deliveryID string, body []byte) (*WebhookResult, error) {
+	event = strings.TrimSpace(event)
+	result := &WebhookResult{Event: event, DeliveryID: strings.TrimSpace(deliveryID)}
+	switch event {
+	case "ping":
+		return result, nil
+	case "push":
+		var payload githubPushPayload
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return nil, ErrInvalidInput
+		}
+		owner := payload.Repository.Owner.Login
+		if owner == "" {
+			owner = payload.Repository.Owner.Name
+		}
+		owner, name, err := normalizeRepositoryInput(owner, payload.Repository.Name)
+		if err != nil {
+			return nil, err
+		}
+		repos, err := s.repo.ListRepositoriesByRemote(ctx, strings.ToLower(owner), strings.ToLower(name))
+		if err != nil {
+			return nil, err
+		}
+		remoteRepo := payload.remoteRepository(owner, name)
+		remoteCommits := payload.remoteCommits()
+		now := time.Now().UTC()
+		for i := range repos {
+			if remoteRepo.FullName != "" {
+				repos[i].FullName = remoteRepo.FullName
+			}
+			if remoteRepo.HTMLURL != "" {
+				repos[i].HTMLURL = remoteRepo.HTMLURL
+			}
+			if remoteRepo.DefaultBranch != "" {
+				repos[i].DefaultBranch = remoteRepo.DefaultBranch
+			}
+			if err := s.repo.UpsertRepository(ctx, &repos[i]); err != nil {
+				return nil, err
+			}
+			imported, linked, err := s.importRemoteCommits(ctx, repos[i].ProjectID, repos[i].ID, remoteCommits, "")
+			if err != nil {
+				return nil, err
+			}
+			if err := s.repo.MarkRepositoryWebhookReceived(ctx, repos[i].ID, now); err != nil {
+				return nil, err
+			}
+			result.Repositories++
+			result.Imported += imported
+			result.Linked += linked
+		}
+		return result, nil
+	default:
+		result.Ignored = true
+		return result, nil
+	}
+}
+
+// importRemoteCommits stores remote commits and message-derived ticket links.
+func (s *Service) importRemoteCommits(ctx context.Context, projectID, repositoryID string, remoteCommits []RemoteCommit, actorID string) (int, int, error) {
+	prepared := make([]GitHubCommit, 0, len(remoteCommits))
+	allRefs := make([]string, 0)
+	for _, remote := range remoteCommits {
+		sha := strings.TrimSpace(remote.SHA)
+		if sha == "" {
+			continue
+		}
+		commit := GitHubCommit{
+			RepositoryID: repositoryID,
+			SHA:          sha,
+			ShortSHA:     shortSHA(sha),
+			Message:      strings.TrimSpace(remote.Message),
+			AuthorName:   strings.TrimSpace(remote.AuthorName),
+			AuthorEmail:  strings.TrimSpace(remote.AuthorEmail),
+			AuthoredAt:   remote.AuthoredAt,
+			HTMLURL:      strings.TrimSpace(remote.HTMLURL),
+		}
+		prepared = append(prepared, commit)
+		allRefs = append(allRefs, ticketReferences(commit.Message)...)
+	}
+
+	resolved, err := s.repo.FindTicketIDsByReferences(ctx, projectID, allRefs)
+	if err != nil {
+		return 0, 0, err
+	}
+	imported := 0
+	linked := 0
+	for i := range prepared {
+		refs := ticketReferences(prepared[i].Message)
+		ticketIDs := make([]string, 0, len(refs))
+		for _, ref := range refs {
+			if ticketID := resolved[ref]; ticketID != "" {
+				ticketIDs = append(ticketIDs, ticketID)
+			}
+		}
+		newLinks, err := s.repo.UpsertCommitWithLinks(ctx, &prepared[i], ticketIDs, actorID)
+		if err != nil {
+			return 0, 0, err
+		}
+		imported++
+		linked += newLinks
+	}
+	return imported, linked, nil
+}
+
+// githubPushPayload captures the GitHub push fields needed for imports.
+type githubPushPayload struct {
+	Ref        string `json:"ref"`
+	Repository struct {
+		Name          string `json:"name"`
+		FullName      string `json:"full_name"`
+		HTMLURL       string `json:"html_url"`
+		DefaultBranch string `json:"default_branch"`
+		Owner         struct {
+			Login string `json:"login"`
+			Name  string `json:"name"`
+		} `json:"owner"`
+	} `json:"repository"`
+	Commits []struct {
+		ID        string `json:"id"`
+		Message   string `json:"message"`
+		Timestamp string `json:"timestamp"`
+		URL       string `json:"url"`
+		Author    struct {
+			Name  string `json:"name"`
+			Email string `json:"email"`
+		} `json:"author"`
+	} `json:"commits"`
+}
+
+// remoteRepository normalizes repository metadata from the webhook payload.
+func (payload githubPushPayload) remoteRepository(owner, name string) RemoteRepository {
+	fullName := strings.TrimSpace(payload.Repository.FullName)
+	if fullName == "" {
+		fullName = owner + "/" + name
+	}
+	return RemoteRepository{
+		Owner:         owner,
+		Name:          name,
+		FullName:      fullName,
+		HTMLURL:       strings.TrimSpace(payload.Repository.HTMLURL),
+		DefaultBranch: strings.TrimSpace(payload.Repository.DefaultBranch),
+	}
+}
+
+// remoteCommits converts GitHub push commits into the shared import shape.
+func (payload githubPushPayload) remoteCommits() []RemoteCommit {
+	commits := make([]RemoteCommit, 0, len(payload.Commits))
+	for _, item := range payload.Commits {
+		var authoredAt *time.Time
+		if parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(item.Timestamp)); err == nil {
+			parsed = parsed.UTC()
+			authoredAt = &parsed
+		}
+		commits = append(commits, RemoteCommit{
+			SHA:         item.ID,
+			Message:     item.Message,
+			AuthorName:  item.Author.Name,
+			AuthorEmail: item.Author.Email,
+			AuthoredAt:  authoredAt,
+			HTMLURL:     item.URL,
+		})
+	}
+	return commits
+}
+
 // requireProjectRead checks read access to project GitHub metadata.
 func (s *Service) requireProjectRead(ctx context.Context, projectID, userID string) error {
 	return s.projects.RequireProjectPermission(ctx, projectID, userID, project.PermissionProjectRead, "project not found or access denied")
@@ -228,6 +431,11 @@ func (s *Service) requireProjectRead(ctx context.Context, projectID, userID stri
 // requireProjectUpdate checks permission to manage project GitHub metadata.
 func (s *Service) requireProjectUpdate(ctx context.Context, projectID, userID string) error {
 	return s.projects.RequireProjectPermission(ctx, projectID, userID, project.PermissionProjectUpdate, "insufficient permissions: missing project.update")
+}
+
+// requireTicketsUpdate checks permission to attach commits to tickets.
+func (s *Service) requireTicketsUpdate(ctx context.Context, projectID, userID string) error {
+	return s.projects.RequireProjectPermission(ctx, projectID, userID, project.PermissionTicketsUpdate, "insufficient permissions: missing tickets.update")
 }
 
 // validateUUID checks that a route identifier is a UUID.
