@@ -25,6 +25,7 @@ type Service struct {
 	projectService ProjectChecker
 	apConfig       activitypub.Config
 	delivery       DeliveryEnqueuer
+	events         EventPublisher
 }
 
 // DeliveryEnqueuer queues federation deliveries created by ticket actions.
@@ -46,6 +47,11 @@ func NewService(repo Repository, projectService ProjectChecker, apConfig activit
 // SetDelivery attaches the delivery queue used for ticket federation.
 func (s *Service) SetDelivery(delivery DeliveryEnqueuer) {
 	s.delivery = delivery
+}
+
+// SetEventPublisher attaches the realtime event publisher used by ticket workflows.
+func (s *Service) SetEventPublisher(events EventPublisher) {
+	s.events = events
 }
 
 // GetProjectRole returns a user's role in a project through the project service.
@@ -177,6 +183,7 @@ func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, pro
 		return nil, err
 	}
 	s.enqueueProjectTicketRecipients(ctx, projectID, t.ID, activityIDs...)
+	s.publishTicketEvent(Event{Type: EventTicketCreated, ProjectID: projectID, TicketID: t.ID})
 
 	return t, nil
 }
@@ -314,6 +321,7 @@ func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, tic
 		return err
 	}
 	s.enqueueProjectTicketRecipients(ctx, ticketToUpdate.ProjectID, ticketToUpdate.ID, activityIDs...)
+	s.publishTicketEvent(Event{Type: EventTicketUpdated, ProjectID: ticketToUpdate.ProjectID, TicketID: ticketToUpdate.ID})
 	return nil
 }
 
@@ -356,6 +364,7 @@ func (s *Service) DeleteTicket(ctx context.Context, ticketID, userID string) err
 		return err
 	}
 	s.enqueueRecipientInboxes(ctx, ticket.ProjectID, deleteResult)
+	s.publishTicketEvent(Event{Type: EventTicketDeleted, ProjectID: ticket.ProjectID, TicketID: ticket.ID})
 	return nil
 }
 
@@ -411,7 +420,11 @@ func (s *Service) AddTicketLink(ctx context.Context, sourceID, targetID string, 
 		LinkType: linkType,
 	}
 
-	return s.repo.CreateLink(ctx, link)
+	if err := s.repo.CreateLink(ctx, link); err != nil {
+		return err
+	}
+	s.publishTicketEvent(Event{Type: EventTicketLinked, ProjectID: source.ProjectID, TicketID: source.ID})
+	return nil
 }
 
 // hasPath checks if there is a path from start to end using BFS
@@ -491,7 +504,11 @@ func (s *Service) RemoveTicketLink(ctx context.Context, linkID, projectID, userI
 	if err := s.requireProjectPermission(ctx, source.ProjectID, userID, project.PermissionTicketsUpdate, "insufficient permissions: missing tickets.update"); err != nil {
 		return err
 	}
-	return s.repo.DeleteLink(ctx, linkID)
+	if err := s.repo.DeleteLink(ctx, linkID); err != nil {
+		return err
+	}
+	s.publishTicketEvent(Event{Type: EventTicketUnlinked, ProjectID: source.ProjectID, TicketID: source.ID})
+	return nil
 }
 
 // GraphNode is a ticket node in the graph response.
@@ -580,4 +597,12 @@ func (s *Service) requireProjectPermission(ctx context.Context, projectID, userI
 		return errors.New(deniedMessage)
 	}
 	return nil
+}
+
+// publishTicketEvent emits a realtime ticket event when a publisher is attached.
+func (s *Service) publishTicketEvent(event Event) {
+	if s.events == nil {
+		return
+	}
+	s.events.PublishTicketEvent(event)
 }

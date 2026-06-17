@@ -1,10 +1,14 @@
 package ticket
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -13,17 +17,33 @@ import (
 // Handler exposes ticket HTTP endpoints.
 type Handler struct {
 	service *Service
+	events  EventSubscriber
+}
+
+// HandlerOption customizes the ticket HTTP handler.
+type HandlerOption func(*Handler)
+
+// WithEventSubscriber attaches the realtime event subscriber.
+func WithEventSubscriber(events EventSubscriber) HandlerOption {
+	return func(h *Handler) {
+		h.events = events
+	}
 }
 
 // NewHandler creates a ticket HTTP handler.
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+func NewHandler(service *Service, options ...HandlerOption) *Handler {
+	handler := &Handler{service: service}
+	for _, option := range options {
+		option(handler)
+	}
+	return handler
 }
 
 // RegisterRoutes registers authenticated ticket routes.
 func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.POST("/projects/:projectID/tickets", h.Create)
 	api.GET("/projects/:projectID/tickets", h.List)
+	api.GET("/projects/:projectID/tickets/events", h.StreamEvents)
 	api.GET("/tickets/:id", h.Get)
 	api.PATCH("/tickets/:id", h.Update)
 	api.DELETE("/tickets/:id", h.Delete)
@@ -95,6 +115,59 @@ func (h *Handler) List(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, tickets)
+}
+
+// StreamEvents streams project ticket changes as server-sent events.
+func (h *Handler) StreamEvents(c echo.Context) error {
+	if h.events == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "ticket event stream is not configured"})
+	}
+	projectID, ok := uuidParam(c, "projectID", "project id")
+	if !ok {
+		return nil
+	}
+	userID := c.Get("userID").(string)
+	if _, err := h.service.projectService.GetProjectByID(c.Request().Context(), projectID, userID); err != nil {
+		return writeTicketError(c, err)
+	}
+
+	response := c.Response()
+	flusher, ok := response.Writer.(http.Flusher)
+	if !ok {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "streaming is not supported"})
+	}
+	response.Header().Set(echo.HeaderContentType, "text/event-stream")
+	response.Header().Set(echo.HeaderCacheControl, "no-cache")
+	response.Header().Set("Connection", "keep-alive")
+	response.WriteHeader(http.StatusOK)
+
+	events, unsubscribe := h.events.SubscribeTicketEvents(projectID)
+	defer unsubscribe()
+
+	if err := writeSSE(response.Writer, "ready", "", map[string]string{"project_id": projectID}); err != nil {
+		return err
+	}
+	flusher.Flush()
+
+	heartbeat := time.NewTicker(25 * time.Second)
+	defer heartbeat.Stop()
+
+	for {
+		select {
+		case <-c.Request().Context().Done():
+			return nil
+		case event := <-events:
+			if err := writeSSE(response.Writer, event.Type, event.ID, event); err != nil {
+				return err
+			}
+			flusher.Flush()
+		case <-heartbeat.C:
+			if _, err := io.WriteString(response.Writer, ": ping\n\n"); err != nil {
+				return err
+			}
+			flusher.Flush()
+		}
+	}
 }
 
 // updateTicketRequest is the JSON payload for partial ticket updates.
@@ -296,6 +369,21 @@ func parseOptionalNonNegativeInt(raw string) (int, error) {
 		return 0, ErrInvalidTicketInput
 	}
 	return value, nil
+}
+
+// writeSSE writes one server-sent event frame.
+func writeSSE(w io.Writer, eventName, eventID string, data any) error {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	if eventID != "" {
+		if _, err := fmt.Fprintf(w, "id: %s\n", eventID); err != nil {
+			return err
+		}
+	}
+	_, err = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventName, raw)
+	return err
 }
 
 // uuidParam extracts and validates a UUID path parameter.

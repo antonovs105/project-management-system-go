@@ -55,6 +55,8 @@ test("api client covers current backend feature routes", () => {
     "/projects/${projectId}/github/commits",
     "/repositories/${repositoryId}/sync",
     "linkTicketGitHubCommit",
+    "/projects/${projectId}/tickets/events",
+    "projectTicketEventsURL",
     "/projects/${projectId}/invites",
     "/members/${userId}",
     "updateProjectMemberRole",

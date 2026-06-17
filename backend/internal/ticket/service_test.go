@@ -10,7 +10,16 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/project"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
+
+type testEventPublisher struct {
+	events []Event
+}
+
+func (p *testEventPublisher) PublishTicketEvent(event Event) {
+	p.events = append(p.events, event)
+}
 
 func TestService_CreateTicket(t *testing.T) {
 	mockRepo := new(MockRepository)
@@ -155,6 +164,8 @@ func TestService_UpdateTicketUsesActingUser(t *testing.T) {
 	mockRepo := new(MockRepository)
 	mockProject := new(MockProjectChecker)
 	service := NewService(mockRepo, mockProject, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+	events := &testEventPublisher{}
+	service.SetEventPublisher(events)
 
 	ctx := context.Background()
 	projectID := "project-1"
@@ -184,6 +195,10 @@ func TestService_UpdateTicketUsesActingUser(t *testing.T) {
 	err := service.UpdateTicket(ctx, UpdateTicketRequest{Status: &status}, ticketID, actorID)
 
 	assert.NoError(t, err)
+	require.Len(t, events.events, 1)
+	assert.Equal(t, EventTicketUpdated, events.events[0].Type)
+	assert.Equal(t, projectID, events.events[0].ProjectID)
+	assert.Equal(t, ticketID, events.events[0].TicketID)
 	mockRepo.AssertExpectations(t)
 	mockProject.AssertExpectations(t)
 }

@@ -427,7 +427,9 @@ func main() {
 
 	ticketRepo := ticket.NewRepository(db, apConfig)
 	ticketService := ticket.NewService(ticketRepo, projectService, apConfig)
-	ticketHandler := ticket.NewHandler(ticketService)
+	ticketEvents := ticket.NewEventHub()
+	ticketService.SetEventPublisher(ticketEvents)
+	ticketHandler := ticket.NewHandler(ticketService, ticket.WithEventSubscriber(ticketEvents))
 
 	commentRepo := comment.NewRepository(db, apConfig)
 	commentService := comment.NewService(commentRepo, ticketService, apConfig)

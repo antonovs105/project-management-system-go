@@ -1001,6 +1001,25 @@ paths:
                 $ref: "#/components/schemas/Ticket"
         "400":
           $ref: "#/components/responses/Error"
+  /api/projects/{projectID}/tickets/events:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [Tickets]
+      operationId: streamProjectTicketEvents
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Server-sent stream of project ticket changes.
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/TicketEvent"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
   /api/projects/{projectID}/graph:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
@@ -1471,6 +1490,8 @@ paths:
     $ref: "#/paths/~1api~1invites~1{inviteID}~1revoke"
   /api/v1/projects/{projectID}/tickets:
     $ref: "#/paths/~1api~1projects~1{projectID}~1tickets"
+  /api/v1/projects/{projectID}/tickets/events:
+    $ref: "#/paths/~1api~1projects~1{projectID}~1tickets~1events"
   /api/v1/projects/{projectID}/graph:
     $ref: "#/paths/~1api~1projects~1{projectID}~1graph"
   /api/v1/tickets/{ticketID}:
@@ -2999,6 +3020,25 @@ components:
           type: string
           format: date-time
         updated_at:
+          type: string
+          format: date-time
+    TicketEvent:
+      type: object
+      required: [id, type, project_id, occurred_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [ticket.created, ticket.updated, ticket.deleted, ticket.linked, ticket.unlinked]
+        project_id:
+          type: string
+          format: uuid
+        ticket_id:
+          type: string
+          format: uuid
+        occurred_at:
           type: string
           format: date-time
     TicketPriority:

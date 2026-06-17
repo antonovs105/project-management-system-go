@@ -116,6 +116,16 @@ export interface Ticket {
   updated_at: string;
 }
 
+export type TicketEventType = "ticket.created" | "ticket.updated" | "ticket.deleted" | "ticket.linked" | "ticket.unlinked";
+
+export interface TicketEvent {
+  id: ID;
+  type: TicketEventType;
+  project_id: ID;
+  ticket_id?: ID;
+  occurred_at: string;
+}
+
 export interface Comment {
   id: ID;
   ap_id: string;

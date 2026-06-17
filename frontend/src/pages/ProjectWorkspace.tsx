@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Clock3, Flame, GitFork, ListChecks, Pencil, Plus, RefreshCw, Settings, Trash2, Truck } from "lucide-react";
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -9,10 +9,11 @@ import { ProjectSettingsPanel } from "../features/projects/ProjectSettingsPanel"
 import { TicketBoard } from "../features/tickets/TicketBoard";
 import { TicketDetailPanel } from "../features/tickets/TicketDetailPanel";
 import { TicketFormModal } from "../features/tickets/TicketFormModal";
-import { api, errorMessage } from "../lib/api";
+import { api, errorMessage, projectTicketEventsURL } from "../lib/api";
 import { relativeDate } from "../lib/format";
 import { queryKeys } from "../lib/queryKeys";
-import type { ID, Ticket, TicketStatus } from "../types";
+import { useAuthStore } from "../store/auth";
+import type { ID, Ticket, TicketEvent, TicketStatus } from "../types";
 import { Button, ErrorState, LoadingState, Modal, Panel, TextAreaField, TextField } from "../components/ui";
 
 const ProjectGraph = lazy(() =>
@@ -51,11 +52,33 @@ function SummaryItem({ icon, label, value }: { icon: ReactNode; label: string; v
   );
 }
 
+function parseSSEMessage(raw: string): { event: string; data: string } | null {
+  let event = "message";
+  const data: string[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    if (line.startsWith("event:")) {
+      event = line.slice("event:".length).trim();
+    } else if (line.startsWith("data:")) {
+      data.push(line.slice("data:".length).trimStart());
+    }
+  }
+  return data.length > 0 ? { event, data: data.join("\n") } : null;
+}
+
+function isTicketEvent(value: unknown): value is TicketEvent {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const event = value as Partial<TicketEvent>;
+  return typeof event.type === "string" && event.type.startsWith("ticket.") && typeof event.project_id === "string";
+}
+
 export function ProjectWorkspace() {
   const { projectId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const token = useAuthStore((state) => state.token);
   const [createTicketOpen, setCreateTicketOpen] = useState(false);
   const [selectedTicketId, setSelectedTicketId] = useState<ID | null>(null);
   const [editProjectOpen, setEditProjectOpen] = useState(false);
@@ -92,6 +115,94 @@ export function ProjectWorkspace() {
     queryFn: () => api.getProjectGraph(activeProjectId),
     enabled: Boolean(projectId) && view === "graph",
   });
+
+  useEffect(() => {
+    if (!activeProjectId || !token) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const decoder = new TextDecoder();
+    let reconnectTimer: number | undefined;
+
+    function refreshTicketQueries(event: TicketEvent) {
+      if (event.project_id !== activeProjectId) {
+        return;
+      }
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tickets(activeProjectId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.graph(activeProjectId) });
+      if (event.ticket_id) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.ticket(event.ticket_id) });
+      }
+    }
+
+    function handleFrame(frame: string) {
+      const message = parseSSEMessage(frame);
+      if (!message || message.event === "ready") {
+        return;
+      }
+      try {
+        const parsed: unknown = JSON.parse(message.data);
+        if (isTicketEvent(parsed)) {
+          refreshTicketQueries(parsed);
+        }
+      } catch {
+        // Ignore malformed stream frames; reconnect handles transport failures.
+      }
+    }
+
+    function scheduleReconnect() {
+      if (!controller.signal.aborted) {
+        reconnectTimer = window.setTimeout(connect, 3000);
+      }
+    }
+
+    async function connect() {
+      try {
+        const response = await fetch(projectTicketEventsURL(activeProjectId), {
+          headers: {
+            Accept: "text/event-stream",
+            Authorization: `Bearer ${token}`,
+          },
+          signal: controller.signal,
+        });
+        if (response.status === 401) {
+          useAuthStore.getState().logout();
+          return;
+        }
+        if (response.status === 403 || response.status === 404) {
+          return;
+        }
+        if (!response.ok || !response.body) {
+          throw new Error("ticket event stream unavailable");
+        }
+
+        const reader = response.body.getReader();
+        let buffer = "";
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) {
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split(/\n\n/);
+          buffer = frames.pop() || "";
+          frames.forEach(handleFrame);
+        }
+        scheduleReconnect();
+      } catch {
+        scheduleReconnect();
+      }
+    }
+
+    void connect();
+    return () => {
+      controller.abort();
+      if (reconnectTimer) {
+        window.clearTimeout(reconnectTimer);
+      }
+    };
+  }, [activeProjectId, queryClient, token]);
 
   const updateTicketStatus = useMutation({
     mutationFn: ({ ticketId, status }: { ticketId: ID; status: TicketStatus }) => api.updateTicket(ticketId, { status }),

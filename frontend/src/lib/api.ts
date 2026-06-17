@@ -246,9 +246,16 @@ function isOAuthProvider(value: string): value is OAuthProvider {
   return value === "google" || value === "github";
 }
 
+function apiURL(path: string): string {
+  return `${apiBaseURL.replace(/\/$/, "")}${path}`;
+}
+
 export function oauthStartURL(provider: OAuthProvider): string {
-  const trimmedBase = apiBaseURL.replace(/\/$/, "");
-  return `${trimmedBase}/auth/${provider}/start`;
+  return apiURL(`/auth/${provider}/start`);
+}
+
+export function projectTicketEventsURL(projectId: ID): string {
+  return apiURL(`${apiPrefix}/projects/${projectId}/tickets/events`);
 }
 
 export const api = {

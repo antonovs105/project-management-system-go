@@ -136,10 +136,10 @@ export function TicketBoard({
   function handleDragEnd(event: DragEndEvent) {
     const activeId = String(event.active.id);
     const overId = event.over?.id ? String(event.over.id) : "";
-    setActiveTicket(null);
 
     const ticket = tickets.find((item) => item.id === activeId);
     if (!ticket || !overId) {
+      setActiveTicket(null);
       return;
     }
 
@@ -147,6 +147,7 @@ export function TicketBoard({
     if (targetStatus && targetStatus !== ticket.status) {
       onMoveTicket(ticket.id, targetStatus);
     }
+    setActiveTicket(null);
   }
 
   if (tickets.length === 0) {
@@ -160,7 +161,7 @@ export function TicketBoard({
           <BoardColumn key={status.id} status={status.id} tickets={grouped.get(status.id) || []} onOpen={onOpenTicket} />
         ))}
       </div>
-      <DragOverlay>
+      <DragOverlay dropAnimation={null}>
         {activeTicket ? (
           <div className="w-[290px]">
             <Panel className="p-3 shadow-2xl">
