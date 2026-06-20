@@ -207,6 +207,9 @@ func (h *Handler) Register(c echo.Context) error {
 
 	newUser, err := h.service.RegisterUser(c.Request().Context(), req.Username, req.Email, req.Password)
 	if err != nil {
+		if errors.Is(err, ErrRegistrationDisabled) {
+			return c.JSON(http.StatusForbidden, map[string]string{"error": ErrRegistrationDisabled.Error()})
+		}
 		if errors.Is(err, ErrInvalidUserInput) {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
@@ -322,6 +325,8 @@ func oauthErrorCode(err error) string {
 		return "email_unverified"
 	case errors.Is(err, ErrOAuthEmailAlreadyRegistered):
 		return "email_registered"
+	case errors.Is(err, ErrRegistrationDisabled):
+		return "registration_disabled"
 	default:
 		return "provider_failed"
 	}

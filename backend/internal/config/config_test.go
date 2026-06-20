@@ -23,8 +23,11 @@ database:
 security:
   jwt_secret_key: "file-jwt-secret"
 instance:
+  name: " Custom Progo "
   public_base_url: "http://localhost:8080"
   local_domain: "localhost:8080"
+registration:
+  enabled: false
 projects:
   creation_policy: "admins_only"
 rate_limits:
@@ -33,6 +36,7 @@ rate_limits:
     burst: 8
 `)
 	t.Setenv("DB_SOURCE", "postgres://env")
+	t.Setenv("REGISTRATION_ENABLED", "true")
 	t.Setenv("PROJECT_CREATION_POLICY", ProjectCreationEveryone)
 	t.Setenv("AUTH_RATE_LIMIT_BURST", "12")
 
@@ -41,6 +45,8 @@ rate_limits:
 	require.NoError(t, err)
 	require.Equal(t, EnvDevelopment, cfg.App.Env)
 	require.Equal(t, "api", cfg.App.Role)
+	require.Equal(t, "Custom Progo", cfg.Instance.Name)
+	require.True(t, cfg.Registration.Enabled)
 	require.Equal(t, "postgres://env", cfg.Database.Source)
 	require.Equal(t, ProjectCreationEveryone, cfg.Projects.CreationPolicy)
 	require.Equal(t, 4.0, cfg.RateLimits.Auth.RequestsPerSecond)

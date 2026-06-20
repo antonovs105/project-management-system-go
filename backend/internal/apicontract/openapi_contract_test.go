@@ -30,12 +30,14 @@ func TestOpenAPIContractDocumentsRegisteredRoutes(t *testing.T) {
 		{method: "get", path: "/ready"},
 		{method: "get", path: "/metrics"},
 		{method: "post", path: "/webhooks/github"},
+		{method: "get", path: "/instance"},
 		{method: "post", path: "/register"},
 		{method: "post", path: "/login"},
 		{method: "get", path: "/auth/oauth/providers"},
 		{method: "get", path: "/auth/{provider}/start"},
 		{method: "get", path: "/auth/{provider}/callback"},
 		{method: "post", path: "/auth/oauth/exchange"},
+		{method: "get", path: "/api/instance"},
 		{method: "get", path: "/api/me"},
 		{method: "patch", path: "/api/me/password"},
 		{method: "get", path: "/api/me/invites"},
@@ -207,6 +209,7 @@ func TestOpenAPIContractDocumentsVersionedRESTAliases(t *testing.T) {
 		"/api/admin/federation/deliveries",
 		"/api/admin/federation/deliveries/summary",
 		"/api/admin/federation/deliveries/{deliveryID}/retry",
+		"/api/instance",
 	} {
 		versionedPath := "/api/v1" + strings.TrimPrefix(path, "/api")
 		pathItem, ok := doc.Paths[versionedPath]

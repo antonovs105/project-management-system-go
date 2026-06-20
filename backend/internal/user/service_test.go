@@ -59,6 +59,17 @@ func TestService_RegisterUser(t *testing.T) {
 		assert.ErrorIs(t, err, ErrInvalidUserInput)
 		assert.Nil(t, user)
 	})
+
+	t.Run("RegistrationDisabled", func(t *testing.T) {
+		closedRepo := new(MockRepository)
+		closedService := NewService(closedRepo, []byte("secret"), activitypub.NewConfig("http://localhost:8080", "localhost:8080"), WithRegistrationEnabled(false))
+
+		user, err := closedService.RegisterUser(ctx, username, email, password)
+
+		assert.ErrorIs(t, err, ErrRegistrationDisabled)
+		assert.Nil(t, user)
+		closedRepo.AssertNotCalled(t, "CreateUser", mock.Anything, mock.Anything)
+	})
 }
 
 func TestService_BootstrapAdmin(t *testing.T) {
@@ -463,6 +474,20 @@ func TestService_OAuthUserForProfile(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.Equal(t, expected, user)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("RejectsNewOAuthUserWhenRegistrationDisabled", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		service := NewService(mockRepo, []byte("secret"), cfg, WithRegistrationEnabled(false))
+		mockRepo.On("GetOAuthIdentity", ctx, OAuthProviderGoogle, "123456789").Return(nil, sql.ErrNoRows).Once()
+		mockRepo.On("GetUserByEmail", ctx, "oauthuser@example.com").Return(nil, sql.ErrNoRows).Once()
+
+		user, err := service.userForOAuthProfile(ctx, profile)
+
+		assert.ErrorIs(t, err, ErrRegistrationDisabled)
+		assert.Nil(t, user)
+		mockRepo.AssertNotCalled(t, "CreateUserWithOAuthIdentity", mock.Anything, mock.Anything, mock.Anything)
 		mockRepo.AssertExpectations(t)
 	})
 }

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight, FolderKanban, Plus, RefreshCw } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, errorMessage } from "../lib/api";
@@ -23,6 +23,11 @@ export function ProjectsPage() {
     queryFn: api.listProjects,
   });
 
+  const capabilities = useQuery({
+    queryKey: queryKeys.instanceCapabilities,
+    queryFn: api.getInstanceCapabilities,
+  });
+
   const createProject = useMutation({
     mutationFn: api.createProject,
     onSuccess: async (project) => {
@@ -34,10 +39,21 @@ export function ProjectsPage() {
     },
   });
 
+  const canCreateProjects = capabilities.data?.can_create_projects ?? false;
+
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!canCreateProjects) {
+      return;
+    }
     createProject.mutate({ name: name.trim(), description: description.trim() });
   }
+
+  useEffect(() => {
+    if (!canCreateProjects && createOpen) {
+      setCreateOpen(false);
+    }
+  }, [canCreateProjects, createOpen]);
 
   return (
     <div className="space-y-6">
@@ -54,10 +70,12 @@ export function ProjectsPage() {
             <RefreshCw size={16} />
             {t("actions.refresh")}
           </Button>
-          <Button tone="primary" onClick={() => setCreateOpen(true)}>
-            <Plus size={16} />
-            {t("projects.project")}
-          </Button>
+          {canCreateProjects ? (
+            <Button tone="primary" onClick={() => setCreateOpen(true)}>
+              <Plus size={16} />
+              {t("projects.project")}
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -67,16 +85,22 @@ export function ProjectsPage() {
         <ErrorState title={t("projects.loadFailed")} body={errorMessage(projects.error, t("projects.loadFailedBody"))} />
       ) : null}
 
+      {capabilities.isError ? (
+        <ErrorState title={t("projects.capabilitiesFailed")} body={errorMessage(capabilities.error, t("projects.capabilitiesFailedBody"))} />
+      ) : null}
+
       {projects.data && projects.data.length === 0 ? (
         <EmptyState
           icon={<FolderKanban size={36} />}
           title={t("projects.emptyTitle")}
-          body={t("projects.emptyBody")}
+          body={canCreateProjects ? t("projects.emptyBody") : t("projects.emptyRestrictedBody")}
           action={
-            <Button tone="primary" onClick={() => setCreateOpen(true)}>
-              <Plus size={16} />
-              {t("projects.createProject")}
-            </Button>
+            canCreateProjects ? (
+              <Button tone="primary" onClick={() => setCreateOpen(true)}>
+                <Plus size={16} />
+                {t("projects.createProject")}
+              </Button>
+            ) : null
           }
         />
       ) : null}
@@ -119,7 +143,7 @@ export function ProjectsPage() {
         footer={
           <>
             <Button onClick={() => setCreateOpen(false)}>{t("actions.cancel")}</Button>
-            <Button type="submit" form="create-project" tone="primary" disabled={createProject.isPending || !name.trim()}>
+            <Button type="submit" form="create-project" tone="primary" disabled={createProject.isPending || !name.trim() || !canCreateProjects}>
               {t("actions.create")}
             </Button>
           </>

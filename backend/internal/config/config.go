@@ -39,18 +39,19 @@ const (
 
 // Config is the typed runtime configuration used by API and maintenance tools.
 type Config struct {
-	App        AppConfig        `yaml:"app"`
-	Server     ServerConfig     `yaml:"server"`
-	Database   DatabaseConfig   `yaml:"database"`
-	Security   SecurityConfig   `yaml:"security"`
-	Instance   InstanceConfig   `yaml:"instance"`
-	Projects   ProjectsConfig   `yaml:"projects"`
-	RateLimits RateLimitsConfig `yaml:"rate_limits"`
-	Redis      RedisConfig      `yaml:"redis"`
-	Metrics    MetricsConfig    `yaml:"metrics"`
-	Federation FederationConfig `yaml:"federation"`
-	OAuth      OAuthConfig      `yaml:"oauth"`
-	GitHub     GitHubConfig     `yaml:"github"`
+	App          AppConfig          `yaml:"app"`
+	Server       ServerConfig       `yaml:"server"`
+	Database     DatabaseConfig     `yaml:"database"`
+	Security     SecurityConfig     `yaml:"security"`
+	Instance     InstanceConfig     `yaml:"instance"`
+	Registration RegistrationConfig `yaml:"registration"`
+	Projects     ProjectsConfig     `yaml:"projects"`
+	RateLimits   RateLimitsConfig   `yaml:"rate_limits"`
+	Redis        RedisConfig        `yaml:"redis"`
+	Metrics      MetricsConfig      `yaml:"metrics"`
+	Federation   FederationConfig   `yaml:"federation"`
+	OAuth        OAuthConfig        `yaml:"oauth"`
+	GitHub       GitHubConfig       `yaml:"github"`
 }
 
 // AppConfig controls process mode.
@@ -80,8 +81,14 @@ type SecurityConfig struct {
 
 // InstanceConfig describes the local federated instance identity.
 type InstanceConfig struct {
+	Name          string `yaml:"name"`
 	PublicBaseURL string `yaml:"public_base_url"`
 	LocalDomain   string `yaml:"local_domain"`
+}
+
+// RegistrationConfig controls public account creation.
+type RegistrationConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // ProjectsConfig controls instance-wide project policies.
@@ -151,6 +158,12 @@ func Default() Config {
 			HTTPAddr:         ":8080",
 			RequestBodyLimit: "2M",
 		},
+		Instance: InstanceConfig{
+			Name: "Progo",
+		},
+		Registration: RegistrationConfig{
+			Enabled: true,
+		},
 		Projects: ProjectsConfig{
 			CreationPolicy: ProjectCreationEveryone,
 		},
@@ -216,6 +229,10 @@ func normalize(cfg *Config) {
 	cfg.Database.Source = strings.TrimSpace(cfg.Database.Source)
 	cfg.Security.JWTSecretKey = strings.TrimSpace(cfg.Security.JWTSecretKey)
 	cfg.Security.ActorPrivateKeyEncryptionKey = strings.TrimSpace(cfg.Security.ActorPrivateKeyEncryptionKey)
+	cfg.Instance.Name = strings.TrimSpace(cfg.Instance.Name)
+	if cfg.Instance.Name == "" {
+		cfg.Instance.Name = "Progo"
+	}
 	cfg.Instance.PublicBaseURL = strings.TrimSpace(cfg.Instance.PublicBaseURL)
 	cfg.Instance.LocalDomain = strings.TrimSpace(cfg.Instance.LocalDomain)
 	cfg.Redis.Addr = strings.TrimSpace(cfg.Redis.Addr)
@@ -329,6 +346,7 @@ func applyEnv(cfg *Config) error {
 	applyStringEnv(&cfg.Security.JWTSecretKey, "JWT_SECRET_KEY")
 	applyStringEnv(&cfg.Instance.PublicBaseURL, "PUBLIC_BASE_URL")
 	applyStringEnv(&cfg.Instance.LocalDomain, "LOCAL_DOMAIN")
+	applyStringEnv(&cfg.Instance.Name, "INSTANCE_NAME")
 	applyStringEnv(&cfg.Redis.Addr, "REDIS_ADDR")
 	applyStringEnv(&cfg.Metrics.Addr, "METRICS_ADDR")
 	applyStringEnv(&cfg.Metrics.Token, "METRICS_TOKEN")
@@ -343,6 +361,9 @@ func applyEnv(cfg *Config) error {
 	applyStringEnv(&cfg.GitHub.APIToken, "GITHUB_API_TOKEN")
 	applyStringEnv(&cfg.GitHub.WebhookSecret, "GITHUB_WEBHOOK_SECRET")
 	applyStringEnv(&cfg.Projects.CreationPolicy, "PROJECT_CREATION_POLICY")
+	if err := applyBoolValueEnv(&cfg.Registration.Enabled, "REGISTRATION_ENABLED"); err != nil {
+		return err
+	}
 	applyCSVEnv(&cfg.Federation.BlockedDomains, "FEDERATION_BLOCKED_DOMAINS")
 	applyCSVEnv(&cfg.Server.CORSAllowedOrigins, "CORS_ALLOWED_ORIGINS")
 	applyCSVEnv(&cfg.Server.TrustedProxyCIDRs, "TRUSTED_PROXY_CIDRS")
@@ -398,6 +419,20 @@ func applyBoolEnv(target **bool, name string) error {
 		return fmt.Errorf("%s must be a boolean", name)
 	}
 	*target = &value
+	return nil
+}
+
+// applyBoolValueEnv replaces target with an explicitly configured boolean value.
+func applyBoolValueEnv(target *bool, name string) error {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return nil
+	}
+	value, err := parseBool(raw)
+	if err != nil {
+		return fmt.Errorf("%s must be a boolean", name)
+	}
+	*target = value
 	return nil
 }
 

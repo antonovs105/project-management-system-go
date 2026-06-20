@@ -21,6 +21,8 @@ function oauthErrorMessage(errorCode: string, t: ReturnType<typeof useI18n>["t"]
       return t("oauth.emailUnverified");
     case "email_registered":
       return t("oauth.emailRegistered");
+    case "registration_disabled":
+      return t("oauth.registrationDisabled");
     case "provider_failed":
       return t("oauth.providerFailed");
     default:

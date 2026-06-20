@@ -49,9 +49,9 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
   const [password, setPassword] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 
-  const oauthProviders = useQuery({
-    queryKey: queryKeys.oauthProviders,
-    queryFn: api.listOAuthProviders,
+  const publicInstance = useQuery({
+    queryKey: queryKeys.publicInstance,
+    queryFn: api.getPublicInstance,
     retry: false,
     staleTime: 60_000,
   });
@@ -80,6 +80,10 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
     event.preventDefault();
     setFormError(null);
     if (mode === "register") {
+      if (publicInstance.data?.registration_enabled === false) {
+        setFormError(t("auth.registrationClosedBody"));
+        return;
+      }
       const passwordLength = Array.from(password).length;
       const passwordBytes = new TextEncoder().encode(password).length;
       if (passwordLength < fieldLimits.passwordMinLength) {
@@ -97,7 +101,8 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
   }
 
   const pending = login.isPending || register.isPending;
-  const availableOAuthProviders = oauthProviders.data ?? [];
+  const registrationEnabled = publicInstance.data?.registration_enabled ?? true;
+  const availableOAuthProviders = publicInstance.data?.oauth_providers ?? [];
 
   return (
     <main className="grid min-h-screen bg-zinc-100 lg:grid-cols-[1fr_460px]">
@@ -165,50 +170,67 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
             </div>
           ) : null}
 
-          <form className="grid gap-4" onSubmit={submit}>
-            {mode === "register" ? (
+          {mode === "register" && !registrationEnabled ? (
+            <div className="grid gap-4">
+              <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+                <h3 className="text-sm font-semibold text-zinc-950">{t("auth.registrationClosedTitle")}</h3>
+                <p className="mt-1 text-sm text-zinc-500">{t("auth.registrationClosedBody")}</p>
+              </div>
+              <Button tone="primary" className="w-full" onClick={() => navigate("/login")}>
+                {t("actions.signIn")}
+                <ArrowRight size={16} />
+              </Button>
+            </div>
+          ) : (
+            <form className="grid gap-4" onSubmit={submit}>
+              {mode === "register" ? (
+                <TextField
+                  label={t("auth.username")}
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  autoComplete="username"
+                  required
+                  minLength={3}
+                />
+              ) : null}
               <TextField
-                label={t("auth.username")}
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                autoComplete="username"
+                label={t("auth.email")}
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                autoComplete="email"
                 required
-                minLength={3}
               />
-            ) : null}
-            <TextField
-              label={t("auth.email")}
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              autoComplete="email"
-              required
-            />
-            <TextField
-              label={t("auth.password")}
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
-              required
-              minLength={mode === "register" ? fieldLimits.passwordMinLength : undefined}
-              maxLength={fieldLimits.passwordMaxLength}
-              hint={mode === "register" ? t("validation.passwordHint", { min: fieldLimits.passwordMinLength }) : undefined}
-            />
-            <Button type="submit" tone="primary" className="w-full" disabled={pending}>
-              {pending ? t("common.working") : mode === "login" ? t("actions.signIn") : t("actions.createAccount")}
-              <ArrowRight size={16} />
-            </Button>
-          </form>
+              <TextField
+                label={t("auth.password")}
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                required
+                minLength={mode === "register" ? fieldLimits.passwordMinLength : undefined}
+                maxLength={fieldLimits.passwordMaxLength}
+                hint={mode === "register" ? t("validation.passwordHint", { min: fieldLimits.passwordMinLength }) : undefined}
+              />
+              <Button type="submit" tone="primary" className="w-full" disabled={pending}>
+                {pending ? t("common.working") : mode === "login" ? t("actions.signIn") : t("actions.createAccount")}
+                <ArrowRight size={16} />
+              </Button>
+            </form>
+          )}
 
           <div className="mt-5 text-center text-sm text-zinc-500">
             {mode === "login" ? (
-              <>
-                {t("auth.needAccount")}{" "}
-                <Link className="font-medium text-zinc-950 underline-offset-4 hover:underline" to="/register">
-                  {t("actions.register")}
-                </Link>
-              </>
+              registrationEnabled ? (
+                <>
+                  {t("auth.needAccount")}{" "}
+                  <Link className="font-medium text-zinc-950 underline-offset-4 hover:underline" to="/register">
+                    {t("actions.register")}
+                  </Link>
+                </>
+              ) : (
+                <span>{t("auth.registrationClosedShort")}</span>
+              )
             ) : (
               <>
                 {t("auth.alreadyRegistered")}{" "}

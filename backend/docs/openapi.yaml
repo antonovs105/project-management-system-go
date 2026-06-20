@@ -8,6 +8,7 @@ servers:
 tags:
   - name: Health
   - name: Auth
+  - name: Instance
   - name: Projects
   - name: Tickets
   - name: Comments
@@ -105,6 +106,17 @@ paths:
           $ref: "#/components/responses/Error"
         "503":
           $ref: "#/components/responses/Error"
+  /instance:
+    get:
+      tags: [Instance]
+      operationId: getPublicInstance
+      responses:
+        "200":
+          description: Public instance metadata and unauthenticated capabilities.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicInstanceConfig"
   /register:
     post:
       tags: [Auth]
@@ -119,6 +131,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/User"
         "400":
+          $ref: "#/components/responses/Error"
+        "403":
           $ref: "#/components/responses/Error"
   /login:
     post:
@@ -218,6 +232,23 @@ paths:
                   token:
                     type: string
         "401":
+          $ref: "#/components/responses/Error"
+  /api/instance:
+    get:
+      tags: [Instance]
+      operationId: getInstanceCapabilities
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Instance metadata and current-user capabilities.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstanceCapabilities"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
           $ref: "#/components/responses/Error"
   /api/me:
     get:
@@ -1442,6 +1473,8 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
+  /api/v1/instance:
+    $ref: "#/paths/~1api~1instance"
   /api/v1/me:
     $ref: "#/paths/~1api~1me"
   /api/v1/me/password:
@@ -2102,6 +2135,42 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
   schemas:
+    PublicInstanceConfig:
+      type: object
+      required:
+        - name
+        - version
+        - registration_enabled
+        - project_creation_policy
+        - oauth_providers
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        registration_enabled:
+          type: boolean
+        project_creation_policy:
+          type: string
+          enum: [everyone, admins_only]
+        oauth_providers:
+          type: array
+          items:
+            type: string
+            enum: [google, github]
+    InstanceCapabilities:
+      allOf:
+        - $ref: "#/components/schemas/PublicInstanceConfig"
+        - type: object
+          required:
+            - instance_role
+            - can_create_projects
+          properties:
+            instance_role:
+              type: string
+              enum: [owner, admin, user]
+            can_create_projects:
+              type: boolean
     GitHubCommit:
       type: object
       required:

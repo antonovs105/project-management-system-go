@@ -20,10 +20,12 @@ import type {
   GitHubSyncResult,
   GraphData,
   ID,
+  InstanceCapabilities,
   InstanceRole,
   Notification,
   OAuthProvider,
   Project,
+  ProjectCreationPolicy,
   ProjectDelivery,
   ProjectDeliverySummary,
   ProjectInvite,
@@ -32,6 +34,7 @@ import type {
   ProjectPermission,
   ProjectRole,
   ProjectRoleKey,
+  PublicInstanceConfig,
   RemoteActorInspection,
   Ticket,
   TicketPriority,
@@ -236,6 +239,19 @@ interface OAuthProvidersResponse {
   providers?: OAuthProvider[];
 }
 
+interface InstanceConfigResponse {
+  name?: string;
+  version?: string;
+  registration_enabled?: boolean;
+  project_creation_policy?: ProjectCreationPolicy;
+  oauth_providers?: OAuthProvider[];
+}
+
+interface InstanceCapabilitiesResponse extends InstanceConfigResponse {
+  instance_role?: InstanceRole;
+  can_create_projects?: boolean;
+}
+
 interface ErrorResponse {
   error?: string;
   message?: string;
@@ -259,6 +275,32 @@ function isOAuthProvider(value: string): value is OAuthProvider {
   return value === "google" || value === "github";
 }
 
+function isProjectCreationPolicy(value: string): value is ProjectCreationPolicy {
+  return value === "everyone" || value === "admins_only";
+}
+
+function isInstanceRole(value: string): value is InstanceRole {
+  return value === "owner" || value === "admin" || value === "user";
+}
+
+function normalizeOAuthProviders(values: OAuthProvider[] | undefined): OAuthProvider[] {
+  return asArray(values).filter(isOAuthProvider);
+}
+
+function normalizeProjectCreationPolicy(value: ProjectCreationPolicy | undefined): ProjectCreationPolicy {
+  return value && isProjectCreationPolicy(value) ? value : "everyone";
+}
+
+function normalizeInstanceConfig(data: InstanceConfigResponse) {
+  return {
+    name: data.name || "Progo",
+    version: data.version || "dev",
+    registration_enabled: data.registration_enabled ?? true,
+    project_creation_policy: normalizeProjectCreationPolicy(data.project_creation_policy),
+    oauth_providers: normalizeOAuthProviders(data.oauth_providers),
+  };
+}
+
 function apiURL(path: string): string {
   return `${apiBaseURL.replace(/\/$/, "")}${path}`;
 }
@@ -276,6 +318,21 @@ export function notificationsEventsURL(): string {
 }
 
 export const api = {
+  async getPublicInstance(): Promise<PublicInstanceConfig> {
+    const { data } = await http.get<InstanceConfigResponse>("/instance");
+    return normalizeInstanceConfig(data);
+  },
+
+  async getInstanceCapabilities(): Promise<InstanceCapabilities> {
+    const { data } = await http.get<InstanceCapabilitiesResponse>(`${apiPrefix}/instance`);
+    const normalized = normalizeInstanceConfig(data);
+    return {
+      ...normalized,
+      instance_role: data.instance_role && isInstanceRole(data.instance_role) ? data.instance_role : "user",
+      can_create_projects: data.can_create_projects ?? (normalized.project_creation_policy === "everyone"),
+    };
+  },
+
   async login(payload: LoginPayload): Promise<LoginResponse> {
     const { data } = await http.post<LoginResponse>("/login", payload);
     return data;

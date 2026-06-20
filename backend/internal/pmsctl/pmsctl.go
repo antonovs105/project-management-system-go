@@ -174,7 +174,14 @@ func (r *Runner) runConfigValidate(ctx context.Context, args []string) int {
 		fmt.Fprintf(r.Stderr, "config_invalid error=%q\n", err.Error())
 		return 1
 	}
-	fmt.Fprintf(r.Stdout, "config_valid app_env=%s role=%s project_creation_policy=%s\n", cfg.App.Env, cfg.App.Role, cfg.Projects.CreationPolicy)
+	fmt.Fprintf(
+		r.Stdout,
+		"config_valid app_env=%s role=%s registration_enabled=%t project_creation_policy=%s\n",
+		cfg.App.Env,
+		cfg.App.Role,
+		cfg.Registration.Enabled,
+		cfg.Projects.CreationPolicy,
+	)
 	return 0
 }
 

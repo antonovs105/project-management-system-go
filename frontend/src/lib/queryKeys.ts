@@ -2,6 +2,8 @@ import type { ID } from "../types";
 
 export const queryKeys = {
   profile: ["profile"] as const,
+  publicInstance: ["publicInstance"] as const,
+  instanceCapabilities: ["instanceCapabilities"] as const,
   oauthProviders: ["oauthProviders"] as const,
   projects: ["projects"] as const,
   project: (projectId: ID) => ["project", projectId] as const,

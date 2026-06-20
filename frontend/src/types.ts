@@ -2,6 +2,7 @@ export type ID = string;
 
 export type InstanceRole = "owner" | "admin" | "user";
 export type OAuthProvider = "google" | "github";
+export type ProjectCreationPolicy = "everyone" | "admins_only";
 export type ProjectRoleKey = string;
 export type ProjectPermission =
   | "project.read"
@@ -33,6 +34,19 @@ export interface SessionUser {
   userId: ID;
   instanceRole: InstanceRole;
   email?: string;
+}
+
+export interface PublicInstanceConfig {
+  name: string;
+  version: string;
+  registration_enabled: boolean;
+  project_creation_policy: ProjectCreationPolicy;
+  oauth_providers: OAuthProvider[];
+}
+
+export interface InstanceCapabilities extends PublicInstanceConfig {
+  instance_role: InstanceRole;
+  can_create_projects: boolean;
 }
 
 export interface Project {

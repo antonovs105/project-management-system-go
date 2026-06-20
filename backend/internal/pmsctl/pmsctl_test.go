@@ -142,6 +142,7 @@ func TestConfigValidateLoadsEnvAndReportsPolicy(t *testing.T) {
 			cfg.Security.JWTSecretKey = "dev-secret"
 			cfg.Instance.PublicBaseURL = "http://localhost:8080"
 			cfg.Instance.LocalDomain = "localhost:8080"
+			cfg.Registration.Enabled = false
 			cfg.Projects.CreationPolicy = appconfig.ProjectCreationAdminsOnly
 			return cfg, nil
 		},
@@ -158,6 +159,7 @@ func TestConfigValidateLoadsEnvAndReportsPolicy(t *testing.T) {
 	require.Equal(t, "alpha.env", loadedEnvFile)
 	require.Equal(t, "progo.yml", loadedConfigFile)
 	require.Contains(t, stdout.String(), "config_valid")
+	require.Contains(t, stdout.String(), "registration_enabled=false")
 	require.Contains(t, stdout.String(), "project_creation_policy=admins_only")
 }
 

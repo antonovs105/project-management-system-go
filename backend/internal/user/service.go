@@ -47,6 +47,9 @@ var ErrCannotDemoteLastAdmin = errors.New("cannot demote the last instance owner
 // ErrInvalidCredentials reports failed authentication without revealing which credential failed.
 var ErrInvalidCredentials = errors.New("invalid credentials")
 
+// ErrRegistrationDisabled reports that this instance is closed to new accounts.
+var ErrRegistrationDisabled = errors.New("registration is disabled")
+
 // ErrOAuthProviderUnavailable reports that a requested OAuth provider is disabled.
 var ErrOAuthProviderUnavailable = errors.New("oauth provider unavailable")
 
@@ -95,11 +98,12 @@ const (
 
 // Service encapsulates local user registration, login, and account management.
 type Service struct {
-	repo         Repository
-	jwtSecretKey []byte
-	apConfig     activitypub.Config
-	oauthConfig  OAuthConfig
-	httpClient   *http.Client
+	repo                Repository
+	jwtSecretKey        []byte
+	apConfig            activitypub.Config
+	oauthConfig         OAuthConfig
+	httpClient          *http.Client
+	registrationEnabled bool
 }
 
 // OAuthProviderConfig contains one provider's OAuth client settings.
@@ -137,13 +141,21 @@ func WithHTTPClient(client *http.Client) Option {
 	}
 }
 
+// WithRegistrationEnabled controls whether this instance accepts new accounts.
+func WithRegistrationEnabled(enabled bool) Option {
+	return func(s *Service) {
+		s.registrationEnabled = enabled
+	}
+}
+
 // NewService creates a user service with repository, JWT secret, and ActivityPub configuration.
 func NewService(repo Repository, jwtSecret []byte, apConfig activitypub.Config, options ...Option) *Service {
 	service := &Service{
-		repo:         repo,
-		jwtSecretKey: jwtSecret,
-		apConfig:     apConfig,
-		httpClient:   &http.Client{Timeout: 10 * time.Second},
+		repo:                repo,
+		jwtSecretKey:        jwtSecret,
+		apConfig:            apConfig,
+		httpClient:          &http.Client{Timeout: 10 * time.Second},
+		registrationEnabled: true,
 	}
 	for _, option := range options {
 		option(service)
@@ -162,6 +174,9 @@ func NewService(repo Repository, jwtSecret []byte, apConfig activitypub.Config, 
 
 // RegisterUser creates a local regular account and its ActivityPub actor graph.
 func (s *Service) RegisterUser(ctx context.Context, username, email, password string) (*User, error) {
+	if !s.registrationEnabled {
+		return nil, ErrRegistrationDisabled
+	}
 	newUser, err := s.newLocalUser(username, email, password, InstanceRoleUser)
 	if err != nil {
 		return nil, err
@@ -688,6 +703,9 @@ func (s *Service) userForOAuthProfile(ctx context.Context, profile OAuthProfile)
 		return nil, ErrOAuthEmailAlreadyRegistered
 	} else if err != nil && !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, ErrUserNotFound) {
 		return nil, err
+	}
+	if !s.registrationEnabled {
+		return nil, ErrRegistrationDisabled
 	}
 	newUser, err := s.newOAuthUser(profile)
 	if err != nil {

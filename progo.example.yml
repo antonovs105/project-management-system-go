@@ -17,8 +17,12 @@ security:
   actor_private_key_encryption_key: "change-me-actor-key-32-byte-minimum"
 
 instance:
+  name: "Progo"
   public_base_url: "http://localhost:8080"
   local_domain: "localhost:8080"
+
+registration:
+  enabled: true
 
 projects:
   creation_policy: "everyone"

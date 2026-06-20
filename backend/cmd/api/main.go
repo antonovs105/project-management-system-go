@@ -30,6 +30,7 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/comment"
 	appconfig "github.com/antonovs105/project-management-system-go/internal/config"
 	"github.com/antonovs105/project-management-system-go/internal/githubintegration"
+	"github.com/antonovs105/project-management-system-go/internal/instance"
 	authMiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
 	"github.com/antonovs105/project-management-system-go/internal/notification"
 	"github.com/antonovs105/project-management-system-go/internal/observability"
@@ -133,6 +134,7 @@ type ApiServer struct {
 	metrics             *observability.Metrics
 	metricsToken        string
 	userHandler         *user.Handler
+	instanceHandler     *instance.Handler
 	projectHandler      *project.Handler
 	ticketHandler       *ticket.Handler
 	commentHandler      *comment.Handler
@@ -404,20 +406,27 @@ func main() {
 	log.Println("DB connection successful")
 
 	userRepo := user.NewRepository(db, apConfig, privateKeyCodec)
-	userService := user.NewService(userRepo, []byte(jwtSecret), apConfig, user.WithOAuthConfig(user.OAuthConfig{
-		FrontendCallbackURL: cfg.OAuth.FrontendCallbackURL,
-		Google: user.OAuthProviderConfig{
-			ClientID:     cfg.OAuth.Google.ClientID,
-			ClientSecret: cfg.OAuth.Google.ClientSecret,
-			RedirectURL:  cfg.OAuth.Google.RedirectURL,
-		},
-		GitHub: user.OAuthProviderConfig{
-			ClientID:     cfg.OAuth.GitHub.ClientID,
-			ClientSecret: cfg.OAuth.GitHub.ClientSecret,
-			RedirectURL:  cfg.OAuth.GitHub.RedirectURL,
-		},
-	}))
+	userService := user.NewService(
+		userRepo,
+		[]byte(jwtSecret),
+		apConfig,
+		user.WithRegistrationEnabled(cfg.Registration.Enabled),
+		user.WithOAuthConfig(user.OAuthConfig{
+			FrontendCallbackURL: cfg.OAuth.FrontendCallbackURL,
+			Google: user.OAuthProviderConfig{
+				ClientID:     cfg.OAuth.Google.ClientID,
+				ClientSecret: cfg.OAuth.Google.ClientSecret,
+				RedirectURL:  cfg.OAuth.Google.RedirectURL,
+			},
+			GitHub: user.OAuthProviderConfig{
+				ClientID:     cfg.OAuth.GitHub.ClientID,
+				ClientSecret: cfg.OAuth.GitHub.ClientSecret,
+				RedirectURL:  cfg.OAuth.GitHub.RedirectURL,
+			},
+		}),
+	)
 	userHandler := user.NewHandler(userService)
+	instanceHandler := instance.NewHandler(cfg, userService, userService)
 
 	projectRepo := project.NewRepository(db, apConfig, privateKeyCodec)
 	projectService := project.NewService(projectRepo, apConfig)
@@ -543,6 +552,7 @@ func main() {
 		metrics:             metrics,
 		metricsToken:        metricsToken,
 		userHandler:         userHandler,
+		instanceHandler:     instanceHandler,
 		projectHandler:      projectHandler,
 		ticketHandler:       ticketHandler,
 		commentHandler:      commentHandler,
@@ -587,6 +597,7 @@ func main() {
 	e.GET("/health", server.healthCheck)
 	e.GET("/ready", server.readinessCheck)
 	e.GET("/metrics", server.metricsHandler)
+	server.instanceHandler.RegisterPublicRoutes(e)
 
 	server.userHandler.RegisterRoutes(e, newRateLimiter(rate.Limit(cfg.RateLimits.Auth.RequestsPerSecond), cfg.RateLimits.Auth.Burst))
 	server.wfHandler.RegisterRoutes(e, newRateLimiter(rate.Limit(cfg.RateLimits.Discovery.RequestsPerSecond), cfg.RateLimits.Discovery.Burst))
@@ -810,6 +821,7 @@ func registerAuthenticatedAPIRoutes(api *echo.Group, server *ApiServer, jwtSecre
 	api.Use(authMiddleware.JWTMiddleware(jwtSecret, userService))
 
 	api.GET("/me", server.getProfile)
+	server.instanceHandler.RegisterAuthenticatedRoutes(api)
 	server.userHandler.RegisterAccountRoutes(api)
 	server.userHandler.RegisterAdminRoutes(api)
 	server.federationHandler.RegisterRoutes(api)
