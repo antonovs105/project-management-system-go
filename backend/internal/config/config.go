@@ -185,6 +185,16 @@ func Load() (Config, error) {
 
 // LoadFile reads a specific YAML file and applies environment overrides.
 func LoadFile(path string) (Config, error) {
+	return loadFile(path, true)
+}
+
+// LoadFileNoEnv reads a specific YAML file without applying environment overrides.
+func LoadFileNoEnv(path string) (Config, error) {
+	return loadFile(path, false)
+}
+
+// loadFile reads YAML configuration and optionally applies environment overrides.
+func loadFile(path string, useEnv bool) (Config, error) {
 	cfg := Default()
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -209,8 +219,10 @@ func LoadFile(path string) (Config, error) {
 		}
 	}
 
-	if err := applyEnv(&cfg); err != nil {
-		return Config{}, err
+	if useEnv {
+		if err := applyEnv(&cfg); err != nil {
+			return Config{}, err
+		}
 	}
 	Normalize(&cfg)
 	if err := cfg.Validate(); err != nil {

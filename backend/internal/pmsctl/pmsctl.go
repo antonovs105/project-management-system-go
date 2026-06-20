@@ -148,6 +148,8 @@ func (r *Runner) runConfig(ctx context.Context, args []string) int {
 		return 2
 	}
 	switch args[0] {
+	case "export-env":
+		return r.runConfigExportEnv(ctx, args[1:])
 	case "init":
 		return r.runConfigInit(ctx, args[1:])
 	case "validate":
@@ -394,6 +396,7 @@ func (r *Runner) printConfigUsage() {
 	fmt.Fprintln(r.Stderr, "Usage: pmsctl config <command> [options]")
 	fmt.Fprintln(r.Stderr)
 	fmt.Fprintln(r.Stderr, "Commands:")
+	fmt.Fprintln(r.Stderr, "  export-env      Create a Docker Compose env file from runtime YAML")
 	fmt.Fprintln(r.Stderr, "  init            Create an interactive runtime configuration")
 	fmt.Fprintln(r.Stderr, "  validate        Validate dotenv/YAML runtime configuration")
 }

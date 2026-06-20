@@ -54,6 +54,32 @@ rate_limits:
 	require.True(t, cfg.FederationAllowInsecureHTTP())
 }
 
+func TestLoadFileNoEnvIgnoresEnvironmentOverrides(t *testing.T) {
+	path := writeConfig(t, `
+database:
+  source: "postgres://file"
+security:
+  jwt_secret_key: "file-jwt-secret"
+instance:
+  public_base_url: "http://localhost:8080"
+  local_domain: "localhost:8080"
+registration:
+  enabled: false
+projects:
+  creation_policy: "admins_only"
+`)
+	t.Setenv("DB_SOURCE", "postgres://env")
+	t.Setenv("REGISTRATION_ENABLED", "true")
+	t.Setenv("PROJECT_CREATION_POLICY", ProjectCreationEveryone)
+
+	cfg, err := LoadFileNoEnv(path)
+
+	require.NoError(t, err)
+	require.Equal(t, "postgres://file", cfg.Database.Source)
+	require.False(t, cfg.Registration.Enabled)
+	require.Equal(t, ProjectCreationAdminsOnly, cfg.Projects.CreationPolicy)
+}
+
 func TestLoadFileRejectsUnknownYAMLFields(t *testing.T) {
 	path := writeConfig(t, `
 database:

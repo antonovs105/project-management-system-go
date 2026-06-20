@@ -329,6 +329,107 @@ func TestConfigInitFailsWhenSecretGenerationFails(t *testing.T) {
 	require.True(t, errors.Is(err, os.ErrNotExist))
 }
 
+func TestConfigExportEnvWritesComposeEnvWithoutEnvironmentOverrides(t *testing.T) {
+	disabled := false
+	cfg := appconfig.Default()
+	cfg.App.Env = appconfig.EnvProduction
+	cfg.Database.Source = "postgres://progo:database-password@db:5432/progo?sslmode=disable"
+	cfg.Security.JWTSecretKey = strings.Repeat("j", 32)
+	cfg.Security.ActorPrivateKeyEncryptionKey = strings.Repeat("a", 32)
+	cfg.Instance.Name = "Alpha Progo"
+	cfg.Instance.PublicBaseURL = "https://alpha.example.test"
+	cfg.Instance.LocalDomain = "alpha.example.test"
+	cfg.Server.CORSAllowedOrigins = []string{"https://alpha.example.test"}
+	cfg.Server.TrustedProxyCIDRs = []string{"127.0.0.1/32"}
+	cfg.Registration.Enabled = false
+	cfg.Projects.CreationPolicy = appconfig.ProjectCreationAdminsOnly
+	cfg.RateLimits.Auth.RequestsPerSecond = 3.5
+	cfg.RateLimits.Auth.Burst = 7
+	cfg.Metrics.Token = strings.Repeat("m", 32)
+	cfg.Federation.BlockedDomains = []string{"blocked.example.test"}
+	cfg.Federation.AllowInsecureHTTP = &disabled
+	cfg.OAuth.Google.ClientID = "google-client"
+	cfg.GitHub.WebhookSecret = "github webhook secret"
+
+	configPath := writeRuntimeConfig(t, cfg)
+	output := filepath.Join(t.TempDir(), ".env")
+	t.Setenv("PUBLIC_BASE_URL", "https://env.example.test")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	runner := Runner{Stdout: &stdout, Stderr: &stderr}
+
+	code := runner.Run(context.Background(), []string{
+		"config", "export-env",
+		"--config", configPath,
+		"--output", output,
+		"--image-prefix", "ghcr.io/example/progo",
+		"--image-tag", "abc123",
+	})
+
+	require.Equal(t, 0, code)
+	require.Empty(t, stderr.String())
+	require.Contains(t, stdout.String(), "dotenv_exported")
+	raw, err := os.ReadFile(output)
+	require.NoError(t, err)
+	body := string(raw)
+	require.Contains(t, body, "INSTANCE_NAME=alpha-example-test\n")
+	require.Contains(t, body, "APP_ENV=production\n")
+	require.Contains(t, body, "POSTGRES_USER=progo\n")
+	require.Contains(t, body, "POSTGRES_PASSWORD=database-password\n")
+	require.Contains(t, body, "POSTGRES_DB=progo\n")
+	require.Contains(t, body, "PUBLIC_BASE_URL=https://alpha.example.test\n")
+	require.NotContains(t, body, "https://env.example.test")
+	require.Contains(t, body, "REGISTRATION_ENABLED=false\n")
+	require.Contains(t, body, "PROJECT_CREATION_POLICY=admins_only\n")
+	require.Contains(t, body, "AUTH_RATE_LIMIT_PER_SECOND=3.5\n")
+	require.Contains(t, body, "AUTH_RATE_LIMIT_BURST=7\n")
+	require.Contains(t, body, "FEDERATION_BLOCKED_DOMAINS=blocked.example.test\n")
+	require.Contains(t, body, "GOOGLE_OAUTH_CLIENT_ID=google-client\n")
+	require.Contains(t, body, "GITHUB_WEBHOOK_SECRET='github webhook secret'\n")
+	require.Contains(t, body, "IMAGE_PREFIX=ghcr.io/example/progo\n")
+	require.Contains(t, body, "IMAGE_TAG=abc123\n")
+}
+
+func TestConfigExportEnvRefusesOverwriteWithoutForce(t *testing.T) {
+	cfg := appconfig.Default()
+	cfg.Database.Source = "postgres://postgres:postgres@localhost:5432/pms?sslmode=disable"
+	cfg.Security.JWTSecretKey = "dev-secret"
+	cfg.Instance.PublicBaseURL = "http://localhost:8080"
+	cfg.Instance.LocalDomain = "localhost:8080"
+	configPath := writeRuntimeConfig(t, cfg)
+	output := filepath.Join(t.TempDir(), ".env")
+	require.NoError(t, os.WriteFile(output, []byte("old"), 0o600))
+	var stderr bytes.Buffer
+	runner := Runner{Stderr: &stderr}
+
+	code := runner.Run(context.Background(), []string{"config", "export-env", "--config", configPath, "--output", output})
+
+	require.Equal(t, 1, code)
+	require.Contains(t, stderr.String(), "already exists")
+	raw, err := os.ReadFile(output)
+	require.NoError(t, err)
+	require.Equal(t, "old", string(raw))
+}
+
+func TestConfigExportEnvRejectsDatabaseSourceWithoutPassword(t *testing.T) {
+	cfg := appconfig.Default()
+	cfg.Database.Source = "postgres://postgres@localhost:5432/pms?sslmode=disable"
+	cfg.Security.JWTSecretKey = "dev-secret"
+	cfg.Instance.PublicBaseURL = "http://localhost:8080"
+	cfg.Instance.LocalDomain = "localhost:8080"
+	configPath := writeRuntimeConfig(t, cfg)
+	output := filepath.Join(t.TempDir(), ".env")
+	var stderr bytes.Buffer
+	runner := Runner{Stderr: &stderr}
+
+	code := runner.Run(context.Background(), []string{"config", "export-env", "--config", configPath, "--output", output})
+
+	require.Equal(t, 1, code)
+	require.Contains(t, stderr.String(), "database.source must include a password")
+	_, err := os.Stat(output)
+	require.True(t, errors.Is(err, os.ErrNotExist))
+}
+
 func TestFederationDiscoverUsesPositionalResource(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -502,6 +603,16 @@ func readGeneratedConfig(t *testing.T, path string) (appconfig.Config, []byte) {
 	require.NoError(t, cfg.Validate())
 
 	return cfg, raw
+}
+
+func writeRuntimeConfig(t *testing.T, cfg appconfig.Config) string {
+	t.Helper()
+
+	data, err := renderConfigYAML(cfg)
+	require.NoError(t, err)
+	path := filepath.Join(t.TempDir(), "progo.yml")
+	require.NoError(t, os.WriteFile(path, data, 0o600))
+	return path
 }
 
 func sequentialSecretGenerator() func(int) (string, error) {
