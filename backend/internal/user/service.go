@@ -343,6 +343,22 @@ func (s *Service) UpdateInstanceRole(ctx context.Context, adminUserID, targetUse
 	return s.repo.UpdateInstanceRole(ctx, adminUserID, targetUserID, role)
 }
 
+// InstanceRole returns the system-wide role for a local user.
+func (s *Service) InstanceRole(ctx context.Context, userID string) (string, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return "", ErrUserNotFound
+	}
+	role, err := s.repo.InstanceRole(ctx, userID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", ErrUserNotFound
+		}
+		return "", err
+	}
+	return role, nil
+}
+
 // ChangePassword replaces a user's password and invalidates their existing JWTs.
 func (s *Service) ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error {
 	userID = strings.TrimSpace(userID)

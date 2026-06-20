@@ -1,0 +1,62 @@
+app:
+  env: development
+  role: all
+
+server:
+  http_addr: ":8080"
+  request_body_limit: "2M"
+  cors_allowed_origins:
+    - "http://localhost:5173"
+  trusted_proxy_cidrs: []
+
+database:
+  source: "postgres://postgres:change-me-postgres-password-32-bytes@localhost:5432/pms?sslmode=disable"
+
+security:
+  jwt_secret_key: "change-me-jwt-secret-32-byte-minimum"
+  actor_private_key_encryption_key: "change-me-actor-key-32-byte-minimum"
+
+instance:
+  public_base_url: "http://localhost:8080"
+  local_domain: "localhost:8080"
+
+projects:
+  creation_policy: "everyone"
+
+rate_limits:
+  auth:
+    requests_per_second: 2
+    burst: 10
+  discovery:
+    requests_per_second: 10
+    burst: 50
+  inbox:
+    requests_per_second: 20
+    burst: 100
+
+redis:
+  addr: "localhost:6379"
+
+metrics:
+  addr: ""
+  token: "change-me-metrics-token-32-byte-min"
+
+federation:
+  blocked_domains: []
+  allow_insecure_http: true
+  allow_private_networks: false
+
+oauth:
+  frontend_callback_url: "http://localhost:5173/oauth/callback"
+  google:
+    client_id: ""
+    client_secret: ""
+    redirect_url: "http://localhost:8080/auth/google/callback"
+  github:
+    client_id: ""
+    client_secret: ""
+    redirect_url: "http://localhost:8080/auth/github/callback"
+
+github:
+  api_token: ""
+  webhook_secret: ""

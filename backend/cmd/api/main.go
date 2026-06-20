@@ -28,6 +28,7 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteinbox"
 	"github.com/antonovs105/project-management-system-go/internal/adminaudit"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
+	appconfig "github.com/antonovs105/project-management-system-go/internal/config"
 	"github.com/antonovs105/project-management-system-go/internal/githubintegration"
 	authMiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
 	"github.com/antonovs105/project-management-system-go/internal/notification"
@@ -339,50 +340,44 @@ func main() {
 	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
 		log.Printf("failed to load .env: %v", err)
 	}
-	appEnv, err := parseAppEnv(os.Getenv("APP_ENV"))
+	cfg, err := appconfig.Load()
+	if err != nil {
+		log.Fatal(err)
+	}
+	appEnv, err := parseAppEnv(cfg.App.Env)
 	if err != nil {
 		log.Fatal(err)
 	}
 	production := appEnv == appEnvProduction
-	role, err := parseAppRole(os.Getenv("APP_ROLE"))
+	role, err := parseAppRole(cfg.App.Role)
 	if err != nil {
 		log.Fatal(err)
 	}
-	dbSource := os.Getenv("DB_SOURCE")
+	dbSource := cfg.Database.Source
 	if dbSource == "" {
 		log.Fatal("DB_SOURCE environment variable is not set")
 	}
-	jwtSecret := os.Getenv("JWT_SECRET_KEY")
+	jwtSecret := cfg.Security.JWTSecretKey
 	if jwtSecret == "" {
 		log.Fatal("JWT_SECRET_KEY environment variable is not set")
 	}
-	publicBaseURL := os.Getenv("PUBLIC_BASE_URL")
+	publicBaseURL := cfg.Instance.PublicBaseURL
 	if publicBaseURL == "" {
 		log.Fatal("PUBLIC_BASE_URL environment variable is not set")
 	}
-	localDomain := os.Getenv("LOCAL_DOMAIN")
+	localDomain := cfg.Instance.LocalDomain
 	if localDomain == "" {
 		log.Fatal("LOCAL_DOMAIN environment variable is not set")
 	}
-	redisAddr := os.Getenv("REDIS_ADDR")
-	metricsAddr := strings.TrimSpace(os.Getenv("METRICS_ADDR"))
-	metricsToken := strings.TrimSpace(os.Getenv("METRICS_TOKEN"))
-	actorPrivateKeyEncryptionKey := strings.TrimSpace(os.Getenv("ACTOR_PRIVATE_KEY_ENCRYPTION_KEY"))
-	allowInsecureFederationHTTP := !production
-	if value, ok, err := optionalBoolEnv("FEDERATION_ALLOW_INSECURE_HTTP"); err != nil {
-		log.Fatal(err)
-	} else if ok {
-		allowInsecureFederationHTTP = value
-	}
+	redisAddr := cfg.Redis.Addr
+	metricsAddr := cfg.Metrics.Addr
+	metricsToken := cfg.Metrics.Token
+	actorPrivateKeyEncryptionKey := cfg.Security.ActorPrivateKeyEncryptionKey
+	allowInsecureFederationHTTP := cfg.FederationAllowInsecureHTTP()
 	if production && allowInsecureFederationHTTP {
 		log.Fatal("FEDERATION_ALLOW_INSECURE_HTTP cannot be enabled in production")
 	}
-	allowPrivateFederationNetworks := false
-	if value, ok, err := optionalBoolEnv("FEDERATION_ALLOW_PRIVATE_NETWORKS"); err != nil {
-		log.Fatal(err)
-	} else if ok {
-		allowPrivateFederationNetworks = value
-	}
+	allowPrivateFederationNetworks := cfg.FederationAllowPrivateNetworks()
 	if production && allowPrivateFederationNetworks {
 		log.Fatal("FEDERATION_ALLOW_PRIVATE_NETWORKS cannot be enabled in production")
 	}
@@ -410,23 +405,27 @@ func main() {
 
 	userRepo := user.NewRepository(db, apConfig, privateKeyCodec)
 	userService := user.NewService(userRepo, []byte(jwtSecret), apConfig, user.WithOAuthConfig(user.OAuthConfig{
-		FrontendCallbackURL: strings.TrimSpace(os.Getenv("OAUTH_FRONTEND_CALLBACK_URL")),
+		FrontendCallbackURL: cfg.OAuth.FrontendCallbackURL,
 		Google: user.OAuthProviderConfig{
-			ClientID:     strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_CLIENT_ID")),
-			ClientSecret: strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_CLIENT_SECRET")),
-			RedirectURL:  strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_REDIRECT_URL")),
+			ClientID:     cfg.OAuth.Google.ClientID,
+			ClientSecret: cfg.OAuth.Google.ClientSecret,
+			RedirectURL:  cfg.OAuth.Google.RedirectURL,
 		},
 		GitHub: user.OAuthProviderConfig{
-			ClientID:     strings.TrimSpace(os.Getenv("GITHUB_OAUTH_CLIENT_ID")),
-			ClientSecret: strings.TrimSpace(os.Getenv("GITHUB_OAUTH_CLIENT_SECRET")),
-			RedirectURL:  strings.TrimSpace(os.Getenv("GITHUB_OAUTH_REDIRECT_URL")),
+			ClientID:     cfg.OAuth.GitHub.ClientID,
+			ClientSecret: cfg.OAuth.GitHub.ClientSecret,
+			RedirectURL:  cfg.OAuth.GitHub.RedirectURL,
 		},
 	}))
 	userHandler := user.NewHandler(userService)
 
 	projectRepo := project.NewRepository(db, apConfig, privateKeyCodec)
 	projectService := project.NewService(projectRepo, apConfig)
-	projectHandler := project.NewHandler(projectService)
+	projectHandler := project.NewHandler(
+		projectService,
+		project.WithInstanceRoleProvider(userService),
+		project.WithProjectCreationPolicy(cfg.Projects.CreationPolicy),
+	)
 
 	ticketRepo := ticket.NewRepository(db, apConfig)
 	ticketService := ticket.NewService(ticketRepo, projectService, apConfig)
@@ -446,11 +445,11 @@ func main() {
 	commentService := comment.NewService(commentRepo, ticketService, apConfig)
 	commentHandler := comment.NewHandler(commentService)
 
-	githubClient := githubintegration.NewHTTPClient(githubintegration.WithToken(os.Getenv("GITHUB_API_TOKEN")))
+	githubClient := githubintegration.NewHTTPClient(githubintegration.WithToken(cfg.GitHub.APIToken))
 	githubService := githubintegration.NewService(githubintegration.NewRepository(db), projectService, githubClient)
 	githubHandler := githubintegration.NewHandler(
 		githubService,
-		githubintegration.WithWebhookSecret(os.Getenv("GITHUB_WEBHOOK_SECRET")),
+		githubintegration.WithWebhookSecret(cfg.GitHub.WebhookSecret),
 	)
 
 	c2sHandler := c2s.NewHandler(db, apConfig, ticketService, commentService)
@@ -521,7 +520,7 @@ func main() {
 		inboxRepo,
 		sigService,
 		remoteinbox.WithDelivery(deliveryService),
-		remoteinbox.WithBlockedDomains(splitCSVEnv("FEDERATION_BLOCKED_DOMAINS")),
+		remoteinbox.WithBlockedDomains(cfg.Federation.BlockedDomains),
 	)
 	inboxHandler := remoteinbox.NewHandler(inboxService, apConfig)
 	federationHandler := apfederation.NewHandler(apfederation.NewService(
@@ -567,13 +566,13 @@ func main() {
 	}
 
 	e := echo.New()
-	if err := configureIPExtractor(e, splitCSVEnv("TRUSTED_PROXY_CIDRS")); err != nil {
+	if err := configureIPExtractor(e, cfg.Server.TrustedProxyCIDRs); err != nil {
 		log.Fatal(err)
 	}
 
-	registerGlobalMiddleware(e, os.Stdout, server.metrics)
+	registerGlobalMiddlewareWithBodyLimit(e, os.Stdout, cfg.Server.RequestBodyLimit, server.metrics)
 
-	corsOrigins := splitCSVEnv("CORS_ALLOWED_ORIGINS")
+	corsOrigins := cfg.Server.CORSAllowedOrigins
 	if err := validateCORSConfig(production, corsOrigins); err != nil {
 		log.Fatal(err)
 	}
@@ -589,19 +588,19 @@ func main() {
 	e.GET("/ready", server.readinessCheck)
 	e.GET("/metrics", server.metricsHandler)
 
-	server.userHandler.RegisterRoutes(e, newRateLimiter(authRateLimitPerSecond, authRateLimitBurst))
-	server.wfHandler.RegisterRoutes(e, newRateLimiter(discoveryRateLimitPerSecond, discoveryRateLimitBurst))
-	server.githubHandler.RegisterWebhookRoutes(e, newRateLimiter(authRateLimitPerSecond, authRateLimitBurst))
+	server.userHandler.RegisterRoutes(e, newRateLimiter(rate.Limit(cfg.RateLimits.Auth.RequestsPerSecond), cfg.RateLimits.Auth.Burst))
+	server.wfHandler.RegisterRoutes(e, newRateLimiter(rate.Limit(cfg.RateLimits.Discovery.RequestsPerSecond), cfg.RateLimits.Discovery.Burst))
+	server.githubHandler.RegisterWebhookRoutes(e, newRateLimiter(rate.Limit(cfg.RateLimits.Auth.RequestsPerSecond), cfg.RateLimits.Auth.Burst))
 
 	// Local ActivityPub JSON-LD read routes and signed remote inbox POST foundation.
 	server.apHandler.RegisterRoutes(e)
 	server.c2sHandler.RegisterRoutes(e, authMiddleware.JWTMiddleware([]byte(jwtSecret), userService))
-	server.inboxHandler.RegisterRoutes(e, newRateLimiter(inboxRateLimitPerSecond, inboxRateLimitBurst))
+	server.inboxHandler.RegisterRoutes(e, newRateLimiter(rate.Limit(cfg.RateLimits.Inbox.RequestsPerSecond), cfg.RateLimits.Inbox.Burst))
 
 	registerAuthenticatedAPIRoutes(e.Group("/api"), server, []byte(jwtSecret), userService)
 	registerAuthenticatedAPIRoutes(e.Group("/api/v1"), server, []byte(jwtSecret), userService)
 
-	if err := runHTTPServer(e, defaultHTTPAddr, gracefulShutdownTimeout); err != nil {
+	if err := runHTTPServer(e, cfg.Server.HTTPAddr, gracefulShutdownTimeout); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -721,13 +720,21 @@ func validBearerToken(expected, header string) bool {
 
 // registerGlobalMiddleware adds request logging, request IDs, panic recovery, and optional metrics.
 func registerGlobalMiddleware(e *echo.Echo, logOutput io.Writer, metrics ...*observability.Metrics) {
+	registerGlobalMiddlewareWithBodyLimit(e, logOutput, defaultRequestBodyLimit, metrics...)
+}
+
+// registerGlobalMiddlewareWithBodyLimit adds global middleware with a configurable body limit.
+func registerGlobalMiddlewareWithBodyLimit(e *echo.Echo, logOutput io.Writer, bodyLimit string, metrics ...*observability.Metrics) {
 	e.Use(middleware.RequestID())
 	e.Use(middleware.LoggerWithConfig(requestLoggerConfig(logOutput)))
 	e.Use(middleware.Recover())
 	if len(metrics) > 0 && metrics[0] != nil {
 		e.Use(metricsMiddleware(metrics[0]))
 	}
-	e.Use(middleware.BodyLimit(defaultRequestBodyLimit))
+	if strings.TrimSpace(bodyLimit) == "" {
+		bodyLimit = defaultRequestBodyLimit
+	}
+	e.Use(middleware.BodyLimit(bodyLimit))
 }
 
 // metricsMiddleware records completed HTTP requests in Prometheus collectors.

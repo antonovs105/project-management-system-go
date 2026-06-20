@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteactor"
+	appconfig "github.com/antonovs105/project-management-system-go/internal/config"
 	"github.com/antonovs105/project-management-system-go/internal/user"
 	"github.com/stretchr/testify/require"
 )
@@ -120,6 +121,63 @@ func TestOwnerCreateMapsEnvFileError(t *testing.T) {
 
 	require.Equal(t, 1, code)
 	require.Contains(t, stderr.String(), "failed to load env file")
+}
+
+func TestConfigValidateLoadsEnvAndReportsPolicy(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	var loadedEnvFile string
+	var loadedConfigFile string
+	runner := Runner{
+		Stdout: &stdout,
+		Stderr: &stderr,
+		LoadEnvFile: func(path string) error {
+			loadedEnvFile = path
+			return nil
+		},
+		LoadAppConfig: func(path string) (appconfig.Config, error) {
+			loadedConfigFile = path
+			cfg := appconfig.Default()
+			cfg.Database.Source = "postgres://postgres:postgres@db:5432/pms?sslmode=disable"
+			cfg.Security.JWTSecretKey = "dev-secret"
+			cfg.Instance.PublicBaseURL = "http://localhost:8080"
+			cfg.Instance.LocalDomain = "localhost:8080"
+			cfg.Projects.CreationPolicy = appconfig.ProjectCreationAdminsOnly
+			return cfg, nil
+		},
+	}
+
+	code := runner.Run(context.Background(), []string{
+		"config", "validate",
+		"--env-file", "alpha.env",
+		"--config", "progo.yml",
+	})
+
+	require.Equal(t, 0, code)
+	require.Empty(t, stderr.String())
+	require.Equal(t, "alpha.env", loadedEnvFile)
+	require.Equal(t, "progo.yml", loadedConfigFile)
+	require.Contains(t, stdout.String(), "config_valid")
+	require.Contains(t, stdout.String(), "project_creation_policy=admins_only")
+}
+
+func TestConfigValidateReportsInvalidConfig(t *testing.T) {
+	var stderr bytes.Buffer
+	runner := Runner{
+		Stderr: &stderr,
+		LoadEnvFile: func(path string) error {
+			return nil
+		},
+		LoadAppConfig: func(path string) (appconfig.Config, error) {
+			return appconfig.Config{}, errors.New("bad config")
+		},
+	}
+
+	code := runner.Run(context.Background(), []string{"config", "validate"})
+
+	require.Equal(t, 1, code)
+	require.Contains(t, stderr.String(), "config_invalid")
+	require.Contains(t, stderr.String(), "bad config")
 }
 
 func TestFederationDiscoverUsesPositionalResource(t *testing.T) {
@@ -253,8 +311,12 @@ func TestFederationAcceptFollowCapturesOptions(t *testing.T) {
 func TestLoadRuntimeConfigValidatesProductionSafety(t *testing.T) {
 	t.Setenv("APP_ENV", "production")
 	t.Setenv("DB_SOURCE", "postgres://postgres:postgres@db:5432/pms?sslmode=disable")
+	t.Setenv("JWT_SECRET_KEY", "0123456789abcdef0123456789abcdef")
 	t.Setenv("PUBLIC_BASE_URL", "http://alpha.pms.test")
 	t.Setenv("LOCAL_DOMAIN", "alpha.pms.test")
+	t.Setenv("CORS_ALLOWED_ORIGINS", "https://alpha.pms.test")
+	t.Setenv("METRICS_TOKEN", "metrics-token-0123456789abcdef0123456789")
+	t.Setenv("ACTOR_PRIVATE_KEY_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef")
 
 	_, err := LoadRuntimeConfig()
 
@@ -265,13 +327,16 @@ func TestLoadRuntimeConfigValidatesProductionSafety(t *testing.T) {
 func TestLoadRuntimeConfigRejectsPrivateFederationNetworksInProduction(t *testing.T) {
 	t.Setenv("APP_ENV", "production")
 	t.Setenv("DB_SOURCE", "postgres://postgres:postgres@db:5432/pms?sslmode=disable")
+	t.Setenv("JWT_SECRET_KEY", "0123456789abcdef0123456789abcdef")
 	t.Setenv("PUBLIC_BASE_URL", "https://alpha.pms.test")
 	t.Setenv("LOCAL_DOMAIN", "alpha.pms.test")
+	t.Setenv("CORS_ALLOWED_ORIGINS", "https://alpha.pms.test")
+	t.Setenv("METRICS_TOKEN", "metrics-token-0123456789abcdef0123456789")
 	t.Setenv("ACTOR_PRIVATE_KEY_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef")
 	t.Setenv("FEDERATION_ALLOW_PRIVATE_NETWORKS", "true")
 
 	_, err := LoadRuntimeConfig()
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "FEDERATION_ALLOW_PRIVATE_NETWORKS")
+	require.Contains(t, err.Error(), "federation.allow_private_networks")
 }

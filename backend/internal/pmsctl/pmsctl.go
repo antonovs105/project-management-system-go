@@ -7,13 +7,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net"
-	"net/url"
 	"os"
 	"strings"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteactor"
+	appconfig "github.com/antonovs105/project-management-system-go/internal/config"
 	"github.com/antonovs105/project-management-system-go/internal/secrets"
 	"github.com/antonovs105/project-management-system-go/internal/user"
 	"github.com/jmoiron/sqlx"
@@ -27,6 +26,7 @@ type Runner struct {
 	Stdout              io.Writer
 	Stderr              io.Writer
 	LoadEnvFile         func(path string) error
+	LoadAppConfig       func(path string) (appconfig.Config, error)
 	CreateOwner         func(ctx context.Context, options OwnerCreateOptions) (*user.User, error)
 	DiscoverRemoteActor func(ctx context.Context, options FederationDiscoverOptions) (*remoteactor.Actor, error)
 	FollowRemoteActor   func(ctx context.Context, options FederationFollowOptions) (*FederationFollowResult, error)
@@ -62,6 +62,7 @@ func NewRunner() *Runner {
 		Stdout:              os.Stdout,
 		Stderr:              os.Stderr,
 		LoadEnvFile:         loadEnvFile,
+		LoadAppConfig:       loadAppConfig,
 		CreateOwner:         createOwner,
 		DiscoverRemoteActor: discoverRemoteActor,
 		FollowRemoteActor:   followRemoteActor,
@@ -85,6 +86,8 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 		return r.runOwner(ctx, args[1:])
 	case "federation":
 		return r.runFederation(ctx, args[1:])
+	case "config":
+		return r.runConfig(ctx, args[1:])
 	default:
 		fmt.Fprintf(r.Stderr, "unknown command %q\n\n", args[0])
 		r.printRootUsage()
@@ -106,6 +109,9 @@ func (r *Runner) withDefaults() {
 	if r.LoadEnvFile == nil {
 		r.LoadEnvFile = loadEnvFile
 	}
+	if r.LoadAppConfig == nil {
+		r.LoadAppConfig = loadAppConfig
+	}
 	if r.CreateOwner == nil {
 		r.CreateOwner = createOwner
 	}
@@ -118,6 +124,58 @@ func (r *Runner) withDefaults() {
 	if r.AcceptProjectFollow == nil {
 		r.AcceptProjectFollow = acceptProjectFollow
 	}
+}
+
+// runConfig dispatches local configuration subcommands.
+func (r *Runner) runConfig(ctx context.Context, args []string) int {
+	if len(args) == 0 {
+		r.printConfigUsage()
+		return 2
+	}
+	switch args[0] {
+	case "validate":
+		return r.runConfigValidate(ctx, args[1:])
+	case "help", "-h", "--help":
+		r.printConfigUsage()
+		return 0
+	default:
+		fmt.Fprintf(r.Stderr, "unknown config command %q\n\n", args[0])
+		r.printConfigUsage()
+		return 2
+	}
+}
+
+// runConfigValidate loads dotenv/YAML config and reports validation status.
+func (r *Runner) runConfigValidate(ctx context.Context, args []string) int {
+	_ = ctx
+	fs := flag.NewFlagSet("pmsctl config validate", flag.ContinueOnError)
+	fs.SetOutput(r.Stderr)
+	envFile := fs.String("env-file", defaultEnvFile, "environment file to load before validating")
+	configFile := fs.String("config", "", "YAML config file to validate")
+	fs.Usage = func() {
+		fmt.Fprintln(r.Stderr, "Usage: pmsctl config validate [--config FILE] [--env-file FILE]")
+		fs.PrintDefaults()
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(r.Stderr, "unexpected arguments: %s\n\n", strings.Join(fs.Args(), " "))
+		fs.Usage()
+		return 2
+	}
+	if err := r.LoadEnvFile(strings.TrimSpace(*envFile)); err != nil {
+		fmt.Fprintf(r.Stderr, "failed to load env file: %v\n", err)
+		return 1
+	}
+	cfg, err := r.LoadAppConfig(strings.TrimSpace(*configFile))
+	if err != nil {
+		fmt.Fprintf(r.Stderr, "config_invalid error=%q\n", err.Error())
+		return 1
+	}
+	fmt.Fprintf(r.Stdout, "config_valid app_env=%s role=%s project_creation_policy=%s\n", cfg.App.Env, cfg.App.Role, cfg.Projects.CreationPolicy)
+	return 0
 }
 
 // runOwner dispatches owner maintenance subcommands.
@@ -237,6 +295,15 @@ func loadEnvFile(path string) error {
 	return nil
 }
 
+// loadAppConfig validates either the default runtime config or an explicit YAML path.
+func loadAppConfig(path string) (appconfig.Config, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return appconfig.Load()
+	}
+	return appconfig.LoadFile(path)
+}
+
 // createOwner creates the first owner using configured database and ActivityPub settings.
 func createOwner(ctx context.Context, options OwnerCreateOptions) (*user.User, error) {
 	cfg, err := LoadRuntimeConfig()
@@ -264,102 +331,19 @@ func createOwner(ctx context.Context, options OwnerCreateOptions) (*user.User, e
 
 // LoadRuntimeConfig reads and validates the environment shared by API and CLI commands.
 func LoadRuntimeConfig() (RuntimeConfig, error) {
-	cfg := RuntimeConfig{
-		AppEnv:                       strings.ToLower(strings.TrimSpace(os.Getenv("APP_ENV"))),
-		DBSource:                     strings.TrimSpace(os.Getenv("DB_SOURCE")),
-		PublicBaseURL:                strings.TrimSpace(os.Getenv("PUBLIC_BASE_URL")),
-		LocalDomain:                  strings.TrimSpace(os.Getenv("LOCAL_DOMAIN")),
-		ActorPrivateKeyEncryptionKey: strings.TrimSpace(os.Getenv("ACTOR_PRIVATE_KEY_ENCRYPTION_KEY")),
-	}
-	if cfg.AppEnv == "" {
-		cfg.AppEnv = "development"
-	}
-
-	missing := make([]string, 0, 3)
-	if cfg.DBSource == "" {
-		missing = append(missing, "DB_SOURCE")
-	}
-	if cfg.PublicBaseURL == "" {
-		missing = append(missing, "PUBLIC_BASE_URL")
-	}
-	if cfg.LocalDomain == "" {
-		missing = append(missing, "LOCAL_DOMAIN")
-	}
-	if len(missing) > 0 {
-		return RuntimeConfig{}, fmt.Errorf("missing required environment variable(s): %s", strings.Join(missing, ", "))
-	}
-	if cfg.AppEnv != "development" && cfg.AppEnv != "test" && cfg.AppEnv != "production" {
-		return RuntimeConfig{}, fmt.Errorf("APP_ENV must be one of development, test, or production")
-	}
-	if value, ok, err := optionalBoolEnv("FEDERATION_ALLOW_INSECURE_HTTP"); err != nil {
+	cfg, err := appconfig.Load()
+	if err != nil {
 		return RuntimeConfig{}, err
-	} else if ok {
-		cfg.FederationAllowInsecureHTTP = value
-	} else {
-		cfg.FederationAllowInsecureHTTP = cfg.AppEnv != "production"
 	}
-	if value, ok, err := optionalBoolEnv("FEDERATION_ALLOW_PRIVATE_NETWORKS"); err != nil {
-		return RuntimeConfig{}, err
-	} else if ok {
-		cfg.FederationAllowPrivateNetworks = value
-	}
-
-	parsedBaseURL, err := url.Parse(cfg.PublicBaseURL)
-	if err != nil || parsedBaseURL.Scheme == "" || parsedBaseURL.Host == "" {
-		return RuntimeConfig{}, fmt.Errorf("PUBLIC_BASE_URL must be an absolute HTTP URL")
-	}
-	if parsedBaseURL.Scheme != "http" && parsedBaseURL.Scheme != "https" {
-		return RuntimeConfig{}, fmt.Errorf("PUBLIC_BASE_URL must use http or https")
-	}
-	if strings.ContainsAny(cfg.LocalDomain, " \t\r\n/") {
-		return RuntimeConfig{}, fmt.Errorf("LOCAL_DOMAIN must be a host name, not a URL")
-	}
-
-	if cfg.AppEnv == "production" {
-		if parsedBaseURL.Scheme != "https" {
-			return RuntimeConfig{}, fmt.Errorf("PUBLIC_BASE_URL must use https in production")
-		}
-		if isLocalHost(parsedBaseURL.Hostname()) || isLocalHost(cfg.LocalDomain) {
-			return RuntimeConfig{}, fmt.Errorf("PUBLIC_BASE_URL and LOCAL_DOMAIN must not use localhost in production")
-		}
-		if len(cfg.ActorPrivateKeyEncryptionKey) < 32 {
-			return RuntimeConfig{}, fmt.Errorf("ACTOR_PRIVATE_KEY_ENCRYPTION_KEY must be at least 32 characters in production")
-		}
-		if cfg.FederationAllowInsecureHTTP {
-			return RuntimeConfig{}, fmt.Errorf("FEDERATION_ALLOW_INSECURE_HTTP cannot be enabled in production")
-		}
-		if cfg.FederationAllowPrivateNetworks {
-			return RuntimeConfig{}, fmt.Errorf("FEDERATION_ALLOW_PRIVATE_NETWORKS cannot be enabled in production")
-		}
-	}
-
-	return cfg, nil
-}
-
-// optionalBoolEnv parses an optional boolean environment setting.
-func optionalBoolEnv(name string) (bool, bool, error) {
-	raw := strings.TrimSpace(os.Getenv(name))
-	if raw == "" {
-		return false, false, nil
-	}
-	switch strings.ToLower(raw) {
-	case "1", "true", "yes", "on":
-		return true, true, nil
-	case "0", "false", "no", "off":
-		return false, true, nil
-	default:
-		return false, true, fmt.Errorf("%s must be a boolean", name)
-	}
-}
-
-// isLocalHost reports whether host points to the loopback development host.
-func isLocalHost(host string) bool {
-	host = strings.TrimSpace(host)
-	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
-		host = parsedHost
-	}
-	host = strings.ToLower(strings.Trim(host, "[]"))
-	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+	return RuntimeConfig{
+		AppEnv:                         cfg.App.Env,
+		DBSource:                       cfg.Database.Source,
+		PublicBaseURL:                  cfg.Instance.PublicBaseURL,
+		LocalDomain:                    cfg.Instance.LocalDomain,
+		ActorPrivateKeyEncryptionKey:   cfg.Security.ActorPrivateKeyEncryptionKey,
+		FederationAllowInsecureHTTP:    cfg.FederationAllowInsecureHTTP(),
+		FederationAllowPrivateNetworks: cfg.FederationAllowPrivateNetworks(),
+	}, nil
 }
 
 // printRootUsage writes the top-level command help.
@@ -369,6 +353,7 @@ func (r *Runner) printRootUsage() {
 	fmt.Fprintln(r.Stderr, "Commands:")
 	fmt.Fprintln(r.Stderr, "  owner create    Create the first local owner account")
 	fmt.Fprintln(r.Stderr, "  federation      Discover and send local federation activities")
+	fmt.Fprintln(r.Stderr, "  config validate Validate runtime configuration")
 }
 
 // printOwnerUsage writes owner command help.
@@ -377,4 +362,12 @@ func (r *Runner) printOwnerUsage() {
 	fmt.Fprintln(r.Stderr)
 	fmt.Fprintln(r.Stderr, "Commands:")
 	fmt.Fprintln(r.Stderr, "  create          Create the first local owner account")
+}
+
+// printConfigUsage writes configuration command help.
+func (r *Runner) printConfigUsage() {
+	fmt.Fprintln(r.Stderr, "Usage: pmsctl config <command> [options]")
+	fmt.Fprintln(r.Stderr)
+	fmt.Fprintln(r.Stderr, "Commands:")
+	fmt.Fprintln(r.Stderr, "  validate        Validate dotenv/YAML runtime configuration")
 }

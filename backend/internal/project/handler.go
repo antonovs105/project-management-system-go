@@ -1,24 +1,61 @@
 package project
 
 import (
+	"context"
 	"errors"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
 
+	appconfig "github.com/antonovs105/project-management-system-go/internal/config"
+	"github.com/antonovs105/project-management-system-go/internal/user"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 )
 
 // Handler exposes project HTTP endpoints.
 type Handler struct {
-	service *Service
+	service               *Service
+	instanceRoles         InstanceRoleProvider
+	projectCreationPolicy string
+}
+
+// InstanceRoleProvider resolves system-wide roles for instance policy checks.
+type InstanceRoleProvider interface {
+	InstanceRole(ctx context.Context, userID string) (string, error)
+}
+
+// HandlerOption customizes project HTTP behavior.
+type HandlerOption func(*Handler)
+
+// WithInstanceRoleProvider supplies instance role lookup for global policies.
+func WithInstanceRoleProvider(provider InstanceRoleProvider) HandlerOption {
+	return func(h *Handler) {
+		h.instanceRoles = provider
+	}
+}
+
+// WithProjectCreationPolicy controls which local users may create projects.
+func WithProjectCreationPolicy(policy string) HandlerOption {
+	return func(h *Handler) {
+		policy = strings.TrimSpace(policy)
+		if policy != "" {
+			h.projectCreationPolicy = policy
+		}
+	}
 }
 
 // NewHandler creates a project HTTP handler.
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+func NewHandler(service *Service, options ...HandlerOption) *Handler {
+	handler := &Handler{
+		service:               service,
+		projectCreationPolicy: appconfig.ProjectCreationEveryone,
+	}
+	for _, option := range options {
+		option(handler)
+	}
+	return handler
 }
 
 // RegisterRoutes registers authenticated project routes.
@@ -57,6 +94,9 @@ func (h *Handler) Create(c echo.Context) error {
 	}
 
 	userID := c.Get("userID").(string)
+	if err := h.requireProjectCreationAllowed(c.Request().Context(), userID); err != nil {
+		return writeProjectError(c, err)
+	}
 
 	project, err := h.service.CreateProject(c.Request().Context(), req.Name, req.Description, userID)
 	if err != nil {
@@ -64,6 +104,28 @@ func (h *Handler) Create(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusCreated, project)
+}
+
+// requireProjectCreationAllowed enforces instance-wide project creation policy.
+func (h *Handler) requireProjectCreationAllowed(ctx context.Context, userID string) error {
+	switch h.projectCreationPolicy {
+	case "", appconfig.ProjectCreationEveryone:
+		return nil
+	case appconfig.ProjectCreationAdminsOnly:
+		if h.instanceRoles == nil {
+			return errors.New("project creation policy is missing instance role provider")
+		}
+		role, err := h.instanceRoles.InstanceRole(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if !user.HasAdminPrivileges(role) {
+			return errors.New("insufficient permissions: project creation is restricted to instance administrators")
+		}
+		return nil
+	default:
+		return errors.New("invalid project creation policy")
+	}
 }
 
 // Get returns a project visible to the current user.
