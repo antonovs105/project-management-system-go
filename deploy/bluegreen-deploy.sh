@@ -6,6 +6,7 @@ ENV_FILE=${ENV_FILE:-"$APP_DIR/.env"}
 COMPOSE_FILE=${COMPOSE_FILE:-"$APP_DIR/deploy/docker-compose.bluegreen.yml"}
 STATE_FILE=${STATE_FILE:-"$APP_DIR/.active-color"}
 TAG_FILE=${TAG_FILE:-"$APP_DIR/.active-image-tag"}
+BACKUP_DIR=${BACKUP_DIR:-"$APP_DIR/backups"}
 
 BLUE_BACKEND_PORT=${BLUE_BACKEND_PORT:-18080}
 BLUE_FRONTEND_PORT=${BLUE_FRONTEND_PORT:-15173}
@@ -28,6 +29,7 @@ env_value() {
   key=$1
   awk -F= -v key="$key" '$1 == key {
     sub(/^[^=]*=/, "")
+    sub(/\r$/, "")
     print
     exit
   }' "$ENV_FILE"
@@ -39,6 +41,10 @@ PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-$(env_value PUBLIC_BASE_URL)}
 FEDERATION_NETWORK=${FEDERATION_NETWORK:-$(env_value FEDERATION_NETWORK)}
 FEDERATION_NETWORK=${FEDERATION_NETWORK:-pms-federation}
 MIGRATIONS_DIR=${MIGRATIONS_DIR:-"$APP_DIR/migrations"}
+POSTGRES_USER=${POSTGRES_USER:-$(env_value POSTGRES_USER)}
+POSTGRES_USER=${POSTGRES_USER:-postgres}
+POSTGRES_DB=${POSTGRES_DB:-$(env_value POSTGRES_DB)}
+POSTGRES_DB=${POSTGRES_DB:-pms}
 
 if [ -z "$INSTANCE_NAME" ]; then
   echo "INSTANCE_NAME is required in $ENV_FILE" >&2
@@ -64,6 +70,7 @@ export BACKEND_IMAGE
 export FRONTEND_IMAGE
 export FEDERATION_NETWORK
 export MIGRATIONS_DIR
+export POSTGRES_USER POSTGRES_DB
 export BLUE_BACKEND_PORT BLUE_FRONTEND_PORT BLUE_BACKEND_WORKER_METRICS_PORT
 export GREEN_BACKEND_PORT GREEN_FRONTEND_PORT GREEN_BACKEND_WORKER_METRICS_PORT
 
@@ -170,6 +177,31 @@ wait_for_url() {
   exit 1
 }
 
+backup_database() {
+  if [ "${SKIP_DB_BACKUP:-false}" = "true" ]; then
+    echo "SKIP_DB_BACKUP=true; skipping database backup"
+    return
+  fi
+
+  mkdir -p "$BACKUP_DIR"
+  chmod 700 "$BACKUP_DIR" >/dev/null 2>&1 || true
+  timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+  target="$BACKUP_DIR/$INSTANCE_NAME-$timestamp.sql"
+  tmp="$target.tmp"
+
+  echo "creating database backup: $target"
+  umask 077
+  if compose exec -T db pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" > "$tmp"; then
+    mv "$tmp" "$target"
+    echo "database backup complete: $target"
+    return
+  fi
+
+  rm -f "$tmp"
+  echo "database backup failed; aborting before migrations" >&2
+  exit 1
+}
+
 write_caddyfile() {
   backend_port=$1
   frontend_port=$2
@@ -259,6 +291,7 @@ else
   compose pull "backend-$inactive" "backend-worker-$inactive" "frontend-$inactive"
 fi
 compose up -d --wait db redis
+backup_database
 compose run --rm --no-deps migrations
 compose up -d "backend-$inactive" "backend-worker-$inactive"
 
