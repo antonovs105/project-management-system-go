@@ -27,6 +27,9 @@ type Runner struct {
 	Stderr              io.Writer
 	LoadEnvFile         func(path string) error
 	LoadAppConfig       func(path string) (appconfig.Config, error)
+	WriteFile           func(path string, data []byte, perm os.FileMode) error
+	FileExists          func(path string) (bool, error)
+	GenerateSecret      func(byteCount int) (string, error)
 	CreateOwner         func(ctx context.Context, options OwnerCreateOptions) (*user.User, error)
 	DiscoverRemoteActor func(ctx context.Context, options FederationDiscoverOptions) (*remoteactor.Actor, error)
 	FollowRemoteActor   func(ctx context.Context, options FederationFollowOptions) (*FederationFollowResult, error)
@@ -63,6 +66,9 @@ func NewRunner() *Runner {
 		Stderr:              os.Stderr,
 		LoadEnvFile:         loadEnvFile,
 		LoadAppConfig:       loadAppConfig,
+		WriteFile:           os.WriteFile,
+		FileExists:          fileExists,
+		GenerateSecret:      generateSecret,
 		CreateOwner:         createOwner,
 		DiscoverRemoteActor: discoverRemoteActor,
 		FollowRemoteActor:   followRemoteActor,
@@ -112,6 +118,15 @@ func (r *Runner) withDefaults() {
 	if r.LoadAppConfig == nil {
 		r.LoadAppConfig = loadAppConfig
 	}
+	if r.WriteFile == nil {
+		r.WriteFile = os.WriteFile
+	}
+	if r.FileExists == nil {
+		r.FileExists = fileExists
+	}
+	if r.GenerateSecret == nil {
+		r.GenerateSecret = generateSecret
+	}
 	if r.CreateOwner == nil {
 		r.CreateOwner = createOwner
 	}
@@ -133,6 +148,8 @@ func (r *Runner) runConfig(ctx context.Context, args []string) int {
 		return 2
 	}
 	switch args[0] {
+	case "init":
+		return r.runConfigInit(ctx, args[1:])
 	case "validate":
 		return r.runConfigValidate(ctx, args[1:])
 	case "help", "-h", "--help":
@@ -360,6 +377,7 @@ func (r *Runner) printRootUsage() {
 	fmt.Fprintln(r.Stderr, "Commands:")
 	fmt.Fprintln(r.Stderr, "  owner create    Create the first local owner account")
 	fmt.Fprintln(r.Stderr, "  federation      Discover and send local federation activities")
+	fmt.Fprintln(r.Stderr, "  config init     Create an interactive runtime configuration")
 	fmt.Fprintln(r.Stderr, "  config validate Validate runtime configuration")
 }
 
@@ -376,5 +394,6 @@ func (r *Runner) printConfigUsage() {
 	fmt.Fprintln(r.Stderr, "Usage: pmsctl config <command> [options]")
 	fmt.Fprintln(r.Stderr)
 	fmt.Fprintln(r.Stderr, "Commands:")
+	fmt.Fprintln(r.Stderr, "  init            Create an interactive runtime configuration")
 	fmt.Fprintln(r.Stderr, "  validate        Validate dotenv/YAML runtime configuration")
 }

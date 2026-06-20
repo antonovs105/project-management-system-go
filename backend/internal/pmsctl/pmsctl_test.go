@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,6 +14,7 @@ import (
 	appconfig "github.com/antonovs105/project-management-system-go/internal/config"
 	"github.com/antonovs105/project-management-system-go/internal/user"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func TestOwnerCreateReadsPasswordFromStdin(t *testing.T) {
@@ -182,6 +186,149 @@ func TestConfigValidateReportsInvalidConfig(t *testing.T) {
 	require.Contains(t, stderr.String(), "bad config")
 }
 
+func TestConfigInitWritesValidatedProductionConfig(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	output := filepath.Join(t.TempDir(), "progo.yml")
+	runner := Runner{
+		Stdin: strings.NewReader(strings.Join([]string{
+			"production",
+			"Alpha",
+			"https://alpha.example.test",
+			"",
+			"",
+			"redis:6379",
+			"",
+			"n",
+			"admins_only",
+			"n",
+			"n",
+		}, "\n") + "\n"),
+		Stdout:         &stdout,
+		Stderr:         &stderr,
+		GenerateSecret: sequentialSecretGenerator(),
+	}
+
+	code := runner.Run(context.Background(), []string{"config", "init", "--output", output})
+
+	require.Equal(t, 0, code)
+	require.Empty(t, stderr.String())
+	require.Contains(t, stdout.String(), "config_initialized")
+	require.Contains(t, stdout.String(), "registration_enabled=false")
+	require.Contains(t, stdout.String(), "project_creation_policy=admins_only")
+
+	cfg, raw := readGeneratedConfig(t, output)
+	require.Equal(t, appconfig.EnvProduction, cfg.App.Env)
+	require.Equal(t, appconfig.RoleAll, cfg.App.Role)
+	require.Equal(t, "Alpha", cfg.Instance.Name)
+	require.Equal(t, "https://alpha.example.test", cfg.Instance.PublicBaseURL)
+	require.Equal(t, "alpha.example.test", cfg.Instance.LocalDomain)
+	require.False(t, cfg.Registration.Enabled)
+	require.Equal(t, appconfig.ProjectCreationAdminsOnly, cfg.Projects.CreationPolicy)
+	require.Equal(t, []string{"https://alpha.example.test"}, cfg.Server.CORSAllowedOrigins)
+	require.Equal(t, "redis:6379", cfg.Redis.Addr)
+	require.False(t, cfg.FederationAllowInsecureHTTP())
+	require.False(t, cfg.FederationAllowPrivateNetworks())
+	require.Len(t, cfg.Security.JWTSecretKey, 32)
+	require.Len(t, cfg.Security.ActorPrivateKeyEncryptionKey, 32)
+	require.Len(t, cfg.Metrics.Token, 32)
+	require.Contains(t, cfg.Database.Source, "postgres://progo:")
+	require.NotContains(t, string(raw), "change-me")
+}
+
+func TestConfigInitRefusesOverwriteWithoutForce(t *testing.T) {
+	var stderr bytes.Buffer
+	output := filepath.Join(t.TempDir(), "progo.yml")
+	require.NoError(t, os.WriteFile(output, []byte("old"), 0o600))
+	runner := Runner{
+		Stdin:  strings.NewReader(""),
+		Stderr: &stderr,
+	}
+
+	code := runner.Run(context.Background(), []string{"config", "init", "--output", output})
+
+	require.Equal(t, 1, code)
+	require.Contains(t, stderr.String(), "already exists")
+	raw, err := os.ReadFile(output)
+	require.NoError(t, err)
+	require.Equal(t, "old", string(raw))
+}
+
+func TestConfigInitForceOverwritesExistingFile(t *testing.T) {
+	var stdout bytes.Buffer
+	output := filepath.Join(t.TempDir(), "progo.yml")
+	require.NoError(t, os.WriteFile(output, []byte("old"), 0o600))
+	runner := Runner{
+		Stdin:          strings.NewReader(strings.Repeat("\n", 11)),
+		Stdout:         &stdout,
+		GenerateSecret: sequentialSecretGenerator(),
+	}
+
+	code := runner.Run(context.Background(), []string{"config", "init", "--output", output, "--force"})
+
+	require.Equal(t, 0, code)
+	require.Contains(t, stdout.String(), "config_initialized")
+	raw, err := os.ReadFile(output)
+	require.NoError(t, err)
+	require.NotEqual(t, "old", string(raw))
+	require.Contains(t, string(raw), "registration:")
+}
+
+func TestConfigInitRejectsInvalidGeneratedProductionConfig(t *testing.T) {
+	var stderr bytes.Buffer
+	output := filepath.Join(t.TempDir(), "progo.yml")
+	runner := Runner{
+		Stdin: strings.NewReader(strings.Join([]string{
+			"production",
+			"Alpha",
+			"https://alpha.example.test",
+			"",
+			"",
+			"redis:6379",
+			"",
+			"y",
+			"admins_only",
+			"y",
+			"n",
+		}, "\n") + "\n"),
+		Stderr:         &stderr,
+		GenerateSecret: sequentialSecretGenerator(),
+	}
+
+	code := runner.Run(context.Background(), []string{"config", "init", "--output", output})
+
+	require.Equal(t, 1, code)
+	require.Contains(t, stderr.String(), "generated config is invalid")
+	require.Contains(t, stderr.String(), "federation.allow_insecure_http")
+	_, err := os.Stat(output)
+	require.True(t, errors.Is(err, os.ErrNotExist))
+}
+
+func TestConfigInitFailsWhenSecretGenerationFails(t *testing.T) {
+	var stderr bytes.Buffer
+	output := filepath.Join(t.TempDir(), "progo.yml")
+	runner := Runner{
+		Stdin: strings.NewReader(strings.Join([]string{
+			"production",
+			"Alpha",
+			"https://alpha.example.test",
+			"",
+		}, "\n") + "\n"),
+		Stderr: &stderr,
+		GenerateSecret: func(byteCount int) (string, error) {
+			return "", errors.New("entropy unavailable")
+		},
+	}
+
+	code := runner.Run(context.Background(), []string{"config", "init", "--output", output})
+
+	require.Equal(t, 1, code)
+	require.Contains(t, stderr.String(), "generate database password")
+	require.Contains(t, stderr.String(), "entropy unavailable")
+	_, err := os.Stat(output)
+	require.True(t, errors.Is(err, os.ErrNotExist))
+}
+
 func TestFederationDiscoverUsesPositionalResource(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -341,4 +488,27 @@ func TestLoadRuntimeConfigRejectsPrivateFederationNetworksInProduction(t *testin
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "federation.allow_private_networks")
+}
+
+func readGeneratedConfig(t *testing.T, path string) (appconfig.Config, []byte) {
+	t.Helper()
+
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	var cfg appconfig.Config
+	require.NoError(t, yaml.Unmarshal(raw, &cfg))
+	appconfig.Normalize(&cfg)
+	require.NoError(t, cfg.Validate())
+
+	return cfg, raw
+}
+
+func sequentialSecretGenerator() func(int) (string, error) {
+	counter := 0
+	return func(byteCount int) (string, error) {
+		counter++
+		digit := fmt.Sprintf("%d", counter%10)
+		return strings.Repeat(digit, byteCount), nil
+	}
 }

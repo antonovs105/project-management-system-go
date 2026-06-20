@@ -212,15 +212,15 @@ func LoadFile(path string) (Config, error) {
 	if err := applyEnv(&cfg); err != nil {
 		return Config{}, err
 	}
-	normalize(&cfg)
+	Normalize(&cfg)
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
 }
 
-// normalize canonicalizes operator-facing string tokens before validation.
-func normalize(cfg *Config) {
+// Normalize canonicalizes operator-facing string tokens before validation.
+func Normalize(cfg *Config) {
 	cfg.App.Env = strings.ToLower(strings.TrimSpace(cfg.App.Env))
 	cfg.App.Role = strings.ToLower(strings.TrimSpace(cfg.App.Role))
 	cfg.Projects.CreationPolicy = strings.ToLower(strings.TrimSpace(cfg.Projects.CreationPolicy))
