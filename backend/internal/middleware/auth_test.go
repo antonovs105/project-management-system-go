@@ -63,6 +63,21 @@ func TestJWTMiddlewareSetsUserID(t *testing.T) {
 	assert.JSONEq(t, `{"user_id":"user-1"}`, rec.Body.String())
 }
 
+func TestJWTMiddlewareRejectsUnexpectedHMACVariant(t *testing.T) {
+	secret := []byte("secret")
+	token := jwt.NewWithClaims(jwt.SigningMethodHS384, jwt.MapClaims{
+		"sub": "user-1",
+		"exp": 9999999999,
+	})
+	raw, err := token.SignedString(secret)
+	require.NoError(t, err)
+
+	rec := runJWTMiddleware(t, secret, "Bearer "+raw)
+
+	require.Equal(t, http.StatusUnauthorized, rec.Code, rec.Body.String())
+	assert.JSONEq(t, `{"error":"invalid token"}`, rec.Body.String())
+}
+
 func TestJWTMiddlewareValidatesTokenVersion(t *testing.T) {
 	secret := []byte("secret")
 	validator := &testTokenValidator{wantUserID: "user-1", wantVersion: 2}

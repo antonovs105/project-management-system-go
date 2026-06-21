@@ -186,6 +186,8 @@ export interface GraphLink {
 export interface GraphData {
   nodes: GraphNode[];
   links: GraphLink[];
+  limit: number;
+  truncated: boolean;
 }
 
 export interface AdminUser {

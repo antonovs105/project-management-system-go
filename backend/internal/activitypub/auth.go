@@ -129,7 +129,7 @@ func (a *AccessAuthorizer) actorIDFromJWT(ctx context.Context, req *http.Request
 	}
 
 	token, err := jwt.Parse(strings.TrimSpace(tokenValue), func(token *jwt.Token) (any, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+		if token.Method == nil || token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
 			return nil, ErrInvalidAuthorization
 		}
 		return a.jwtSecret, nil

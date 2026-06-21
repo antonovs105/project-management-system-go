@@ -39,7 +39,7 @@ func JWTMiddleware(secret []byte, validators ...TokenVersionValidator) echo.Midd
 
 			tokenString := headerParts[1]
 			token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				if token.Method == nil || token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
 					return nil, echo.NewHTTPError(http.StatusUnauthorized, "Unexpected signing method")
 				}
 				return secret, nil

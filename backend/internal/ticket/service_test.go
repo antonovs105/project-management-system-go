@@ -3,6 +3,7 @@ package ticket
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -465,7 +466,7 @@ func TestService_GetTicketGraph(t *testing.T) {
 			{ID: "ticket-1", Title: "Epic", Type: "epic", CreatedAt: time.Now()},
 			{ID: "ticket-2", Title: "Task", Type: "task", ParentID: stringPtr("ticket-1"), CreatedAt: time.Now()},
 		}
-		mockRepo.On("ListByProjectID", ctx, projectID, TicketListOptions{Limit: maxTicketListLimit}).Return(tickets, nil).Once()
+		mockRepo.On("ListByProjectID", ctx, projectID, TicketListOptions{Limit: graphNodeLimit + 1}).Return(tickets, nil).Once()
 		mockRepo.On("GetLinksByProjectID", ctx, projectID).Return([]TicketLink{}, nil).Once()
 
 		graph, err := service.GetTicketGraph(ctx, projectID, userID)
@@ -475,6 +476,47 @@ func TestService_GetTicketGraph(t *testing.T) {
 		assert.Len(t, graph.Nodes, 2)
 		assert.Len(t, graph.Links, 1) // 1 hierarchy link
 		assert.Equal(t, "hierarchy", graph.Links[0].Type)
+		assert.Equal(t, graphNodeLimit, graph.Limit)
+		assert.False(t, graph.Truncated)
+	})
+
+	t.Run("MarksTruncatedGraphAndSkipsDanglingLinks", func(t *testing.T) {
+		mockRepo := new(MockRepository)
+		mockProject := new(MockProjectChecker)
+		service := NewService(mockRepo, mockProject, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+		mockProject.On("GetProjectByID", ctx, projectID, userID).Return(&project.Project{}, nil).Once()
+
+		tickets := make([]Ticket, 0, graphNodeLimit+1)
+		for i := 0; i < graphNodeLimit+1; i++ {
+			tickets = append(tickets, Ticket{
+				ID:        fmt.Sprintf("ticket-%03d", i),
+				Title:     fmt.Sprintf("Ticket %d", i),
+				Type:      "task",
+				CreatedAt: time.Now(),
+			})
+		}
+		tickets[1].ParentID = stringPtr("ticket-000")
+		links := []TicketLink{
+			{SourceID: "ticket-000", TargetID: "ticket-001", LinkType: "relates_to"},
+			{SourceID: "ticket-000", TargetID: "ticket-500", LinkType: "blocks"},
+		}
+		mockRepo.On("ListByProjectID", ctx, projectID, TicketListOptions{Limit: graphNodeLimit + 1}).Return(tickets, nil).Once()
+		mockRepo.On("GetLinksByProjectID", ctx, projectID).Return(links, nil).Once()
+
+		graph, err := service.GetTicketGraph(ctx, projectID, userID)
+
+		require.NoError(t, err)
+		require.NotNil(t, graph)
+		assert.True(t, graph.Truncated)
+		assert.Equal(t, graphNodeLimit, graph.Limit)
+		assert.Len(t, graph.Nodes, graphNodeLimit)
+		for _, link := range graph.Links {
+			assert.NotEqual(t, "ticket-500", link.Source)
+			assert.NotEqual(t, "ticket-500", link.Target)
+		}
+		assert.Len(t, graph.Links, 2)
+		mockRepo.AssertExpectations(t)
+		mockProject.AssertExpectations(t)
 	})
 }
 

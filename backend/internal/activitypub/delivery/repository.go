@@ -24,6 +24,7 @@ type RecipientRepository interface {
 	ProjectDeliveries(ctx context.Context, projectID string, userID string, options ProjectDeliveryListOptions) ([]ProjectDelivery, error)
 	ProjectDeliverySummary(ctx context.Context, projectID string, userID string) (*ProjectDeliverySummary, error)
 	RetryProjectDelivery(ctx context.Context, projectID string, userID string, deliveryID string) (*Delivery, error)
+	DueDeliveries(ctx context.Context, limit int) ([]QueueCandidate, error)
 	RemoteProjectFollowerInboxes(ctx context.Context, projectID string) ([]string, error)
 	RemoteProjectTicketRecipientInboxes(ctx context.Context, projectID string, ticketID string) ([]string, error)
 }
@@ -383,6 +384,26 @@ func (r *PgRepository) RetryProjectDelivery(ctx context.Context, projectID strin
 		return nil, err
 	}
 	return delivery, nil
+}
+
+// DueDeliveries returns persisted delivery rows that should have an Asynq task.
+func (r *PgRepository) DueDeliveries(ctx context.Context, limit int) ([]QueueCandidate, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	deliveries := make([]QueueCandidate, 0)
+	err := r.db.SelectContext(ctx, &deliveries, `
+		SELECT id::text, max_attempts
+		FROM activity_deliveries
+		WHERE state = $1
+			OR (
+				state = $2
+				AND (next_attempt_at IS NULL OR next_attempt_at <= now())
+			)
+		ORDER BY COALESCE(next_attempt_at, created_at), created_at
+		LIMIT $3
+	`, StatePending, StateFailed, limit)
+	return deliveries, err
 }
 
 // RemoteActorAPIDByInboxURL resolves a remote actor by inbox URL.

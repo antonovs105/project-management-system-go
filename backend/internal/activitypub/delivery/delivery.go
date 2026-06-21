@@ -121,6 +121,12 @@ type ProjectDeliverySummary struct {
 	CanRetry   bool `db:"can_retry" json:"can_retry"`
 }
 
+// QueueCandidate is a persisted delivery row that should have a queue task.
+type QueueCandidate struct {
+	ID          string `db:"id"`
+	MaxAttempts int    `db:"max_attempts"`
+}
+
 // TaskPayload is the Asynq payload for one delivery task.
 type TaskPayload struct {
 	DeliveryID string `json:"delivery_id"`

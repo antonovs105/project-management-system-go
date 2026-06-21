@@ -52,3 +52,28 @@ func TestEventHubUnsubscribeIsIdempotent(t *testing.T) {
 		hub.PublishTicketEvent(Event{Type: EventTicketUpdated, ProjectID: "project-1", TicketID: "ticket-1"})
 	})
 }
+
+func TestRedisEventHubSuppressesDuplicateLocalDelivery(t *testing.T) {
+	hub := &RedisEventHub{
+		local: NewEventHub(),
+		seen:  make(map[string]time.Time),
+	}
+	events, unsubscribe := hub.SubscribeTicketEvents("project-1")
+	defer unsubscribe()
+	event := Event{ID: "event-1", Type: EventTicketUpdated, ProjectID: "project-1", TicketID: "ticket-1", OccurredAt: time.Now().UTC()}
+
+	hub.publishLocalOnce(event)
+	hub.publishLocalOnce(event)
+
+	select {
+	case received := <-events:
+		assert.Equal(t, event.ID, received.ID)
+	case <-time.After(time.Second):
+		require.Fail(t, "timed out waiting for ticket event")
+	}
+	select {
+	case received := <-events:
+		require.Failf(t, "unexpected duplicate event", "received %#v", received)
+	case <-time.After(50 * time.Millisecond):
+	}
+}

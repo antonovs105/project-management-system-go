@@ -163,6 +163,17 @@ func TestOpenAPIContractDocumentsDeliveryResponseShapes(t *testing.T) {
 	require.NotContains(t, projectDeliveryProps, "actor_id")
 }
 
+func TestOpenAPIContractDocumentsGraphMetadata(t *testing.T) {
+	doc := loadOpenAPI(t)
+
+	require.Equal(t, "#/components/schemas/GraphResponse", responseRef(t, doc, "get", "/api/projects/{projectID}/graph", "200", "application/json"))
+	graphProps := schemaProperties(t, doc, "GraphResponse")
+	require.Contains(t, graphProps, "nodes")
+	require.Contains(t, graphProps, "links")
+	require.Contains(t, graphProps, "limit")
+	require.Contains(t, graphProps, "truncated")
+}
+
 func TestOpenAPIContractDocumentsVersionedRESTAliases(t *testing.T) {
 	doc := loadOpenAPI(t)
 

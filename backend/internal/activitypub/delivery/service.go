@@ -3,6 +3,14 @@ package delivery
 import (
 	"context"
 	"log"
+	"time"
+)
+
+const (
+	// defaultRecoveryInterval controls how often missing delivery tasks are repaired.
+	defaultRecoveryInterval = 30 * time.Second
+	// defaultRecoveryLimit bounds one delivery recovery scan.
+	defaultRecoveryLimit = 100
 )
 
 // Service creates delivery rows and queues outbound federation work.
@@ -85,6 +93,61 @@ func (s *Service) RetryProjectDelivery(ctx context.Context, projectID string, us
 		return nil, err
 	}
 	return delivery, nil
+}
+
+// RecoverDueDeliveries re-enqueues persisted delivery rows that have no guaranteed live task.
+func (s *Service) RecoverDueDeliveries(ctx context.Context, limit int) (int, error) {
+	if limit <= 0 {
+		limit = defaultRecoveryLimit
+	}
+	deliveries, err := s.repo.DueDeliveries(ctx, limit)
+	if err != nil {
+		return 0, err
+	}
+	recovered := 0
+	for _, delivery := range deliveries {
+		if err := s.queue.Enqueue(ctx, delivery.ID, delivery.MaxAttempts); err != nil {
+			return recovered, err
+		}
+		recovered++
+	}
+	return recovered, nil
+}
+
+// StartRecoveryLoop periodically re-enqueues due delivery rows.
+func (s *Service) StartRecoveryLoop(parent context.Context, interval time.Duration, limit int) func() {
+	if interval <= 0 {
+		interval = defaultRecoveryInterval
+	}
+	ctx, cancel := context.WithCancel(parent)
+	go func() {
+		s.recoverAndLog(ctx, limit)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.recoverAndLog(ctx, limit)
+			}
+		}
+	}()
+	return cancel
+}
+
+// recoverAndLog runs one delivery recovery pass and writes structured logs.
+func (s *Service) recoverAndLog(ctx context.Context, limit int) {
+	recovered, err := s.RecoverDueDeliveries(ctx, limit)
+	if err != nil {
+		if ctx.Err() == nil {
+			log.Printf("activitypub_delivery_recovery_failed error=%v", err)
+		}
+		return
+	}
+	if recovered > 0 {
+		log.Printf("activitypub_delivery_recovery_enqueued count=%d", recovered)
+	}
 }
 
 // EnqueueProjectFollowers queues activities for all remote project followers.

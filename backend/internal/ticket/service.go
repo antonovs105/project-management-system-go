@@ -101,6 +101,8 @@ const (
 	defaultTicketListLimit = 100
 	// maxTicketListLimit is the largest accepted ticket list size.
 	maxTicketListLimit = 500
+	// graphNodeLimit is the largest graph node set returned to the browser.
+	graphNodeLimit = 500
 	// maxTicketTitleLength is the longest accepted ticket title.
 	maxTicketTitleLength = 120
 	// maxTicketDescriptionLength is the longest accepted ticket description.
@@ -612,8 +614,10 @@ type GraphLink struct {
 
 // GraphResponse contains graph-ready ticket nodes and links.
 type GraphResponse struct {
-	Nodes []GraphNode `json:"nodes"`
-	Links []GraphLink `json:"links"`
+	Nodes     []GraphNode `json:"nodes"`
+	Links     []GraphLink `json:"links"`
+	Limit     int         `json:"limit"`
+	Truncated bool        `json:"truncated"`
 }
 
 // GetTicketGraph returns project tickets and links as graph data.
@@ -623,9 +627,13 @@ func (s *Service) GetTicketGraph(ctx context.Context, projectID, userID string) 
 		return nil, err
 	}
 
-	tickets, err := s.repo.ListByProjectID(ctx, projectID, TicketListOptions{Limit: maxTicketListLimit})
+	tickets, err := s.repo.ListByProjectID(ctx, projectID, TicketListOptions{Limit: graphNodeLimit + 1})
 	if err != nil {
 		return nil, err
+	}
+	truncated := len(tickets) > graphNodeLimit
+	if truncated {
+		tickets = tickets[:graphNodeLimit]
 	}
 
 	links, err := s.repo.GetLinksByProjectID(ctx, projectID)
@@ -634,8 +642,15 @@ func (s *Service) GetTicketGraph(ctx context.Context, projectID, userID string) 
 	}
 
 	response := &GraphResponse{
-		Nodes: make([]GraphNode, 0, len(tickets)),
-		Links: make([]GraphLink, 0, len(links)+len(tickets)),
+		Nodes:     make([]GraphNode, 0, len(tickets)),
+		Links:     make([]GraphLink, 0, len(links)+len(tickets)),
+		Limit:     graphNodeLimit,
+		Truncated: truncated,
+	}
+
+	nodeIDs := make(map[string]struct{}, len(tickets))
+	for _, t := range tickets {
+		nodeIDs[t.ID] = struct{}{}
 	}
 
 	for _, t := range tickets {
@@ -650,15 +665,23 @@ func (s *Service) GetTicketGraph(ctx context.Context, projectID, userID string) 
 
 		// Add implicit hierarchy links
 		if t.ParentID != nil {
-			response.Links = append(response.Links, GraphLink{
-				Source: *t.ParentID,
-				Target: t.ID,
-				Type:   "hierarchy",
-			})
+			if _, ok := nodeIDs[*t.ParentID]; ok {
+				response.Links = append(response.Links, GraphLink{
+					Source: *t.ParentID,
+					Target: t.ID,
+					Type:   "hierarchy",
+				})
+			}
 		}
 	}
 
 	for _, l := range links {
+		if _, ok := nodeIDs[l.SourceID]; !ok {
+			continue
+		}
+		if _, ok := nodeIDs[l.TargetID]; !ok {
+			continue
+		}
 		response.Links = append(response.Links, GraphLink{
 			Source: l.SourceID,
 			Target: l.TargetID,

@@ -234,6 +234,39 @@ func TestService_SyncRepositoryImportsAndLinksCommits(t *testing.T) {
 	assert.NotNil(t, repo.syncedAt)
 }
 
+func TestService_SyncRepositorySkipsUnresolvedCompactReferences(t *testing.T) {
+	repo := &fakeRepository{
+		repository: GitHubRepository{
+			ID:            "11111111-1111-4111-8111-111111111111",
+			ProjectID:     "22222222-2222-4222-8222-222222222222",
+			Owner:         "owner",
+			Name:          "repo",
+			DefaultBranch: "main",
+		},
+		resolvedRefs: map[string]string{},
+	}
+	service := NewService(repo, &fakeProjectChecker{}, fakeClient{commits: []RemoteCommit{
+		{
+			SHA:     "abcdef1234567890",
+			Message: "Fix #aaaaaaaa",
+		},
+	}})
+
+	result, err := service.SyncRepository(
+		context.Background(),
+		"22222222-2222-4222-8222-222222222222",
+		"33333333-3333-4333-8333-333333333333",
+		"11111111-1111-4111-8111-111111111111",
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, 1, result.Imported)
+	assert.Equal(t, 0, result.Linked)
+	require.Len(t, repo.linkSets, 1)
+	assert.Empty(t, repo.linkSets[0])
+}
+
 func TestService_LinkCommitToTicketRequiresTicketUpdate(t *testing.T) {
 	projects := &fakeProjectChecker{}
 	repo := &fakeRepository{

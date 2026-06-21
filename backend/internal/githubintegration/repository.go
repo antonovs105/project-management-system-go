@@ -367,14 +367,26 @@ func (r *PgRepository) FindTicketIDsByReferences(ctx context.Context, projectID 
 		}
 		shortRefs = append(shortRefs, normalized)
 	}
+	shortRefSet := makeStringSet(shortRefs)
 	rows, err := r.db.QueryxContext(ctx, `
-		SELECT id::text, lower(id::text), left(lower(id::text), 8)
-		FROM tickets
-		WHERE project_id = $1
-			AND (
-				lower(id::text) = ANY($2)
-				OR left(lower(id::text), 8) = ANY($3)
-			)
+		WITH candidates AS (
+			SELECT
+				id::text AS ticket_id,
+				lower(id::text) AS full_ref,
+				left(lower(id::text), 8) AS short_ref,
+				count(*) OVER (PARTITION BY left(lower(id::text), 8)) AS short_ref_count
+			FROM tickets
+			WHERE project_id = $1
+				AND (
+					lower(id::text) = ANY($2)
+					OR left(lower(id::text), 8) = ANY($3)
+				)
+		)
+		SELECT
+			ticket_id,
+			full_ref,
+			CASE WHEN short_ref_count = 1 THEN short_ref ELSE '' END AS short_ref
+		FROM candidates
 	`, projectID, pq.Array(fullRefs), pq.Array(shortRefs))
 	if err != nil {
 		return nil, err
@@ -390,7 +402,9 @@ func (r *PgRepository) FindTicketIDsByReferences(ctx context.Context, projectID 
 			return nil, err
 		}
 		resolved[fullRef] = ticketID
-		resolved[shortRef] = ticketID
+		if _, requested := shortRefSet[shortRef]; requested {
+			resolved[shortRef] = ticketID
+		}
 	}
 	return resolved, rows.Err()
 }
@@ -562,4 +576,16 @@ func uniqueStrings(values []string) []string {
 		unique = append(unique, value)
 	}
 	return unique
+}
+
+// makeStringSet returns trimmed non-empty values as a lookup set.
+func makeStringSet(values []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			set[value] = struct{}{}
+		}
+	}
+	return set
 }

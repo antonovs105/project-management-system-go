@@ -35,6 +35,7 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/notification"
 	"github.com/antonovs105/project-management-system-go/internal/observability"
 	"github.com/antonovs105/project-management-system-go/internal/project"
+	appratelimit "github.com/antonovs105/project-management-system-go/internal/ratelimit"
 	"github.com/antonovs105/project-management-system-go/internal/secrets"
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
 	"github.com/antonovs105/project-management-system-go/internal/user"
@@ -149,6 +150,18 @@ type ApiServer struct {
 	auditHandler        *adminaudit.Handler
 	deliverySvc         *delivery.Service
 	wfHandler           *webfinger.Handler
+}
+
+// ticketEventBus combines ticket publish and subscribe behavior for HTTP wiring.
+type ticketEventBus interface {
+	ticket.EventPublisher
+	ticket.EventSubscriber
+}
+
+// notificationEventBus combines notification publish and subscribe behavior for HTTP wiring.
+type notificationEventBus interface {
+	notification.EventPublisher
+	notification.EventSubscriber
 }
 
 // signatureActorVerifier adapts HTTP signature verification to ActivityPub authorization.
@@ -405,6 +418,12 @@ func main() {
 
 	log.Println("DB connection successful")
 
+	var redisClient *redis.Client
+	if redisAddr != "" {
+		redisClient = redis.NewClient(&redis.Options{Addr: redisAddr})
+		defer redisClient.Close()
+	}
+
 	userRepo := user.NewRepository(db, apConfig, privateKeyCodec)
 	userService := user.NewService(
 		userRepo,
@@ -438,11 +457,21 @@ func main() {
 
 	ticketRepo := ticket.NewRepository(db, apConfig)
 	ticketService := ticket.NewService(ticketRepo, projectService, apConfig)
-	ticketEvents := ticket.NewEventHub()
+	var ticketEvents ticketEventBus = ticket.NewEventHub()
+	if redisClient != nil && role.runsAPI() {
+		redisTicketEvents := ticket.NewRedisEventHub(redisClient)
+		defer redisTicketEvents.Close()
+		ticketEvents = redisTicketEvents
+	}
 	ticketService.SetEventPublisher(ticketEvents)
 	ticketHandler := ticket.NewHandler(ticketService, ticket.WithEventSubscriber(ticketEvents))
 
-	notificationEvents := notification.NewEventHub()
+	var notificationEvents notificationEventBus = notification.NewEventHub()
+	if redisClient != nil && role.runsAPI() {
+		redisNotificationEvents := notification.NewRedisEventHub(redisClient)
+		defer redisNotificationEvents.Close()
+		notificationEvents = redisNotificationEvents
+	}
 	notificationService := notification.NewService(
 		notification.NewRepository(db),
 		notification.WithEventPublisher(notificationEvents),
@@ -518,6 +547,10 @@ func main() {
 		log.Println("REDIS_ADDR is not set; ActivityPub delivery worker disabled")
 	}
 	deliveryService := delivery.NewService(deliveryRepo, deliveryQueue)
+	if redisAddr != "" {
+		stopDeliveryRecovery := deliveryService.StartRecoveryLoop(context.Background(), 30*time.Second, 100)
+		defer stopDeliveryRecovery()
+	}
 	projectService.SetDelivery(deliveryService)
 	ticketService.SetDelivery(deliveryService)
 	commentService.SetDelivery(deliveryService)
@@ -599,14 +632,14 @@ func main() {
 	e.GET("/metrics", server.metricsHandler)
 	server.instanceHandler.RegisterPublicRoutes(e)
 
-	server.userHandler.RegisterRoutes(e, newRateLimiter(rate.Limit(cfg.RateLimits.Auth.RequestsPerSecond), cfg.RateLimits.Auth.Burst))
-	server.wfHandler.RegisterRoutes(e, newRateLimiter(rate.Limit(cfg.RateLimits.Discovery.RequestsPerSecond), cfg.RateLimits.Discovery.Burst))
-	server.githubHandler.RegisterWebhookRoutes(e, newRateLimiter(rate.Limit(cfg.RateLimits.Auth.RequestsPerSecond), cfg.RateLimits.Auth.Burst))
+	server.userHandler.RegisterRoutes(e, newConfiguredRateLimiter("auth", cfg.RateLimits.Auth, redisClient))
+	server.wfHandler.RegisterRoutes(e, newConfiguredRateLimiter("discovery", cfg.RateLimits.Discovery, redisClient))
+	server.githubHandler.RegisterWebhookRoutes(e, newConfiguredRateLimiter("github-webhook", cfg.RateLimits.Auth, redisClient))
 
 	// Local ActivityPub JSON-LD read routes and signed remote inbox POST foundation.
 	server.apHandler.RegisterRoutes(e)
 	server.c2sHandler.RegisterRoutes(e, authMiddleware.JWTMiddleware([]byte(jwtSecret), userService))
-	server.inboxHandler.RegisterRoutes(e, newRateLimiter(rate.Limit(cfg.RateLimits.Inbox.RequestsPerSecond), cfg.RateLimits.Inbox.Burst))
+	server.inboxHandler.RegisterRoutes(e, newConfiguredRateLimiter("inbox", cfg.RateLimits.Inbox, redisClient))
 
 	registerAuthenticatedAPIRoutes(e.Group("/api"), server, []byte(jwtSecret), userService)
 	registerAuthenticatedAPIRoutes(e.Group("/api/v1"), server, []byte(jwtSecret), userService)
@@ -801,13 +834,36 @@ func requestLoggerConfig(output io.Writer) middleware.LoggerConfig {
 
 // newRateLimiter returns an in-memory per-IP rate limiter for one public surface.
 func newRateLimiter(requestsPerSecond rate.Limit, burst int) echo.MiddlewareFunc {
+	return newRateLimiterWithStore(newMemoryRateLimiterStore(requestsPerSecond, burst))
+}
+
+// newConfiguredRateLimiter returns a Redis-backed limiter when Redis is configured.
+func newConfiguredRateLimiter(scope string, cfg appconfig.RateLimitConfig, redisClient *redis.Client) echo.MiddlewareFunc {
+	if redisClient != nil {
+		return newRateLimiterWithStore(appratelimit.NewRedisStore(redisClient, appratelimit.RedisStoreConfig{
+			Prefix:            "progo:ratelimit:" + strings.TrimSpace(scope),
+			RequestsPerSecond: cfg.RequestsPerSecond,
+			Burst:             cfg.Burst,
+			ExpiresIn:         5 * time.Minute,
+		}))
+	}
+	return newRateLimiter(rate.Limit(cfg.RequestsPerSecond), cfg.Burst)
+}
+
+// newRateLimiterWithStore wraps a concrete limiter store with the shared identifier policy.
+func newRateLimiterWithStore(store middleware.RateLimiterStore) echo.MiddlewareFunc {
 	return middleware.RateLimiterWithConfig(middleware.RateLimiterConfig{
-		Store: middleware.NewRateLimiterMemoryStoreWithConfig(middleware.RateLimiterMemoryStoreConfig{
-			Rate:      requestsPerSecond,
-			Burst:     burst,
-			ExpiresIn: 5 * time.Minute,
-		}),
+		Store:               store,
 		IdentifierExtractor: rateLimitIdentifier,
+	})
+}
+
+// newMemoryRateLimiterStore returns the local-process fallback limiter store.
+func newMemoryRateLimiterStore(requestsPerSecond rate.Limit, burst int) middleware.RateLimiterStore {
+	return middleware.NewRateLimiterMemoryStoreWithConfig(middleware.RateLimiterMemoryStoreConfig{
+		Rate:      requestsPerSecond,
+		Burst:     burst,
+		ExpiresIn: 5 * time.Minute,
 	})
 }
 

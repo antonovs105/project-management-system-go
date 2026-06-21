@@ -2793,7 +2793,7 @@ components:
           type: boolean
     GraphResponse:
       type: object
-      required: [nodes, links]
+      required: [nodes, links, limit, truncated]
       properties:
         nodes:
           type: array
@@ -2828,6 +2828,11 @@ components:
                 format: uuid
               type:
                 type: string
+        limit:
+          type: integer
+          minimum: 1
+        truncated:
+          type: boolean
     HealthResponse:
       type: object
       required: [status, system]

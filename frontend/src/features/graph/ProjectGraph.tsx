@@ -114,6 +114,11 @@ export function ProjectGraph({
           <span className="h-2.5 w-2.5 rounded-full bg-red-600" />
           Urgent
         </span>
+        {data.truncated ? (
+          <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-700">
+            Showing first {data.limit} nodes
+          </span>
+        ) : null}
         <span className="ml-auto rounded-full border border-zinc-200 px-2 py-0.5 text-zinc-500">
           {data.nodes.length} nodes / {data.links.length} links
         </span>

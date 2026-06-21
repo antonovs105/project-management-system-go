@@ -24,6 +24,7 @@ type serviceRepo struct {
 	ticketID          string
 	retryDeliveryID   string
 	delivery          *Delivery
+	dueDeliveries     []QueueCandidate
 	retryDelivery     *Delivery
 	created           []*Delivery
 	err               error
@@ -101,6 +102,13 @@ func (r *serviceRepo) RetryProjectDelivery(ctx context.Context, projectID string
 	return &Delivery{ID: deliveryID, State: StatePending, MaxAttempts: DefaultMaxRetry}, nil
 }
 
+func (r *serviceRepo) DueDeliveries(ctx context.Context, limit int) ([]QueueCandidate, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	return r.dueDeliveries, nil
+}
+
 func (r *serviceRepo) RemoteProjectFollowerInboxes(ctx context.Context, projectID string) ([]string, error) {
 	if r.err != nil {
 		return nil, r.err
@@ -121,12 +129,14 @@ func (r *serviceRepo) RemoteProjectTicketRecipientInboxes(ctx context.Context, p
 type serviceQueue struct {
 	deliveryID  string
 	maxAttempts int
+	enqueued    []QueueCandidate
 	err         error
 }
 
 func (q *serviceQueue) Enqueue(ctx context.Context, deliveryID string, maxAttempts int) error {
 	q.deliveryID = deliveryID
 	q.maxAttempts = maxAttempts
+	q.enqueued = append(q.enqueued, QueueCandidate{ID: deliveryID, MaxAttempts: maxAttempts})
 	return q.err
 }
 
@@ -309,4 +319,33 @@ func TestServiceRetryProjectDeliveryReturnsQueueError(t *testing.T) {
 	_, err := service.RetryProjectDelivery(context.Background(), "project-1", "user-1", "delivery-1")
 
 	require.ErrorIs(t, err, assert.AnError)
+}
+
+func TestServiceRecoverDueDeliveriesQueuesPersistedRows(t *testing.T) {
+	repo := &serviceRepo{dueDeliveries: []QueueCandidate{
+		{ID: "delivery-1", MaxAttempts: 5},
+		{ID: "delivery-2", MaxAttempts: 10},
+	}}
+	queue := &serviceQueue{}
+	service := NewService(repo, queue)
+
+	recovered, err := service.RecoverDueDeliveries(context.Background(), 100)
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, recovered)
+	assert.Equal(t, []QueueCandidate{
+		{ID: "delivery-1", MaxAttempts: 5},
+		{ID: "delivery-2", MaxAttempts: 10},
+	}, queue.enqueued)
+}
+
+func TestServiceRecoverDueDeliveriesReturnsQueueError(t *testing.T) {
+	repo := &serviceRepo{dueDeliveries: []QueueCandidate{{ID: "delivery-1", MaxAttempts: 5}}}
+	queue := &serviceQueue{err: assert.AnError}
+	service := NewService(repo, queue)
+
+	recovered, err := service.RecoverDueDeliveries(context.Background(), 100)
+
+	require.ErrorIs(t, err, assert.AnError)
+	assert.Equal(t, 0, recovered)
 }
