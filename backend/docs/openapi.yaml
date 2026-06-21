@@ -233,7 +233,7 @@ paths:
                     type: string
         "401":
           $ref: "#/components/responses/Error"
-  /api/instance:
+  /api/v1/instance:
     get:
       tags: [Instance]
       operationId: getInstanceCapabilities
@@ -250,7 +250,7 @@ paths:
           $ref: "#/components/responses/Error"
         "403":
           $ref: "#/components/responses/Error"
-  /api/me:
+  /api/v1/me:
     get:
       tags: [Auth]
       operationId: getCurrentUserProfile
@@ -272,7 +272,7 @@ paths:
                     format: uuid
         "401":
           $ref: "#/components/responses/Error"
-  /api/me/password:
+  /api/v1/me/password:
     patch:
       tags: [Auth]
       operationId: changeCurrentUserPassword
@@ -287,7 +287,7 @@ paths:
           $ref: "#/components/responses/Error"
         "401":
           $ref: "#/components/responses/Error"
-  /api/me/invites:
+  /api/v1/me/invites:
     get:
       tags: [Projects]
       operationId: listCurrentUserProjectInvites
@@ -324,7 +324,7 @@ paths:
           $ref: "#/components/responses/Error"
         "401":
           $ref: "#/components/responses/Error"
-  /api/me/federation/inbox:
+  /api/v1/me/federation/inbox:
     get:
       tags: [Federation]
       operationId: listPersonalFederationInbox
@@ -355,7 +355,7 @@ paths:
           $ref: "#/components/responses/Error"
         "401":
           $ref: "#/components/responses/Error"
-  /api/me/federation/discover:
+  /api/v1/me/federation/discover:
     post:
       tags: [Federation]
       operationId: discoverPersonalFederationActor
@@ -376,7 +376,7 @@ paths:
           $ref: "#/components/responses/Error"
         "502":
           $ref: "#/components/responses/Error"
-  /api/me/federation/follows:
+  /api/v1/me/federation/follows:
     get:
       tags: [Federation]
       operationId: listPersonalFederationFollows
@@ -438,7 +438,7 @@ paths:
           $ref: "#/components/responses/Error"
         "502":
           $ref: "#/components/responses/Error"
-  /api/admin/users:
+  /api/v1/admin/users:
     get:
       tags: [Auth]
       operationId: listAdminUsers
@@ -475,7 +475,7 @@ paths:
                   $ref: "#/components/schemas/User"
         "403":
           $ref: "#/components/responses/Error"
-  /api/admin/users/{userID}/role:
+  /api/v1/admin/users/{userID}/role:
     parameters:
       - $ref: "#/components/parameters/UserID"
     patch:
@@ -500,7 +500,7 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
-  /api/admin/audit-events:
+  /api/v1/admin/audit-events:
     get:
       tags: [Admin Audit]
       operationId: listAdminAuditEvents
@@ -544,7 +544,7 @@ paths:
           $ref: "#/components/responses/Error"
         "403":
           $ref: "#/components/responses/Error"
-  /api/projects:
+  /api/v1/projects:
     get:
       tags: [Projects]
       operationId: listProjects
@@ -589,7 +589,7 @@ paths:
                 $ref: "#/components/schemas/Project"
         "400":
           $ref: "#/components/responses/Error"
-  /api/projects/{projectID}:
+  /api/v1/projects/{projectID}:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
     get:
@@ -628,7 +628,7 @@ paths:
           description: Project deleted.
         "404":
           $ref: "#/components/responses/Error"
-  /api/projects/{projectID}/members:
+  /api/v1/projects/{projectID}/members:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
     get:
@@ -676,7 +676,7 @@ paths:
                 $ref: "#/components/schemas/ProjectInvite"
         "409":
           $ref: "#/components/responses/Error"
-  /api/projects/{projectID}/invites:
+  /api/v1/projects/{projectID}/invites:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
     get:
@@ -715,7 +715,7 @@ paths:
           $ref: "#/components/responses/Error"
         "403":
           $ref: "#/components/responses/Error"
-  /api/projects/{projectID}/roles:
+  /api/v1/projects/{projectID}/roles:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
     get:
@@ -754,7 +754,7 @@ paths:
           $ref: "#/components/responses/Error"
         "403":
           $ref: "#/components/responses/Error"
-  /api/projects/{projectID}/roles/{roleID}:
+  /api/v1/projects/{projectID}/roles/{roleID}:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
       - $ref: "#/components/parameters/RoleID"
@@ -792,7 +792,7 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
-  /api/projects/{projectID}/members/{userID}:
+  /api/v1/projects/{projectID}/members/{userID}:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
       - $ref: "#/components/parameters/UserID"
@@ -828,7 +828,7 @@ paths:
           description: Member removed.
         "403":
           $ref: "#/components/responses/Error"
-  /api/invites/{inviteID}/accept:
+  /api/v1/invites/{inviteID}/accept:
     parameters:
       - $ref: "#/components/parameters/InviteID"
     post:
@@ -841,7 +841,7 @@ paths:
           description: Invite accepted.
         "409":
           $ref: "#/components/responses/Error"
-  /api/invites/{inviteID}/reject:
+  /api/v1/invites/{inviteID}/reject:
     parameters:
       - $ref: "#/components/parameters/InviteID"
     post:
@@ -854,7 +854,7 @@ paths:
           description: Invite rejected.
         "409":
           $ref: "#/components/responses/Error"
-  /api/invites/{inviteID}/revoke:
+  /api/v1/invites/{inviteID}/revoke:
     parameters:
       - $ref: "#/components/parameters/InviteID"
     post:
@@ -867,7 +867,7 @@ paths:
           description: Invite revoked.
         "409":
           $ref: "#/components/responses/Error"
-  /api/projects/{projectID}/github/repositories:
+  /api/v1/projects/{projectID}/github/repositories:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
     get:
@@ -908,7 +908,7 @@ paths:
           $ref: "#/components/responses/Error"
         "502":
           $ref: "#/components/responses/Error"
-  /api/projects/{projectID}/github/repositories/{repositoryID}:
+  /api/v1/projects/{projectID}/github/repositories/{repositoryID}:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
       - $ref: "#/components/parameters/GitHubRepositoryID"
@@ -924,7 +924,7 @@ paths:
           $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
-  /api/projects/{projectID}/github/repositories/{repositoryID}/sync:
+  /api/v1/projects/{projectID}/github/repositories/{repositoryID}/sync:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
       - $ref: "#/components/parameters/GitHubRepositoryID"
@@ -946,7 +946,7 @@ paths:
           $ref: "#/components/responses/Error"
         "502":
           $ref: "#/components/responses/Error"
-  /api/projects/{projectID}/github/commits:
+  /api/v1/projects/{projectID}/github/commits:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
     get:
@@ -985,7 +985,7 @@ paths:
                   $ref: "#/components/schemas/GitHubCommit"
         "403":
           $ref: "#/components/responses/Error"
-  /api/projects/{projectID}/tickets:
+  /api/v1/projects/{projectID}/tickets:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
     get:
@@ -1032,7 +1032,7 @@ paths:
                 $ref: "#/components/schemas/Ticket"
         "400":
           $ref: "#/components/responses/Error"
-  /api/projects/{projectID}/tickets/events:
+  /api/v1/projects/{projectID}/tickets/events:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
     get:
@@ -1051,7 +1051,7 @@ paths:
           $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
-  /api/projects/{projectID}/graph:
+  /api/v1/projects/{projectID}/graph:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
     get:
@@ -1066,7 +1066,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/GraphResponse"
-  /api/tickets/{ticketID}:
+  /api/v1/tickets/{ticketID}:
     parameters:
       - $ref: "#/components/parameters/TicketID"
     get:
@@ -1105,7 +1105,7 @@ paths:
           description: Ticket deleted.
         "404":
           $ref: "#/components/responses/Error"
-  /api/tickets/{ticketID}/links:
+  /api/v1/tickets/{ticketID}/links:
     parameters:
       - $ref: "#/components/parameters/TicketID"
     post:
@@ -1120,7 +1120,7 @@ paths:
           description: Link created.
         "400":
           $ref: "#/components/responses/Error"
-  /api/links/{linkID}:
+  /api/v1/links/{linkID}:
     parameters:
       - $ref: "#/components/parameters/LinkID"
     delete:
@@ -1133,7 +1133,7 @@ paths:
           description: Link removed.
         "404":
           $ref: "#/components/responses/Error"
-  /api/tickets/{ticketID}/github/commits:
+  /api/v1/tickets/{ticketID}/github/commits:
     parameters:
       - $ref: "#/components/parameters/TicketID"
     get:
@@ -1174,7 +1174,7 @@ paths:
           $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
-  /api/tickets/{ticketID}/github/commits/{commitID}:
+  /api/v1/tickets/{ticketID}/github/commits/{commitID}:
     parameters:
       - $ref: "#/components/parameters/TicketID"
       - $ref: "#/components/parameters/GitHubCommitID"
@@ -1190,7 +1190,7 @@ paths:
           $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
-  /api/tickets/{ticketID}/comments:
+  /api/v1/tickets/{ticketID}/comments:
     parameters:
       - $ref: "#/components/parameters/TicketID"
     get:
@@ -1237,7 +1237,7 @@ paths:
                 $ref: "#/components/schemas/Comment"
         "400":
           $ref: "#/components/responses/Error"
-  /api/comments/{commentID}:
+  /api/v1/comments/{commentID}:
     parameters:
       - $ref: "#/components/parameters/CommentID"
     delete:
@@ -1250,7 +1250,7 @@ paths:
           description: Comment deleted.
         "404":
           $ref: "#/components/responses/Error"
-  /api/projects/{projectID}/deliveries:
+  /api/v1/projects/{projectID}/deliveries:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
     get:
@@ -1282,7 +1282,7 @@ paths:
           $ref: "#/components/responses/Error"
         "403":
           $ref: "#/components/responses/Error"
-  /api/projects/{projectID}/deliveries/summary:
+  /api/v1/projects/{projectID}/deliveries/summary:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
     get:
@@ -1297,7 +1297,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DeliverySummary"
-  /api/projects/{projectID}/deliveries/{deliveryID}/retry:
+  /api/v1/projects/{projectID}/deliveries/{deliveryID}/retry:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
       - $ref: "#/components/parameters/DeliveryID"
@@ -1319,7 +1319,7 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
-  /api/admin/federation/domain-blocks:
+  /api/v1/admin/federation/domain-blocks:
     get:
       tags: [Federation Moderation]
       operationId: listFederationDomainBlocks
@@ -1354,7 +1354,7 @@ paths:
           $ref: "#/components/responses/Error"
         "403":
           $ref: "#/components/responses/Error"
-  /api/admin/federation/domain-blocks/{domain}:
+  /api/v1/admin/federation/domain-blocks/{domain}:
     parameters:
       - name: domain
         in: path
@@ -1373,7 +1373,7 @@ paths:
           $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
-  /api/admin/federation/remote-actors:
+  /api/v1/admin/federation/remote-actors:
     get:
       tags: [Federation Moderation]
       operationId: listFederationRemoteActors
@@ -1401,7 +1401,7 @@ paths:
                   $ref: "#/components/schemas/FederationRemoteActor"
         "403":
           $ref: "#/components/responses/Error"
-  /api/admin/federation/deliveries:
+  /api/v1/admin/federation/deliveries:
     get:
       tags: [Federation Moderation]
       operationId: listFederationDeliveries
@@ -1437,7 +1437,7 @@ paths:
           $ref: "#/components/responses/Error"
         "403":
           $ref: "#/components/responses/Error"
-  /api/admin/federation/deliveries/summary:
+  /api/v1/admin/federation/deliveries/summary:
     get:
       tags: [Federation Moderation]
       operationId: getFederationDeliverySummary
@@ -1452,7 +1452,7 @@ paths:
                 $ref: "#/components/schemas/FederationDeliverySummary"
         "403":
           $ref: "#/components/responses/Error"
-  /api/admin/federation/deliveries/{deliveryID}/retry:
+  /api/v1/admin/federation/deliveries/{deliveryID}/retry:
     parameters:
       - $ref: "#/components/parameters/DeliveryID"
     post:
@@ -1473,92 +1473,6 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
-  /api/v1/instance:
-    $ref: "#/paths/~1api~1instance"
-  /api/v1/me:
-    $ref: "#/paths/~1api~1me"
-  /api/v1/me/password:
-    $ref: "#/paths/~1api~1me~1password"
-  /api/v1/me/invites:
-    $ref: "#/paths/~1api~1me~1invites"
-  /api/v1/me/federation/inbox:
-    $ref: "#/paths/~1api~1me~1federation~1inbox"
-  /api/v1/me/federation/discover:
-    $ref: "#/paths/~1api~1me~1federation~1discover"
-  /api/v1/me/federation/follows:
-    $ref: "#/paths/~1api~1me~1federation~1follows"
-  /api/v1/admin/users:
-    $ref: "#/paths/~1api~1admin~1users"
-  /api/v1/admin/users/{userID}/role:
-    $ref: "#/paths/~1api~1admin~1users~1{userID}~1role"
-  /api/v1/admin/audit-events:
-    $ref: "#/paths/~1api~1admin~1audit-events"
-  /api/v1/projects:
-    $ref: "#/paths/~1api~1projects"
-  /api/v1/projects/{projectID}:
-    $ref: "#/paths/~1api~1projects~1{projectID}"
-  /api/v1/projects/{projectID}/members:
-    $ref: "#/paths/~1api~1projects~1{projectID}~1members"
-  /api/v1/projects/{projectID}/invites:
-    $ref: "#/paths/~1api~1projects~1{projectID}~1invites"
-  /api/v1/projects/{projectID}/roles:
-    $ref: "#/paths/~1api~1projects~1{projectID}~1roles"
-  /api/v1/projects/{projectID}/roles/{roleID}:
-    $ref: "#/paths/~1api~1projects~1{projectID}~1roles~1{roleID}"
-  /api/v1/projects/{projectID}/members/{userID}:
-    $ref: "#/paths/~1api~1projects~1{projectID}~1members~1{userID}"
-  /api/v1/projects/{projectID}/github/repositories:
-    $ref: "#/paths/~1api~1projects~1{projectID}~1github~1repositories"
-  /api/v1/projects/{projectID}/github/repositories/{repositoryID}:
-    $ref: "#/paths/~1api~1projects~1{projectID}~1github~1repositories~1{repositoryID}"
-  /api/v1/projects/{projectID}/github/repositories/{repositoryID}/sync:
-    $ref: "#/paths/~1api~1projects~1{projectID}~1github~1repositories~1{repositoryID}~1sync"
-  /api/v1/projects/{projectID}/github/commits:
-    $ref: "#/paths/~1api~1projects~1{projectID}~1github~1commits"
-  /api/v1/invites/{inviteID}/accept:
-    $ref: "#/paths/~1api~1invites~1{inviteID}~1accept"
-  /api/v1/invites/{inviteID}/reject:
-    $ref: "#/paths/~1api~1invites~1{inviteID}~1reject"
-  /api/v1/invites/{inviteID}/revoke:
-    $ref: "#/paths/~1api~1invites~1{inviteID}~1revoke"
-  /api/v1/projects/{projectID}/tickets:
-    $ref: "#/paths/~1api~1projects~1{projectID}~1tickets"
-  /api/v1/projects/{projectID}/tickets/events:
-    $ref: "#/paths/~1api~1projects~1{projectID}~1tickets~1events"
-  /api/v1/projects/{projectID}/graph:
-    $ref: "#/paths/~1api~1projects~1{projectID}~1graph"
-  /api/v1/tickets/{ticketID}:
-    $ref: "#/paths/~1api~1tickets~1{ticketID}"
-  /api/v1/tickets/{ticketID}/links:
-    $ref: "#/paths/~1api~1tickets~1{ticketID}~1links"
-  /api/v1/links/{linkID}:
-    $ref: "#/paths/~1api~1links~1{linkID}"
-  /api/v1/tickets/{ticketID}/github/commits:
-    $ref: "#/paths/~1api~1tickets~1{ticketID}~1github~1commits"
-  /api/v1/tickets/{ticketID}/github/commits/{commitID}:
-    $ref: "#/paths/~1api~1tickets~1{ticketID}~1github~1commits~1{commitID}"
-  /api/v1/tickets/{ticketID}/comments:
-    $ref: "#/paths/~1api~1tickets~1{ticketID}~1comments"
-  /api/v1/comments/{commentID}:
-    $ref: "#/paths/~1api~1comments~1{commentID}"
-  /api/v1/projects/{projectID}/deliveries:
-    $ref: "#/paths/~1api~1projects~1{projectID}~1deliveries"
-  /api/v1/projects/{projectID}/deliveries/summary:
-    $ref: "#/paths/~1api~1projects~1{projectID}~1deliveries~1summary"
-  /api/v1/projects/{projectID}/deliveries/{deliveryID}/retry:
-    $ref: "#/paths/~1api~1projects~1{projectID}~1deliveries~1{deliveryID}~1retry"
-  /api/v1/admin/federation/domain-blocks:
-    $ref: "#/paths/~1api~1admin~1federation~1domain-blocks"
-  /api/v1/admin/federation/domain-blocks/{domain}:
-    $ref: "#/paths/~1api~1admin~1federation~1domain-blocks~1{domain}"
-  /api/v1/admin/federation/remote-actors:
-    $ref: "#/paths/~1api~1admin~1federation~1remote-actors"
-  /api/v1/admin/federation/deliveries:
-    $ref: "#/paths/~1api~1admin~1federation~1deliveries"
-  /api/v1/admin/federation/deliveries/summary:
-    $ref: "#/paths/~1api~1admin~1federation~1deliveries~1summary"
-  /api/v1/admin/federation/deliveries/{deliveryID}/retry:
-    $ref: "#/paths/~1api~1admin~1federation~1deliveries~1{deliveryID}~1retry"
   /.well-known/webfinger:
     get:
       tags: [WebFinger]

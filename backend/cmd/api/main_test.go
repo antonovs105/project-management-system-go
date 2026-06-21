@@ -8,7 +8,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
+	apfederation "github.com/antonovs105/project-management-system-go/internal/activitypub/federation"
+	apmoderation "github.com/antonovs105/project-management-system-go/internal/activitypub/moderation"
+	"github.com/antonovs105/project-management-system-go/internal/adminaudit"
+	"github.com/antonovs105/project-management-system-go/internal/comment"
+	appconfig "github.com/antonovs105/project-management-system-go/internal/config"
+	"github.com/antonovs105/project-management-system-go/internal/githubintegration"
+	"github.com/antonovs105/project-management-system-go/internal/instance"
+	"github.com/antonovs105/project-management-system-go/internal/notification"
 	"github.com/antonovs105/project-management-system-go/internal/observability"
+	"github.com/antonovs105/project-management-system-go/internal/project"
+	"github.com/antonovs105/project-management-system-go/internal/ticket"
+	"github.com/antonovs105/project-management-system-go/internal/user"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/require"
 )
@@ -174,6 +186,36 @@ func TestRequiredDatabaseTablesIncludeActivityPubFoundation(t *testing.T) {
 	require.Contains(t, requiredDatabaseTables, "activity_deliveries")
 	require.Contains(t, requiredDatabaseTables, "project_roles")
 	require.Contains(t, requiredDatabaseTables, "project_role_permissions")
+}
+
+func TestAuthenticatedAPIRoutesUseVersionedPrefixOnly(t *testing.T) {
+	e := echo.New()
+	server := &ApiServer{
+		userHandler:         user.NewHandler(nil),
+		instanceHandler:     instance.NewHandler(appconfig.Config{}, nil, nil),
+		projectHandler:      project.NewHandler(nil),
+		ticketHandler:       ticket.NewHandler(nil),
+		commentHandler:      comment.NewHandler(nil),
+		notificationHandler: notification.NewHandler(nil),
+		githubHandler:       githubintegration.NewHandler(nil),
+		federationHandler:   apfederation.NewHandler(nil),
+		moderationHandler:   apmoderation.NewHandler(nil),
+		deliveryHandler:     delivery.NewHandler(nil),
+		auditHandler:        adminaudit.NewHandler(nil),
+	}
+
+	registerAuthenticatedAPIRoutes(e.Group("/api/v1"), server, []byte("test-secret"), nil)
+
+	paths := make(map[string]struct{})
+	for _, route := range e.Routes() {
+		paths[route.Path] = struct{}{}
+		require.True(t, route.Path == "/api/v1" || strings.HasPrefix(route.Path, "/api/v1/"), "unexpected authenticated API route %s", route.Path)
+		legacyRESTPath := strings.HasPrefix(route.Path, "/api/") && route.Path != "/api/v1" && !strings.HasPrefix(route.Path, "/api/v1/")
+		require.False(t, legacyRESTPath, "legacy API route mounted: %s", route.Path)
+	}
+	require.Contains(t, paths, "/api/v1/projects")
+	require.Contains(t, paths, "/api/v1/me/password")
+	require.NotContains(t, paths, "/api/projects")
 }
 
 func TestGlobalMiddlewareAddsRequestIDAndStructuredLog(t *testing.T) {

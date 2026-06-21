@@ -641,7 +641,6 @@ func main() {
 	server.c2sHandler.RegisterRoutes(e, authMiddleware.JWTMiddleware([]byte(jwtSecret), userService))
 	server.inboxHandler.RegisterRoutes(e, newConfiguredRateLimiter("inbox", cfg.RateLimits.Inbox, redisClient))
 
-	registerAuthenticatedAPIRoutes(e.Group("/api"), server, []byte(jwtSecret), userService)
 	registerAuthenticatedAPIRoutes(e.Group("/api/v1"), server, []byte(jwtSecret), userService)
 
 	if err := runHTTPServer(e, cfg.Server.HTTPAddr, gracefulShutdownTimeout); err != nil {

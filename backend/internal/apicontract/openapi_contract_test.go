@@ -37,64 +37,64 @@ func TestOpenAPIContractDocumentsRegisteredRoutes(t *testing.T) {
 		{method: "get", path: "/auth/{provider}/start"},
 		{method: "get", path: "/auth/{provider}/callback"},
 		{method: "post", path: "/auth/oauth/exchange"},
-		{method: "get", path: "/api/instance"},
-		{method: "get", path: "/api/me"},
-		{method: "patch", path: "/api/me/password"},
-		{method: "get", path: "/api/me/invites"},
-		{method: "get", path: "/api/me/federation/inbox"},
-		{method: "post", path: "/api/me/federation/discover"},
-		{method: "get", path: "/api/me/federation/follows"},
-		{method: "post", path: "/api/me/federation/follows"},
-		{method: "get", path: "/api/admin/users"},
-		{method: "patch", path: "/api/admin/users/{userID}/role"},
-		{method: "get", path: "/api/admin/audit-events"},
-		{method: "get", path: "/api/projects"},
-		{method: "post", path: "/api/projects"},
-		{method: "get", path: "/api/projects/{projectID}"},
-		{method: "patch", path: "/api/projects/{projectID}"},
-		{method: "delete", path: "/api/projects/{projectID}"},
-		{method: "get", path: "/api/projects/{projectID}/roles"},
-		{method: "post", path: "/api/projects/{projectID}/roles"},
-		{method: "patch", path: "/api/projects/{projectID}/roles/{roleID}"},
-		{method: "delete", path: "/api/projects/{projectID}/roles/{roleID}"},
-		{method: "get", path: "/api/projects/{projectID}/members"},
-		{method: "post", path: "/api/projects/{projectID}/members"},
-		{method: "patch", path: "/api/projects/{projectID}/members/{userID}"},
-		{method: "delete", path: "/api/projects/{projectID}/members/{userID}"},
-		{method: "get", path: "/api/projects/{projectID}/invites"},
-		{method: "post", path: "/api/invites/{inviteID}/accept"},
-		{method: "post", path: "/api/invites/{inviteID}/reject"},
-		{method: "post", path: "/api/invites/{inviteID}/revoke"},
-		{method: "get", path: "/api/projects/{projectID}/github/repositories"},
-		{method: "post", path: "/api/projects/{projectID}/github/repositories"},
-		{method: "delete", path: "/api/projects/{projectID}/github/repositories/{repositoryID}"},
-		{method: "post", path: "/api/projects/{projectID}/github/repositories/{repositoryID}/sync"},
-		{method: "get", path: "/api/projects/{projectID}/github/commits"},
-		{method: "get", path: "/api/projects/{projectID}/tickets"},
-		{method: "post", path: "/api/projects/{projectID}/tickets"},
-		{method: "get", path: "/api/projects/{projectID}/tickets/events"},
-		{method: "get", path: "/api/projects/{projectID}/graph"},
-		{method: "get", path: "/api/tickets/{ticketID}"},
-		{method: "patch", path: "/api/tickets/{ticketID}"},
-		{method: "delete", path: "/api/tickets/{ticketID}"},
-		{method: "post", path: "/api/tickets/{ticketID}/links"},
-		{method: "delete", path: "/api/links/{linkID}"},
-		{method: "get", path: "/api/tickets/{ticketID}/github/commits"},
-		{method: "post", path: "/api/tickets/{ticketID}/github/commits"},
-		{method: "delete", path: "/api/tickets/{ticketID}/github/commits/{commitID}"},
-		{method: "get", path: "/api/tickets/{ticketID}/comments"},
-		{method: "post", path: "/api/tickets/{ticketID}/comments"},
-		{method: "delete", path: "/api/comments/{commentID}"},
-		{method: "get", path: "/api/projects/{projectID}/deliveries"},
-		{method: "get", path: "/api/projects/{projectID}/deliveries/summary"},
-		{method: "post", path: "/api/projects/{projectID}/deliveries/{deliveryID}/retry"},
-		{method: "get", path: "/api/admin/federation/domain-blocks"},
-		{method: "post", path: "/api/admin/federation/domain-blocks"},
-		{method: "delete", path: "/api/admin/federation/domain-blocks/{domain}"},
-		{method: "get", path: "/api/admin/federation/remote-actors"},
-		{method: "get", path: "/api/admin/federation/deliveries"},
-		{method: "get", path: "/api/admin/federation/deliveries/summary"},
-		{method: "post", path: "/api/admin/federation/deliveries/{deliveryID}/retry"},
+		{method: "get", path: "/api/v1/instance"},
+		{method: "get", path: "/api/v1/me"},
+		{method: "patch", path: "/api/v1/me/password"},
+		{method: "get", path: "/api/v1/me/invites"},
+		{method: "get", path: "/api/v1/me/federation/inbox"},
+		{method: "post", path: "/api/v1/me/federation/discover"},
+		{method: "get", path: "/api/v1/me/federation/follows"},
+		{method: "post", path: "/api/v1/me/federation/follows"},
+		{method: "get", path: "/api/v1/admin/users"},
+		{method: "patch", path: "/api/v1/admin/users/{userID}/role"},
+		{method: "get", path: "/api/v1/admin/audit-events"},
+		{method: "get", path: "/api/v1/projects"},
+		{method: "post", path: "/api/v1/projects"},
+		{method: "get", path: "/api/v1/projects/{projectID}"},
+		{method: "patch", path: "/api/v1/projects/{projectID}"},
+		{method: "delete", path: "/api/v1/projects/{projectID}"},
+		{method: "get", path: "/api/v1/projects/{projectID}/roles"},
+		{method: "post", path: "/api/v1/projects/{projectID}/roles"},
+		{method: "patch", path: "/api/v1/projects/{projectID}/roles/{roleID}"},
+		{method: "delete", path: "/api/v1/projects/{projectID}/roles/{roleID}"},
+		{method: "get", path: "/api/v1/projects/{projectID}/members"},
+		{method: "post", path: "/api/v1/projects/{projectID}/members"},
+		{method: "patch", path: "/api/v1/projects/{projectID}/members/{userID}"},
+		{method: "delete", path: "/api/v1/projects/{projectID}/members/{userID}"},
+		{method: "get", path: "/api/v1/projects/{projectID}/invites"},
+		{method: "post", path: "/api/v1/invites/{inviteID}/accept"},
+		{method: "post", path: "/api/v1/invites/{inviteID}/reject"},
+		{method: "post", path: "/api/v1/invites/{inviteID}/revoke"},
+		{method: "get", path: "/api/v1/projects/{projectID}/github/repositories"},
+		{method: "post", path: "/api/v1/projects/{projectID}/github/repositories"},
+		{method: "delete", path: "/api/v1/projects/{projectID}/github/repositories/{repositoryID}"},
+		{method: "post", path: "/api/v1/projects/{projectID}/github/repositories/{repositoryID}/sync"},
+		{method: "get", path: "/api/v1/projects/{projectID}/github/commits"},
+		{method: "get", path: "/api/v1/projects/{projectID}/tickets"},
+		{method: "post", path: "/api/v1/projects/{projectID}/tickets"},
+		{method: "get", path: "/api/v1/projects/{projectID}/tickets/events"},
+		{method: "get", path: "/api/v1/projects/{projectID}/graph"},
+		{method: "get", path: "/api/v1/tickets/{ticketID}"},
+		{method: "patch", path: "/api/v1/tickets/{ticketID}"},
+		{method: "delete", path: "/api/v1/tickets/{ticketID}"},
+		{method: "post", path: "/api/v1/tickets/{ticketID}/links"},
+		{method: "delete", path: "/api/v1/links/{linkID}"},
+		{method: "get", path: "/api/v1/tickets/{ticketID}/github/commits"},
+		{method: "post", path: "/api/v1/tickets/{ticketID}/github/commits"},
+		{method: "delete", path: "/api/v1/tickets/{ticketID}/github/commits/{commitID}"},
+		{method: "get", path: "/api/v1/tickets/{ticketID}/comments"},
+		{method: "post", path: "/api/v1/tickets/{ticketID}/comments"},
+		{method: "delete", path: "/api/v1/comments/{commentID}"},
+		{method: "get", path: "/api/v1/projects/{projectID}/deliveries"},
+		{method: "get", path: "/api/v1/projects/{projectID}/deliveries/summary"},
+		{method: "post", path: "/api/v1/projects/{projectID}/deliveries/{deliveryID}/retry"},
+		{method: "get", path: "/api/v1/admin/federation/domain-blocks"},
+		{method: "post", path: "/api/v1/admin/federation/domain-blocks"},
+		{method: "delete", path: "/api/v1/admin/federation/domain-blocks/{domain}"},
+		{method: "get", path: "/api/v1/admin/federation/remote-actors"},
+		{method: "get", path: "/api/v1/admin/federation/deliveries"},
+		{method: "get", path: "/api/v1/admin/federation/deliveries/summary"},
+		{method: "post", path: "/api/v1/admin/federation/deliveries/{deliveryID}/retry"},
 		{method: "get", path: "/.well-known/webfinger"},
 		{method: "get", path: "/users/{username}"},
 		{method: "get", path: "/users/{username}/inbox"},
@@ -135,19 +135,19 @@ func TestOpenAPIContractDocumentsMetricsBearerAuth(t *testing.T) {
 func TestOpenAPIContractDocumentsDeliveryResponseShapes(t *testing.T) {
 	doc := loadOpenAPI(t)
 
-	require.Equal(t, "#/components/schemas/ProjectDelivery", responseItemsRef(t, doc, "get", "/api/projects/{projectID}/deliveries", "200", "application/json"))
-	require.Equal(t, "#/components/schemas/ProjectDelivery", responseRef(t, doc, "post", "/api/projects/{projectID}/deliveries/{deliveryID}/retry", "202", "application/json"))
-	require.Equal(t, "#/components/schemas/FederationDelivery", responseItemsRef(t, doc, "get", "/api/admin/federation/deliveries", "200", "application/json"))
-	require.Equal(t, "#/components/schemas/FederationDeliverySummary", responseRef(t, doc, "get", "/api/admin/federation/deliveries/summary", "200", "application/json"))
-	require.Equal(t, "#/components/schemas/Delivery", responseRef(t, doc, "post", "/api/admin/federation/deliveries/{deliveryID}/retry", "202", "application/json"))
-	require.Equal(t, "#/components/schemas/FederationInboxActivity", responseItemsRef(t, doc, "get", "/api/me/federation/inbox", "200", "application/json"))
-	require.Equal(t, "#/components/schemas/FederationRemoteActor", responseRef(t, doc, "post", "/api/me/federation/discover", "200", "application/json"))
-	require.Equal(t, "#/components/schemas/FederationRemoteFollow", responseItemsRef(t, doc, "get", "/api/me/federation/follows", "200", "application/json"))
-	require.Equal(t, "#/components/schemas/FollowRemoteActorResult", responseRef(t, doc, "post", "/api/me/federation/follows", "202", "application/json"))
-	require.Equal(t, "#/components/schemas/ProjectInviteInspection", responseItemsRef(t, doc, "get", "/api/me/invites", "200", "application/json"))
-	require.Equal(t, "#/components/schemas/ProjectMember", responseItemsRef(t, doc, "get", "/api/projects/{projectID}/members", "200", "application/json"))
-	require.Equal(t, "#/components/schemas/ProjectMember", responseRef(t, doc, "patch", "/api/projects/{projectID}/members/{userID}", "200", "application/json"))
-	require.Equal(t, "#/components/schemas/ProjectInviteInspection", responseItemsRef(t, doc, "get", "/api/projects/{projectID}/invites", "200", "application/json"))
+	require.Equal(t, "#/components/schemas/ProjectDelivery", responseItemsRef(t, doc, "get", "/api/v1/projects/{projectID}/deliveries", "200", "application/json"))
+	require.Equal(t, "#/components/schemas/ProjectDelivery", responseRef(t, doc, "post", "/api/v1/projects/{projectID}/deliveries/{deliveryID}/retry", "202", "application/json"))
+	require.Equal(t, "#/components/schemas/FederationDelivery", responseItemsRef(t, doc, "get", "/api/v1/admin/federation/deliveries", "200", "application/json"))
+	require.Equal(t, "#/components/schemas/FederationDeliverySummary", responseRef(t, doc, "get", "/api/v1/admin/federation/deliveries/summary", "200", "application/json"))
+	require.Equal(t, "#/components/schemas/Delivery", responseRef(t, doc, "post", "/api/v1/admin/federation/deliveries/{deliveryID}/retry", "202", "application/json"))
+	require.Equal(t, "#/components/schemas/FederationInboxActivity", responseItemsRef(t, doc, "get", "/api/v1/me/federation/inbox", "200", "application/json"))
+	require.Equal(t, "#/components/schemas/FederationRemoteActor", responseRef(t, doc, "post", "/api/v1/me/federation/discover", "200", "application/json"))
+	require.Equal(t, "#/components/schemas/FederationRemoteFollow", responseItemsRef(t, doc, "get", "/api/v1/me/federation/follows", "200", "application/json"))
+	require.Equal(t, "#/components/schemas/FollowRemoteActorResult", responseRef(t, doc, "post", "/api/v1/me/federation/follows", "202", "application/json"))
+	require.Equal(t, "#/components/schemas/ProjectInviteInspection", responseItemsRef(t, doc, "get", "/api/v1/me/invites", "200", "application/json"))
+	require.Equal(t, "#/components/schemas/ProjectMember", responseItemsRef(t, doc, "get", "/api/v1/projects/{projectID}/members", "200", "application/json"))
+	require.Equal(t, "#/components/schemas/ProjectMember", responseRef(t, doc, "patch", "/api/v1/projects/{projectID}/members/{userID}", "200", "application/json"))
+	require.Equal(t, "#/components/schemas/ProjectInviteInspection", responseItemsRef(t, doc, "get", "/api/v1/projects/{projectID}/invites", "200", "application/json"))
 
 	rawDeliveryProps := schemaProperties(t, doc, "Delivery")
 	require.Contains(t, rawDeliveryProps, "activity_id")
@@ -166,7 +166,7 @@ func TestOpenAPIContractDocumentsDeliveryResponseShapes(t *testing.T) {
 func TestOpenAPIContractDocumentsGraphMetadata(t *testing.T) {
 	doc := loadOpenAPI(t)
 
-	require.Equal(t, "#/components/schemas/GraphResponse", responseRef(t, doc, "get", "/api/projects/{projectID}/graph", "200", "application/json"))
+	require.Equal(t, "#/components/schemas/GraphResponse", responseRef(t, doc, "get", "/api/v1/projects/{projectID}/graph", "200", "application/json"))
 	graphProps := schemaProperties(t, doc, "GraphResponse")
 	require.Contains(t, graphProps, "nodes")
 	require.Contains(t, graphProps, "links")
@@ -174,58 +174,13 @@ func TestOpenAPIContractDocumentsGraphMetadata(t *testing.T) {
 	require.Contains(t, graphProps, "truncated")
 }
 
-func TestOpenAPIContractDocumentsVersionedRESTAliases(t *testing.T) {
+func TestOpenAPIContractRejectsUnversionedRESTAliases(t *testing.T) {
 	doc := loadOpenAPI(t)
 
-	for _, path := range []string{
-		"/api/me",
-		"/api/me/password",
-		"/api/me/invites",
-		"/api/me/federation/inbox",
-		"/api/me/federation/discover",
-		"/api/me/federation/follows",
-		"/api/admin/users",
-		"/api/admin/users/{userID}/role",
-		"/api/admin/audit-events",
-		"/api/projects",
-		"/api/projects/{projectID}",
-		"/api/projects/{projectID}/roles",
-		"/api/projects/{projectID}/roles/{roleID}",
-		"/api/projects/{projectID}/members",
-		"/api/projects/{projectID}/members/{userID}",
-		"/api/projects/{projectID}/invites",
-		"/api/projects/{projectID}/github/repositories",
-		"/api/projects/{projectID}/github/repositories/{repositoryID}",
-		"/api/projects/{projectID}/github/repositories/{repositoryID}/sync",
-		"/api/projects/{projectID}/github/commits",
-		"/api/invites/{inviteID}/accept",
-		"/api/invites/{inviteID}/reject",
-		"/api/invites/{inviteID}/revoke",
-		"/api/projects/{projectID}/tickets",
-		"/api/projects/{projectID}/tickets/events",
-		"/api/projects/{projectID}/graph",
-		"/api/tickets/{ticketID}",
-		"/api/tickets/{ticketID}/links",
-		"/api/links/{linkID}",
-		"/api/tickets/{ticketID}/github/commits",
-		"/api/tickets/{ticketID}/github/commits/{commitID}",
-		"/api/tickets/{ticketID}/comments",
-		"/api/comments/{commentID}",
-		"/api/projects/{projectID}/deliveries",
-		"/api/projects/{projectID}/deliveries/summary",
-		"/api/projects/{projectID}/deliveries/{deliveryID}/retry",
-		"/api/admin/federation/domain-blocks",
-		"/api/admin/federation/domain-blocks/{domain}",
-		"/api/admin/federation/remote-actors",
-		"/api/admin/federation/deliveries",
-		"/api/admin/federation/deliveries/summary",
-		"/api/admin/federation/deliveries/{deliveryID}/retry",
-		"/api/instance",
-	} {
-		versionedPath := "/api/v1" + strings.TrimPrefix(path, "/api")
-		pathItem, ok := doc.Paths[versionedPath]
-		require.True(t, ok, "missing OpenAPI path %s", versionedPath)
-		require.Equal(t, "#/paths/"+openAPIPathRef(path), pathItem["$ref"])
+	for path := range doc.Paths {
+		if strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/api/v1/") {
+			t.Fatalf("legacy unversioned REST path documented: %s", path)
+		}
 	}
 }
 
@@ -283,10 +238,6 @@ func schemaProperties(t *testing.T, doc openAPIDocument, name string) map[string
 	schemas := doc.Components["schemas"]
 	schema := requireMap(t, schemas[name])
 	return requireMap(t, schema["properties"])
-}
-
-func openAPIPathRef(path string) string {
-	return strings.ReplaceAll(path, "/", "~1")
 }
 
 func requireMap(t *testing.T, value any) map[string]any {
