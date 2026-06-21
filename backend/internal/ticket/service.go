@@ -99,8 +99,10 @@ const (
 	defaultTicketListLimit = 100
 	// maxTicketListLimit is the largest accepted ticket list size.
 	maxTicketListLimit = 500
-	// graphNodeLimit is the largest graph node set returned to the browser.
-	graphNodeLimit = 500
+	// defaultGraphNodeLimit is the fallback graph node set returned to the browser.
+	defaultGraphNodeLimit = 250
+	// maxGraphNodeLimit is the largest graph node set returned to the browser.
+	maxGraphNodeLimit = 500
 	// maxTicketTitleLength is the longest accepted ticket title.
 	maxTicketTitleLength = 120
 	// maxTicketDescriptionLength is the longest accepted ticket description.
@@ -224,8 +226,10 @@ func (s *Service) ListTicketsInProject(ctx context.Context, projectID, userID st
 		return nil, err
 	}
 
-	options.Limit = normalizeTicketListLimit(options.Limit)
-	options.Offset = normalizeTicketListOffset(options.Offset)
+	options, err = normalizeTicketListOptions(options)
+	if err != nil {
+		return nil, err
+	}
 	return s.repo.ListByProjectID(ctx, projectID, options)
 }
 
@@ -412,6 +416,37 @@ func normalizeOptionalTicketText(value, label string, maxLength int) (string, er
 	return trimmed, nil
 }
 
+// normalizeTicketListOptions validates filters and bounds pagination.
+func normalizeTicketListOptions(options TicketListOptions) (TicketListOptions, error) {
+	var err error
+	options, err = normalizeTicketFilters(options)
+	if err != nil {
+		return TicketListOptions{}, err
+	}
+	options.Limit = normalizeTicketListLimit(options.Limit)
+	options.Offset = normalizeTicketListOffset(options.Offset)
+	return options, nil
+}
+
+// normalizeTicketFilters validates optional ticket metadata filters.
+func normalizeTicketFilters(options TicketListOptions) (TicketListOptions, error) {
+	options.Status = strings.ToLower(strings.TrimSpace(options.Status))
+	if options.Status != "" && !ticketStatuses[options.Status] {
+		return TicketListOptions{}, invalidTicketInput("invalid ticket status")
+	}
+	options.Priority = strings.ToLower(strings.TrimSpace(options.Priority))
+	if options.Priority != "" && !ticketPriorities[options.Priority] {
+		return TicketListOptions{}, invalidTicketInput("invalid ticket priority")
+	}
+	options.Type = strings.ToLower(strings.TrimSpace(options.Type))
+	if options.Type != "" {
+		if _, ok := ticketRanks[options.Type]; !ok {
+			return TicketListOptions{}, invalidTicketInput("invalid ticket type")
+		}
+	}
+	return options, nil
+}
+
 // normalizeTicketListLimit bounds ticket list sizes.
 func normalizeTicketListLimit(limit int) int {
 	if limit <= 0 {
@@ -421,6 +456,23 @@ func normalizeTicketListLimit(limit int) int {
 		return maxTicketListLimit
 	}
 	return limit
+}
+
+// normalizeGraphOptions validates graph filters and bounds node fanout.
+func normalizeGraphOptions(options TicketListOptions) (TicketListOptions, error) {
+	var err error
+	options, err = normalizeTicketFilters(options)
+	if err != nil {
+		return TicketListOptions{}, err
+	}
+	options.Offset = 0
+	if options.Limit <= 0 {
+		options.Limit = defaultGraphNodeLimit
+	}
+	if options.Limit > maxGraphNodeLimit {
+		options.Limit = maxGraphNodeLimit
+	}
+	return options, nil
 }
 
 // normalizeTicketListOffset clamps negative ticket list offsets.
@@ -589,19 +641,25 @@ type GraphResponse struct {
 }
 
 // GetTicketGraph returns project tickets and links as graph data.
-func (s *Service) GetTicketGraph(ctx context.Context, projectID, userID string) (*GraphResponse, error) {
+func (s *Service) GetTicketGraph(ctx context.Context, projectID, userID string, options TicketListOptions) (*GraphResponse, error) {
 	_, err := s.projectService.GetProjectByID(ctx, projectID, userID)
 	if err != nil {
 		return nil, err
 	}
-
-	tickets, err := s.repo.ListByProjectID(ctx, projectID, TicketListOptions{Limit: graphNodeLimit + 1})
+	options, err = normalizeGraphOptions(options)
 	if err != nil {
 		return nil, err
 	}
-	truncated := len(tickets) > graphNodeLimit
+
+	queryOptions := options
+	queryOptions.Limit = options.Limit + 1
+	tickets, err := s.repo.ListByProjectID(ctx, projectID, queryOptions)
+	if err != nil {
+		return nil, err
+	}
+	truncated := len(tickets) > options.Limit
 	if truncated {
-		tickets = tickets[:graphNodeLimit]
+		tickets = tickets[:options.Limit]
 	}
 
 	links, err := s.repo.GetLinksByProjectID(ctx, projectID)
@@ -612,7 +670,7 @@ func (s *Service) GetTicketGraph(ctx context.Context, projectID, userID string) 
 	response := &GraphResponse{
 		Nodes:     make([]GraphNode, 0, len(tickets)),
 		Links:     make([]GraphLink, 0, len(links)+len(tickets)),
-		Limit:     graphNodeLimit,
+		Limit:     options.Limit,
 		Truncated: truncated,
 	}
 

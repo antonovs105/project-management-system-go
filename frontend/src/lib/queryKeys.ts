@@ -26,7 +26,8 @@ export const queryKeys = {
   ticketGitHubCommitsScope: ["ticketGitHubCommits"] as const,
   ticketGitHubCommits: (ticketId: ID) => ["ticketGitHubCommits", ticketId] as const,
   comments: (ticketId: ID) => ["comments", ticketId] as const,
-  graph: (projectId: ID) => ["graph", projectId] as const,
+  graphScope: (projectId: ID) => ["graph", projectId] as const,
+  graph: (projectId: ID, filtersKey = "default") => ["graph", projectId, filtersKey] as const,
   adminUsers: (role?: string, q?: string) => ["adminUsers", role || "all", q || ""] as const,
   adminAuditEvents: (action?: string, targetType?: string, actorUserId?: string) =>
     ["adminAuditEvents", action || "all", targetType || "all", actorUserId || ""] as const,

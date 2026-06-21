@@ -337,7 +337,12 @@ func (h *Handler) GetGraph(c echo.Context) error {
 	}
 	userID := c.Get("userID").(string)
 
-	graph, err := h.service.GetTicketGraph(c.Request().Context(), projectID, userID)
+	options, err := graphOptions(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	graph, err := h.service.GetTicketGraph(c.Request().Context(), projectID, userID, options)
 	if err != nil {
 		return writeTicketError(c, err)
 	}
@@ -356,6 +361,24 @@ func ticketListOptions(c echo.Context) (TicketListOptions, error) {
 		return TicketListOptions{}, ErrInvalidTicketInput
 	}
 	options := TicketListOptions{Limit: limit, Offset: offset}
+	return ticketFilterOptions(c, options)
+}
+
+// graphOptions parses bounded graph filters without pagination offsets.
+func graphOptions(c echo.Context) (TicketListOptions, error) {
+	limit, err := parseOptionalPositiveInt(c.QueryParam("limit"))
+	if err != nil {
+		return TicketListOptions{}, ErrInvalidTicketInput
+	}
+	options := TicketListOptions{Limit: limit}
+	return ticketFilterOptions(c, options)
+}
+
+// ticketFilterOptions parses optional ticket metadata and assignment filters.
+func ticketFilterOptions(c echo.Context, options TicketListOptions) (TicketListOptions, error) {
+	options.Status = strings.TrimSpace(c.QueryParam("status"))
+	options.Priority = strings.TrimSpace(c.QueryParam("priority"))
+	options.Type = strings.TrimSpace(c.QueryParam("type"))
 	assignee := strings.TrimSpace(c.QueryParam("assignee"))
 	assigneeID := strings.TrimSpace(c.QueryParam("assignee_id"))
 	switch {

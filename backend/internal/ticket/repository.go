@@ -121,6 +121,18 @@ func (r *PgRepository) ListByProjectID(ctx context.Context, projectID string, op
 	if options.Unassigned {
 		conditions = append(conditions, "ta.actor_id IS NULL")
 	}
+	if options.Status != "" {
+		args = append(args, options.Status)
+		conditions = append(conditions, fmt.Sprintf("t.status = $%d", len(args)))
+	}
+	if options.Priority != "" {
+		args = append(args, options.Priority)
+		conditions = append(conditions, fmt.Sprintf("t.priority = $%d", len(args)))
+	}
+	if options.Type != "" {
+		args = append(args, options.Type)
+		conditions = append(conditions, fmt.Sprintf("t.type = $%d", len(args)))
+	}
 	args = append(args, options.Limit, options.Offset)
 	limitPos := len(args) - 1
 	offsetPos := len(args)

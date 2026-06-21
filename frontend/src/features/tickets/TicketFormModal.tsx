@@ -53,7 +53,7 @@ export function TicketFormModal({
     }) => api.createTicket(projectId, payload),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.tickets(projectId) });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.graph(projectId) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.graphScope(projectId) });
       setTitle("");
       setDescription("");
       setType("task");

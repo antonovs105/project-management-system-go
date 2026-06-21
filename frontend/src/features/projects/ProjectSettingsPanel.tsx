@@ -724,7 +724,7 @@ function ProjectMemberActions({ project }: { project: Project }) {
       await Promise.all([
         refreshMembership(),
         queryClient.invalidateQueries({ queryKey: queryKeys.tickets(projectId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.graph(projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.graphScope(projectId) }),
       ]);
       toast.success("Member removed");
     },

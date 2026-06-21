@@ -166,6 +166,18 @@ export interface AddTicketLinkPayload {
   link_type: string;
 }
 
+export interface TicketFilters {
+  assignee?: "me" | "unassigned";
+  assignee_id?: ID;
+  status?: TicketStatus;
+  priority?: TicketPriority;
+  type?: TicketType;
+  limit?: number;
+  offset?: number;
+}
+
+export type GraphFilters = Omit<TicketFilters, "offset">;
+
 export interface AdminUsersFilters {
   role?: InstanceRole | "";
   q?: string;
@@ -499,7 +511,7 @@ export const api = {
     await http.delete(`${apiPrefix}/projects/${projectId}/roles/${roleId}`);
   },
 
-  async listTickets(projectId: ID, filters: { assignee?: "me" | "unassigned"; assignee_id?: ID } = {}): Promise<Ticket[]> {
+  async listTickets(projectId: ID, filters: TicketFilters = {}): Promise<Ticket[]> {
     const { data } = await http.get<Ticket[] | null>(`${apiPrefix}/projects/${projectId}/tickets`, {
       params: { limit: 500, offset: 0, ...filters },
     });
@@ -583,8 +595,10 @@ export const api = {
     await http.delete(`${apiPrefix}/comments/${commentId}`);
   },
 
-  async getProjectGraph(projectId: ID): Promise<GraphData> {
-    const { data } = await http.get<GraphData>(`${apiPrefix}/projects/${projectId}/graph`);
+  async getProjectGraph(projectId: ID, filters: GraphFilters = {}): Promise<GraphData> {
+    const { data } = await http.get<GraphData>(`${apiPrefix}/projects/${projectId}/graph`, {
+      params: filters,
+    });
     return data;
   },
 

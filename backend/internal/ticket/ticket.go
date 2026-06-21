@@ -38,6 +38,9 @@ type TicketLink struct {
 type TicketListOptions struct {
 	Limit      int
 	Offset     int
+	Status     string
+	Priority   string
+	Type       string
 	AssigneeID *string
 	Unassigned bool
 }

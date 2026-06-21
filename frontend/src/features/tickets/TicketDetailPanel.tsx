@@ -54,7 +54,7 @@ function TicketEditor({
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.ticket(ticket.id) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.tickets(projectId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.graph(projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.graphScope(projectId) }),
       ]);
       toast.success("Ticket updated");
     },
@@ -65,7 +65,7 @@ function TicketEditor({
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.tickets(projectId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.graph(projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.graphScope(projectId) }),
       ]);
       toast.success("Ticket deleted");
       onClose();
@@ -175,7 +175,7 @@ function TicketLinksPanel({ projectId, ticketId, tickets }: { projectId: ID; tic
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.ticket(ticketId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.tickets(projectId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.graph(projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.graphScope(projectId) }),
       ]);
       setTargetTicketId("");
       toast.success("Ticket link created");
@@ -185,7 +185,7 @@ function TicketLinksPanel({ projectId, ticketId, tickets }: { projectId: ID; tic
   const removeLink = useMutation({
     mutationFn: () => api.removeTicketLink(linkId.trim()),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.graph(projectId) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.graphScope(projectId) });
       setLinkId("");
       toast.success("Ticket link removed");
     },

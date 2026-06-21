@@ -342,6 +342,28 @@ paths:
           schema:
             type: integer
             minimum: 0
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/TicketStatus"
+        - name: priority
+          in: query
+          schema:
+            $ref: "#/components/schemas/TicketPriority"
+        - name: type
+          in: query
+          schema:
+            $ref: "#/components/schemas/TicketType"
+        - name: assignee
+          in: query
+          schema:
+            type: string
+            enum: [me, unassigned]
+        - name: assignee_id
+          in: query
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
           description: Normalized ActivityPub activities delivered to the authenticated user's inbox.
@@ -1059,6 +1081,35 @@ paths:
       operationId: getProjectTicketGraph
       security:
         - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/TicketStatus"
+        - name: priority
+          in: query
+          schema:
+            $ref: "#/components/schemas/TicketPriority"
+        - name: type
+          in: query
+          schema:
+            $ref: "#/components/schemas/TicketType"
+        - name: assignee
+          in: query
+          schema:
+            type: string
+            enum: [me, unassigned]
+        - name: assignee_id
+          in: query
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
           description: Graph projection for project tickets and links.

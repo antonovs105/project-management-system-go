@@ -10,8 +10,8 @@ import { projectMemberLabel } from "../features/tickets/MemberAssigneeSelect";
 import { TicketBoard } from "../features/tickets/TicketBoard";
 import { TicketDetailPanel } from "../features/tickets/TicketDetailPanel";
 import { TicketFormModal } from "../features/tickets/TicketFormModal";
-import { api, errorMessage, projectTicketEventsURL } from "../lib/api";
-import { ticketStatuses } from "../lib/constants";
+import { api, errorMessage, projectTicketEventsURL, type GraphFilters } from "../lib/api";
+import { ticketPriorities, ticketStatuses, ticketTypes } from "../lib/constants";
 import { relativeDate } from "../lib/format";
 import { fieldLimits } from "../lib/limits";
 import { queryKeys } from "../lib/queryKeys";
@@ -119,6 +119,11 @@ export function ProjectWorkspace() {
   const [projectName, setProjectName] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
   const [assigneeFilter, setAssigneeFilter] = useState("all");
+  const [graphLimit, setGraphLimit] = useState("250");
+  const [graphStatus, setGraphStatus] = useState("");
+  const [graphPriority, setGraphPriority] = useState("");
+  const [graphType, setGraphType] = useState("");
+  const [graphAssignee, setGraphAssignee] = useState("all");
   const activeProjectId = projectId || "";
 
   const view = viewFromPath(location.pathname);
@@ -165,9 +170,33 @@ export function ProjectWorkspace() {
     return currentTickets.filter((ticket) => ticket.assignee_id === assigneeFilter);
   }, [assigneeFilter, tickets.data, user?.userId]);
 
+  const graphFilters = useMemo<GraphFilters>(() => {
+    const filters: GraphFilters = {};
+    const limit = Number(graphLimit);
+    if (Number.isFinite(limit) && limit > 0) {
+      filters.limit = limit;
+    }
+    if (graphStatus) {
+      filters.status = graphStatus as GraphFilters["status"];
+    }
+    if (graphPriority) {
+      filters.priority = graphPriority as GraphFilters["priority"];
+    }
+    if (graphType) {
+      filters.type = graphType as GraphFilters["type"];
+    }
+    if (graphAssignee === "me" || graphAssignee === "unassigned") {
+      filters.assignee = graphAssignee;
+    } else if (graphAssignee !== "all") {
+      filters.assignee_id = graphAssignee;
+    }
+    return filters;
+  }, [graphAssignee, graphLimit, graphPriority, graphStatus, graphType]);
+  const graphFiltersKey = useMemo(() => JSON.stringify(graphFilters), [graphFilters]);
+
   const graph = useQuery({
-    queryKey: queryKeys.graph(activeProjectId),
-    queryFn: () => api.getProjectGraph(activeProjectId),
+    queryKey: queryKeys.graph(activeProjectId, graphFiltersKey),
+    queryFn: () => api.getProjectGraph(activeProjectId, graphFilters),
     enabled: Boolean(projectId) && view === "graph",
   });
 
@@ -185,7 +214,7 @@ export function ProjectWorkspace() {
         return;
       }
       void queryClient.invalidateQueries({ queryKey: queryKeys.tickets(activeProjectId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.graph(activeProjectId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.graphScope(activeProjectId) });
       if (event.ticket_id) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.ticket(event.ticket_id) });
       }
@@ -293,7 +322,7 @@ export function ProjectWorkspace() {
     onSettled: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.tickets(activeProjectId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.graph(activeProjectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.graphScope(activeProjectId) }),
       ]);
     },
   });
@@ -439,15 +468,70 @@ export function ProjectWorkspace() {
           ) : null}
 
           {view === "graph" ? (
-            graph.isLoading ? (
-              <LoadingState label="Loading graph" />
-            ) : graph.isError ? (
-              <ErrorState title="Could not load graph" body={errorMessage(graph.error, "Graph request failed.")} />
-            ) : graph.data ? (
-              <Suspense fallback={<LoadingState label="Loading graph view" />}>
-                <ProjectGraph data={graph.data} tickets={tickets.data || []} onOpenTicket={setSelectedTicketId} />
-              </Suspense>
-            ) : null
+            <div className="grid gap-3">
+              <Panel className="grid gap-3 p-3 lg:grid-cols-[repeat(5,minmax(0,1fr))_auto] lg:items-end">
+                <SelectField label="Limit" value={graphLimit} onChange={(event) => setGraphLimit(event.target.value)}>
+                  <option value="100">100 nodes</option>
+                  <option value="250">250 nodes</option>
+                  <option value="500">500 nodes</option>
+                </SelectField>
+                <SelectField label="Status" value={graphStatus} onChange={(event) => setGraphStatus(event.target.value)}>
+                  <option value="">Any status</option>
+                  {ticketStatuses.map((status) => (
+                    <option key={status.id} value={status.id}>
+                      {status.label}
+                    </option>
+                  ))}
+                </SelectField>
+                <SelectField label="Priority" value={graphPriority} onChange={(event) => setGraphPriority(event.target.value)}>
+                  <option value="">Any priority</option>
+                  {ticketPriorities.map((priority) => (
+                    <option key={priority.id} value={priority.id}>
+                      {priority.label}
+                    </option>
+                  ))}
+                </SelectField>
+                <SelectField label="Type" value={graphType} onChange={(event) => setGraphType(event.target.value)}>
+                  <option value="">Any type</option>
+                  {ticketTypes.map((type) => (
+                    <option key={type.id} value={type.id}>
+                      {type.label}
+                    </option>
+                  ))}
+                </SelectField>
+                <SelectField label="Assignee" value={graphAssignee} onChange={(event) => setGraphAssignee(event.target.value)}>
+                  <option value="all">Any assignee</option>
+                  <option value="me">My tickets</option>
+                  <option value="unassigned">Unassigned</option>
+                  {(members.data || []).map((member) => (
+                    <option key={member.user_id} value={member.user_id}>
+                      {projectMemberLabel(members.data || [], member.user_id)}
+                    </option>
+                  ))}
+                </SelectField>
+                <Button
+                  onClick={() => {
+                    setGraphLimit("250");
+                    setGraphStatus("");
+                    setGraphPriority("");
+                    setGraphType("");
+                    setGraphAssignee("all");
+                  }}
+                >
+                  <RefreshCw size={16} />
+                  Reset
+                </Button>
+              </Panel>
+              {graph.isLoading ? (
+                <LoadingState label="Loading graph" />
+              ) : graph.isError ? (
+                <ErrorState title="Could not load graph" body={errorMessage(graph.error, "Graph request failed.")} />
+              ) : graph.data ? (
+                <Suspense fallback={<LoadingState label="Loading graph view" />}>
+                  <ProjectGraph data={graph.data} tickets={tickets.data || []} onOpenTicket={setSelectedTicketId} />
+                </Suspense>
+              ) : null}
+            </div>
           ) : null}
 
           {view === "deliveries" ? <ProjectDeliveriesPanel projectId={activeProjectId} /> : null}
