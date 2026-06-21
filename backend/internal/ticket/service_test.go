@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
 	"github.com/antonovs105/project-management-system-go/internal/project"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -17,6 +18,15 @@ import (
 
 type testEventPublisher struct {
 	events []Event
+}
+
+type testDeliveryEnqueuer struct {
+	deliveries []apdelivery.QueueCandidate
+}
+
+func (d *testDeliveryEnqueuer) EnqueuePersisted(ctx context.Context, deliveries []apdelivery.QueueCandidate) error {
+	d.deliveries = append(d.deliveries, deliveries...)
+	return nil
 }
 
 func (p *testEventPublisher) PublishTicketEvent(event Event) {
@@ -52,8 +62,13 @@ func TestService_CreateTicket(t *testing.T) {
 	}
 
 	t.Run("Success", func(t *testing.T) {
+		delivery := &testDeliveryEnqueuer{}
+		service.SetDelivery(delivery)
 		mockProject.On("HasProjectPermission", ctx, projectID, reporterID, project.PermissionTicketsCreate).Return(true, nil).Once()
-		mockRepo.On("Create", ctx, mock.AnythingOfType("*ticket.Ticket")).Return([]string{"activity-1"}, nil).Run(func(args mock.Arguments) {
+		mockRepo.On("Create", ctx, mock.AnythingOfType("*ticket.Ticket")).Return(&ActivityResult{
+			ActivityIDs: []string{"activity-1"},
+			Deliveries:  []apdelivery.QueueCandidate{{ID: "delivery-1", MaxAttempts: 10}},
+		}, nil).Run(func(args mock.Arguments) {
 			ticket := args.Get(1).(*Ticket)
 			ticket.ID = "ticket-1"
 		}).Once()
@@ -63,6 +78,7 @@ func TestService_CreateTicket(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, ticket)
 		assert.Equal(t, "task", ticket.Type)
+		assert.Equal(t, []apdelivery.QueueCandidate{{ID: "delivery-1", MaxAttempts: 10}}, delivery.deliveries)
 		mockRepo.AssertExpectations(t)
 		mockProject.AssertExpectations(t)
 	})
@@ -290,7 +306,7 @@ func TestService_UpdateTicketUsesActingUser(t *testing.T) {
 	mockProject.On("HasProjectPermission", ctx, projectID, actorID, project.PermissionTicketsUpdate).Return(true, nil).Once()
 	mockRepo.On("Update", ctx, mock.MatchedBy(func(t *Ticket) bool {
 		return t.ID == ticketID && t.Status == status && t.ReporterID == reporterID
-	}), actorID).Return([]string{"activity-1"}, nil).Once()
+	}), actorID).Return(&ActivityResult{ActivityIDs: []string{"activity-1"}}, nil).Once()
 
 	err := service.UpdateTicket(ctx, UpdateTicketRequest{Status: &status}, ticketID, actorID)
 
@@ -333,7 +349,7 @@ func TestService_UpdateTicketNotifiesNewAssignee(t *testing.T) {
 	mockProject.On("HasProjectPermission", ctx, projectID, actorID, project.PermissionTicketsUpdate).Return(true, nil).Once()
 	mockRepo.On("Update", ctx, mock.MatchedBy(func(t *Ticket) bool {
 		return t.ID == ticketID && t.AssigneeID != nil && *t.AssigneeID == assigneeID
-	}), actorID).Return([]string{"activity-1"}, nil).Once()
+	}), actorID).Return(&ActivityResult{ActivityIDs: []string{"activity-1"}}, nil).Once()
 
 	err := service.UpdateTicket(ctx, UpdateTicketRequest{AssigneeID: &assigneePtr}, ticketID, actorID)
 
@@ -376,7 +392,7 @@ func TestService_MoveTicket(t *testing.T) {
 	mockRepo.On("GetByID", ctx, ticketID).Return(storedTicket, nil).Once()
 	mockProject.On("GetProjectByID", ctx, projectID, actorID).Return(&project.Project{ID: projectID}, nil).Once()
 	mockProject.On("HasProjectPermission", ctx, projectID, actorID, project.PermissionTicketsUpdate).Return(true, nil).Once()
-	mockRepo.On("Move", ctx, ticketID, actorID, status, &beforeID, (*string)(nil)).Return(&movedTicket, []string{"activity-1"}, nil).Once()
+	mockRepo.On("Move", ctx, ticketID, actorID, status, &beforeID, (*string)(nil)).Return(&movedTicket, &ActivityResult{ActivityIDs: []string{"activity-1"}}, nil).Once()
 
 	moved, err := service.MoveTicket(ctx, MoveTicketRequest{Status: status, BeforeTicketID: &beforeID}, ticketID, actorID)
 

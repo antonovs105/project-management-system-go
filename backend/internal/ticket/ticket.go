@@ -1,6 +1,10 @@
 package ticket
 
-import "time"
+import (
+	"time"
+
+	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
+)
 
 // Ticket is a ForgeFed-style issue object owned by a project.
 type Ticket struct {
@@ -38,8 +42,15 @@ type TicketListOptions struct {
 	Unassigned bool
 }
 
+// ActivityResult carries ActivityPub side effects produced by a ticket write.
+type ActivityResult struct {
+	ActivityIDs []string
+	Deliveries  []apdelivery.QueueCandidate
+}
+
 // DeleteResult carries the ActivityPub side effects produced by ticket deletion.
 type DeleteResult struct {
 	ActivityIDs      []string
 	RecipientInboxes []string
+	Deliveries       []apdelivery.QueueCandidate
 }

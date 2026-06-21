@@ -89,10 +89,27 @@ func (s *Service) RetryProjectDelivery(ctx context.Context, projectID string, us
 	if err != nil {
 		return nil, err
 	}
-	if err := s.queue.Enqueue(ctx, delivery.ID, delivery.MaxAttempts); err != nil {
+	if err := s.EnqueuePersisted(ctx, []QueueCandidate{{ID: delivery.ID, MaxAttempts: delivery.MaxAttempts}}); err != nil {
 		return nil, err
 	}
 	return delivery, nil
+}
+
+// EnqueuePersisted queues delivery rows that were already committed transactionally.
+func (s *Service) EnqueuePersisted(ctx context.Context, deliveries []QueueCandidate) error {
+	for _, delivery := range deliveries {
+		if delivery.ID == "" {
+			continue
+		}
+		maxAttempts := delivery.MaxAttempts
+		if maxAttempts <= 0 {
+			maxAttempts = DefaultMaxRetry
+		}
+		if err := s.queue.Enqueue(ctx, delivery.ID, maxAttempts); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RecoverDueDeliveries re-enqueues persisted delivery rows that have no guaranteed live task.
@@ -106,7 +123,7 @@ func (s *Service) RecoverDueDeliveries(ctx context.Context, limit int) (int, err
 	}
 	recovered := 0
 	for _, delivery := range deliveries {
-		if err := s.queue.Enqueue(ctx, delivery.ID, delivery.MaxAttempts); err != nil {
+		if err := s.EnqueuePersisted(ctx, []QueueCandidate{delivery}); err != nil {
 			return recovered, err
 		}
 		recovered++

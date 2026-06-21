@@ -10,17 +10,18 @@ import (
 	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
 	"github.com/antonovs105/project-management-system-go/internal/lexorank"
 	"github.com/jmoiron/sqlx"
 )
 
 // Repository defines persistence operations for tickets and ticket links.
 type Repository interface {
-	Create(ctx context.Context, ticket *Ticket) ([]string, error)
+	Create(ctx context.Context, ticket *Ticket) (*ActivityResult, error)
 	ListByProjectID(ctx context.Context, projectID string, options TicketListOptions) ([]Ticket, error)
 	GetByID(ctx context.Context, id string) (*Ticket, error)
-	Update(ctx context.Context, ticket *Ticket, actorID string) ([]string, error)
-	Move(ctx context.Context, ticketID, actorID, status string, beforeTicketID, afterTicketID *string) (*Ticket, []string, error)
+	Update(ctx context.Context, ticket *Ticket, actorID string) (*ActivityResult, error)
+	Move(ctx context.Context, ticketID, actorID, status string, beforeTicketID, afterTicketID *string) (*Ticket, *ActivityResult, error)
 	Delete(ctx context.Context, id string, actorID string) (*DeleteResult, error)
 	CreateLink(ctx context.Context, link *TicketLink) error
 	GetLinkByID(ctx context.Context, linkID string) (*TicketLink, error)
@@ -40,7 +41,7 @@ func NewRepository(db *sqlx.DB, cfg activitypub.Config) Repository {
 }
 
 // Create stores a ticket, its ForgeFed object, and a Create activity.
-func (r *PgRepository) Create(ctx context.Context, ticket *Ticket) ([]string, error) {
+func (r *PgRepository) Create(ctx context.Context, ticket *Ticket) (*ActivityResult, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -93,11 +94,19 @@ func (r *PgRepository) Create(ctx context.Context, ticket *Ticket) ([]string, er
 	if err != nil {
 		return nil, err
 	}
+	inboxes, err := r.remoteTicketRecipientInboxes(ctx, tx, ticket.ProjectID, ticket.ID)
+	if err != nil {
+		return nil, err
+	}
+	deliveries, err := apdelivery.CreateRowsForInboxes(ctx, tx, activityID, "", inboxes, apdelivery.DefaultMaxRetry)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return []string{activityID}, nil
+	return &ActivityResult{ActivityIDs: []string{activityID}, Deliveries: deliveries}, nil
 }
 
 // ListByProjectID returns tickets for a project.
@@ -146,7 +155,7 @@ func (r *PgRepository) GetByID(ctx context.Context, id string) (*Ticket, error) 
 }
 
 // Update changes a ticket and records ActivityPub activities for the change.
-func (r *PgRepository) Update(ctx context.Context, ticket *Ticket, actorID string) ([]string, error) {
+func (r *PgRepository) Update(ctx context.Context, ticket *Ticket, actorID string) (*ActivityResult, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -265,15 +274,27 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket, actorID strin
 		}
 		activityIDs = append(activityIDs, addActivityID)
 	}
+	inboxes, err := r.remoteTicketRecipientInboxes(ctx, tx, ticket.ProjectID, ticket.ID)
+	if err != nil {
+		return nil, err
+	}
+	deliveries := make([]apdelivery.QueueCandidate, 0, len(activityIDs)*len(inboxes))
+	for _, activityID := range activityIDs {
+		activityDeliveries, err := apdelivery.CreateRowsForInboxes(ctx, tx, activityID, "", inboxes, apdelivery.DefaultMaxRetry)
+		if err != nil {
+			return nil, err
+		}
+		deliveries = append(deliveries, activityDeliveries...)
+	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return activityIDs, nil
+	return &ActivityResult{ActivityIDs: activityIDs, Deliveries: deliveries}, nil
 }
 
 // Move changes a ticket status and rank using neighbor ticket boundaries.
-func (r *PgRepository) Move(ctx context.Context, ticketID, actorID, status string, beforeTicketID, afterTicketID *string) (*Ticket, []string, error) {
+func (r *PgRepository) Move(ctx context.Context, ticketID, actorID, status string, beforeTicketID, afterTicketID *string) (*Ticket, *ActivityResult, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, nil, err
@@ -342,10 +363,18 @@ func (r *PgRepository) Move(ctx context.Context, ticketID, actorID, status strin
 	if err != nil {
 		return nil, nil, err
 	}
+	inboxes, err := r.remoteTicketRecipientInboxes(ctx, tx, moved.ProjectID, moved.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	deliveries, err := apdelivery.CreateRowsForInboxes(ctx, tx, activityID, "", inboxes, apdelivery.DefaultMaxRetry)
+	if err != nil {
+		return nil, nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, nil, err
 	}
-	return moved, []string{activityID}, nil
+	return moved, &ActivityResult{ActivityIDs: []string{activityID}, Deliveries: deliveries}, nil
 }
 
 // Delete removes a ticket and tombstones its related ActivityPub objects.
@@ -374,6 +403,10 @@ func (r *PgRepository) Delete(ctx context.Context, id string, actorID string) (*
 	if err != nil {
 		return nil, err
 	}
+	deliveries, err := apdelivery.CreateRowsForInboxes(ctx, tx, activityID, "", recipientInboxes, apdelivery.DefaultMaxRetry)
+	if err != nil {
+		return nil, err
+	}
 
 	result, err := tx.ExecContext(ctx, `DELETE FROM tickets WHERE id = $1`, id)
 	if err != nil {
@@ -392,6 +425,7 @@ func (r *PgRepository) Delete(ctx context.Context, id string, actorID string) (*
 	return &DeleteResult{
 		ActivityIDs:      []string{activityID},
 		RecipientInboxes: recipientInboxes,
+		Deliveries:       deliveries,
 	}, nil
 }
 

@@ -44,9 +44,7 @@ func NewService(repo Repository, tickets TicketChecker, apConfig activitypub.Con
 
 // DeliveryEnqueuer queues federation deliveries created by comment actions.
 type DeliveryEnqueuer interface {
-	Enqueue(ctx context.Context, activityID string, targetInboxURL string) (*apdelivery.Delivery, error)
-	EnqueueProjectFollowers(ctx context.Context, projectID string, activityIDs ...string) error
-	EnqueueProjectTicketRecipients(ctx context.Context, projectID string, ticketID string, activityIDs ...string) error
+	EnqueuePersisted(ctx context.Context, deliveries []apdelivery.QueueCandidate) error
 }
 
 // SetDelivery attaches the delivery queue used for comment federation.
@@ -82,11 +80,11 @@ func (s *Service) CreateComment(ctx context.Context, ticketID, authorID, content
 		AuthorID: authorID,
 		Content:  content,
 	}
-	activityID, err := s.repo.Create(ctx, comment)
+	result, err := s.repo.Create(ctx, comment)
 	if err != nil {
 		return nil, err
 	}
-	s.enqueueProjectTicketRecipients(ctx, ticket.ProjectID, ticket.ID, activityID)
+	s.enqueueDeliveries(ctx, ticket.ProjectID, result.Deliveries)
 	return comment, nil
 }
 
@@ -150,41 +148,16 @@ func (s *Service) DeleteComment(ctx context.Context, commentID, userID string) e
 	if err != nil {
 		return err
 	}
-	s.enqueueRecipientInboxes(ctx, deleteResult)
+	s.enqueueDeliveries(ctx, deleteResult.ProjectID, deleteResult.Deliveries)
 	return nil
 }
 
-// enqueueProjectFollowers queues comment activities to all remote project followers.
-func (s *Service) enqueueProjectFollowers(ctx context.Context, projectID string, activityIDs ...string) {
-	if s.delivery == nil || len(activityIDs) == 0 {
+// enqueueDeliveries queues delivery rows created in the comment transaction.
+func (s *Service) enqueueDeliveries(ctx context.Context, projectID string, deliveries []apdelivery.QueueCandidate) {
+	if s.delivery == nil || len(deliveries) == 0 {
 		return
 	}
-	if err := s.delivery.EnqueueProjectFollowers(ctx, projectID, activityIDs...); err != nil {
+	if err := s.delivery.EnqueuePersisted(ctx, deliveries); err != nil {
 		log.Printf("failed to enqueue ActivityPub deliveries for project %s: %v", projectID, err)
-	}
-}
-
-// enqueueProjectTicketRecipients queues comment activities to ticket-related recipients.
-func (s *Service) enqueueProjectTicketRecipients(ctx context.Context, projectID, ticketID string, activityIDs ...string) {
-	if s.delivery == nil || len(activityIDs) == 0 {
-		return
-	}
-	if err := s.delivery.EnqueueProjectTicketRecipients(ctx, projectID, ticketID, activityIDs...); err != nil {
-		log.Printf("failed to enqueue ActivityPub deliveries for project %s ticket %s: %v", projectID, ticketID, err)
-	}
-}
-
-// enqueueRecipientInboxes queues delete activities to precomputed remote inboxes.
-func (s *Service) enqueueRecipientInboxes(ctx context.Context, result *DeleteResult) {
-	if s.delivery == nil || result == nil || result.ActivityID == "" {
-		return
-	}
-	for _, inbox := range result.RecipientInboxes {
-		if inbox == "" {
-			continue
-		}
-		if _, err := s.delivery.Enqueue(ctx, result.ActivityID, inbox); err != nil {
-			log.Printf("failed to enqueue ActivityPub delivery for project %s inbox %s: %v", result.ProjectID, inbox, err)
-		}
 	}
 }

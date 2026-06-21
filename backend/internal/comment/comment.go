@@ -1,6 +1,10 @@
 package comment
 
-import "time"
+import (
+	"time"
+
+	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
+)
 
 // Comment is a local Note object attached to a ticket.
 type Comment struct {
@@ -19,9 +23,18 @@ type CommentListOptions struct {
 	Offset int
 }
 
+// CreateResult carries the ActivityPub side effects produced by comment creation.
+type CreateResult struct {
+	ActivityID string
+	ProjectID  string
+	TicketID   string
+	Deliveries []apdelivery.QueueCandidate
+}
+
 // DeleteResult carries the ActivityPub side effects produced by comment deletion.
 type DeleteResult struct {
 	ActivityID       string
 	ProjectID        string
 	RecipientInboxes []string
+	Deliveries       []apdelivery.QueueCandidate
 }

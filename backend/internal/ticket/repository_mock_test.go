@@ -12,12 +12,12 @@ type MockRepository struct {
 	mock.Mock
 }
 
-func (m *MockRepository) Create(ctx context.Context, ticket *Ticket) ([]string, error) {
+func (m *MockRepository) Create(ctx context.Context, ticket *Ticket) (*ActivityResult, error) {
 	args := m.Called(ctx, ticket)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).([]string), args.Error(1)
+	return args.Get(0).(*ActivityResult), args.Error(1)
 }
 
 func (m *MockRepository) ListByProjectID(ctx context.Context, projectID string, options TicketListOptions) ([]Ticket, error) {
@@ -36,25 +36,25 @@ func (m *MockRepository) GetByID(ctx context.Context, id string) (*Ticket, error
 	return args.Get(0).(*Ticket), args.Error(1)
 }
 
-func (m *MockRepository) Update(ctx context.Context, ticket *Ticket, actorID string) ([]string, error) {
+func (m *MockRepository) Update(ctx context.Context, ticket *Ticket, actorID string) (*ActivityResult, error) {
 	args := m.Called(ctx, ticket, actorID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).([]string), args.Error(1)
+	return args.Get(0).(*ActivityResult), args.Error(1)
 }
 
-func (m *MockRepository) Move(ctx context.Context, ticketID, actorID, status string, beforeTicketID, afterTicketID *string) (*Ticket, []string, error) {
+func (m *MockRepository) Move(ctx context.Context, ticketID, actorID, status string, beforeTicketID, afterTicketID *string) (*Ticket, *ActivityResult, error) {
 	args := m.Called(ctx, ticketID, actorID, status, beforeTicketID, afterTicketID)
 	var moved *Ticket
 	if args.Get(0) != nil {
 		moved = args.Get(0).(*Ticket)
 	}
-	var activityIDs []string
+	var result *ActivityResult
 	if args.Get(1) != nil {
-		activityIDs = args.Get(1).([]string)
+		result = args.Get(1).(*ActivityResult)
 	}
-	return moved, activityIDs, args.Error(2)
+	return moved, result, args.Error(2)
 }
 
 func (m *MockRepository) Delete(ctx context.Context, id string, actorID string) (*DeleteResult, error) {

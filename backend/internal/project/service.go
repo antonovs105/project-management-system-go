@@ -41,7 +41,7 @@ type Service struct {
 
 // DeliveryEnqueuer queues ActivityPub deliveries created by project actions.
 type DeliveryEnqueuer interface {
-	Enqueue(ctx context.Context, activityID string, targetInboxURL string) (*apdelivery.Delivery, error)
+	EnqueuePersisted(ctx context.Context, deliveries []apdelivery.QueueCandidate) error
 }
 
 // NewService creates a project service.
@@ -230,7 +230,7 @@ func (s *Service) UpdateProject(ctx context.Context, projectID, userID string, r
 	if err != nil {
 		return err
 	}
-	s.enqueueActivityRecipientInboxes(ctx, updateResult.ProjectID, updateResult.ActivityID, updateResult.RecipientInboxes)
+	s.enqueueDeliveries(ctx, updateResult.ProjectID, updateResult.Deliveries)
 	return nil
 }
 
@@ -246,22 +246,17 @@ func (s *Service) DeleteProject(ctx context.Context, projectID, userID string) e
 	if err != nil {
 		return err
 	}
-	s.enqueueActivityRecipientInboxes(ctx, deleteResult.ProjectID, deleteResult.ActivityID, deleteResult.RecipientInboxes)
+	s.enqueueDeliveries(ctx, deleteResult.ProjectID, deleteResult.Deliveries)
 	return nil
 }
 
-// enqueueActivityRecipientInboxes queues a project activity to explicit inbox URLs.
-func (s *Service) enqueueActivityRecipientInboxes(ctx context.Context, projectID string, activityID string, inboxes []string) {
-	if s.delivery == nil || activityID == "" {
+// enqueueDeliveries queues delivery rows created in the project transaction.
+func (s *Service) enqueueDeliveries(ctx context.Context, projectID string, deliveries []apdelivery.QueueCandidate) {
+	if s.delivery == nil || len(deliveries) == 0 {
 		return
 	}
-	for _, inbox := range inboxes {
-		if inbox == "" {
-			continue
-		}
-		if _, err := s.delivery.Enqueue(ctx, activityID, inbox); err != nil {
-			log.Printf("failed to enqueue ActivityPub delivery for project %s inbox %s: %v", projectID, inbox, err)
-		}
+	if err := s.delivery.EnqueuePersisted(ctx, deliveries); err != nil {
+		log.Printf("failed to enqueue ActivityPub deliveries for project %s: %v", projectID, err)
 	}
 }
 
@@ -272,7 +267,7 @@ func (s *Service) removeMember(ctx context.Context, projectID, actorID, targetUs
 		return err
 	}
 	if result != nil {
-		s.enqueueActivityRecipientInboxes(ctx, result.ProjectID, result.ActivityID, result.RecipientInboxes)
+		s.enqueueDeliveries(ctx, result.ProjectID, result.Deliveries)
 	}
 	return nil
 }
@@ -399,7 +394,7 @@ func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUser
 		return nil, err
 	}
 	if result != nil {
-		s.enqueueActivityRecipientInboxes(ctx, result.ProjectID, result.ActivityID, result.RecipientInboxes)
+		s.enqueueDeliveries(ctx, result.ProjectID, result.Deliveries)
 	}
 	return invite, nil
 }
@@ -653,7 +648,7 @@ func (s *Service) AcceptInvite(ctx context.Context, inviteID, userID string) err
 		return err
 	}
 	if result != nil {
-		s.enqueueActivityRecipientInboxes(ctx, result.ProjectID, result.ActivityID, result.RecipientInboxes)
+		s.enqueueDeliveries(ctx, result.ProjectID, result.Deliveries)
 	}
 	return nil
 }
@@ -665,7 +660,7 @@ func (s *Service) RejectInvite(ctx context.Context, inviteID, userID string) err
 		return err
 	}
 	if result != nil {
-		s.enqueueActivityRecipientInboxes(ctx, result.ProjectID, result.ActivityID, result.RecipientInboxes)
+		s.enqueueDeliveries(ctx, result.ProjectID, result.Deliveries)
 	}
 	return nil
 }
@@ -693,7 +688,7 @@ func (s *Service) RevokeInvite(ctx context.Context, inviteID, userID string) err
 		return err
 	}
 	if result != nil {
-		s.enqueueActivityRecipientInboxes(ctx, result.ProjectID, result.ActivityID, result.RecipientInboxes)
+		s.enqueueDeliveries(ctx, result.ProjectID, result.Deliveries)
 	}
 	return nil
 }

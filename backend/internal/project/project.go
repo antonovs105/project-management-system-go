@@ -1,6 +1,10 @@
 package project
 
-import "time"
+import (
+	"time"
+
+	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
+)
 
 const (
 	// RoleOwner is the default full-control project role key.
@@ -219,6 +223,7 @@ type UpdateResult struct {
 	ActivityID       string
 	ProjectID        string
 	RecipientInboxes []string
+	Deliveries       []apdelivery.QueueCandidate
 }
 
 // DeleteResult carries the ActivityPub side effects produced by project deletion.
@@ -226,6 +231,7 @@ type DeleteResult struct {
 	ActivityID       string
 	ProjectID        string
 	RecipientInboxes []string
+	Deliveries       []apdelivery.QueueCandidate
 }
 
 // MembershipResult carries the ActivityPub side effects produced by membership changes.
@@ -233,6 +239,7 @@ type MembershipResult struct {
 	ActivityID       string
 	ProjectID        string
 	RecipientInboxes []string
+	Deliveries       []apdelivery.QueueCandidate
 }
 
 // IsSupportedPermission reports whether permission can be assigned to a project role.

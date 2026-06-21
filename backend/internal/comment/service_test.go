@@ -15,7 +15,14 @@ import (
 func TestServiceCreateCommentWritesNoteAndQueuesRecipients(t *testing.T) {
 	ctx := context.Background()
 	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
-	repo := &fakeCommentRepository{createActivityID: "activity-create"}
+	repo := &fakeCommentRepository{
+		createResult: &CreateResult{
+			ActivityID: "activity-create",
+			ProjectID:  "project-1",
+			TicketID:   "ticket-1",
+			Deliveries: []apdelivery.QueueCandidate{{ID: "delivery-create", MaxAttempts: 10}},
+		},
+	}
 	tickets := &fakeTicketChecker{
 		ticket:      &ticket.Ticket{ID: "ticket-1", ProjectID: "project-1"},
 		permissions: map[string]bool{"project-1:user-1:" + project.PermissionCommentsCreate: true},
@@ -34,16 +41,12 @@ func TestServiceCreateCommentWritesNoteAndQueuesRecipients(t *testing.T) {
 	require.Equal(t, activitypub.CommentAPID(cfg, created.ID), created.APID)
 	require.Equal(t, "ticket-1", repo.created[0].TicketID)
 	require.Equal(t, "user-1", repo.created[0].AuthorID)
-	require.Equal(t, []projectTicketDelivery{{
-		projectID:   "project-1",
-		ticketID:    "ticket-1",
-		activityIDs: []string{"activity-create"},
-	}}, delivery.projectTicketDeliveries)
+	require.Equal(t, []apdelivery.QueueCandidate{{ID: "delivery-create", MaxAttempts: 10}}, delivery.deliveries)
 }
 
 func TestServiceCreateCommentRejectsViewer(t *testing.T) {
 	ctx := context.Background()
-	repo := &fakeCommentRepository{createActivityID: "activity-create"}
+	repo := &fakeCommentRepository{createResult: &CreateResult{ActivityID: "activity-create"}}
 	tickets := &fakeTicketChecker{
 		ticket:      &ticket.Ticket{ID: "ticket-1", ProjectID: "project-1"},
 		permissions: map[string]bool{},
@@ -81,6 +84,7 @@ func TestServiceDeleteCommentAllowsManagerToModerateAndQueuesInboxes(t *testing.
 			ActivityID:       "activity-delete",
 			ProjectID:        "project-1",
 			RecipientInboxes: []string{"https://remote.example/users/alice/inbox", ""},
+			Deliveries:       []apdelivery.QueueCandidate{{ID: "delivery-delete", MaxAttempts: 10}},
 		},
 	}
 	tickets := &fakeTicketChecker{
@@ -96,10 +100,7 @@ func TestServiceDeleteCommentAllowsManagerToModerateAndQueuesInboxes(t *testing.
 	require.NoError(t, err)
 	require.Equal(t, "comment-1", repo.deletedCommentID)
 	require.Equal(t, "manager-1", repo.deletedActorID)
-	require.Equal(t, []inboxDelivery{{
-		activityID: "activity-delete",
-		inboxURL:   "https://remote.example/users/alice/inbox",
-	}}, delivery.inboxDeliveries)
+	require.Equal(t, []apdelivery.QueueCandidate{{ID: "delivery-delete", MaxAttempts: 10}}, delivery.deliveries)
 }
 
 func TestServiceDeleteCommentRejectsOtherDeveloper(t *testing.T) {
@@ -123,13 +124,13 @@ func TestServiceDeleteCommentRejectsOtherDeveloper(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "comments.moderate")
 	require.Empty(t, repo.deletedCommentID)
-	require.Empty(t, delivery.inboxDeliveries)
+	require.Empty(t, delivery.deliveries)
 }
 
 type fakeCommentRepository struct {
-	createActivityID string
-	createErr        error
-	created          []Comment
+	createResult *CreateResult
+	createErr    error
+	created      []Comment
 
 	commentsByID map[string]*Comment
 	getErr       error
@@ -144,12 +145,12 @@ type fakeCommentRepository struct {
 	deletedActorID   string
 }
 
-func (f *fakeCommentRepository) Create(ctx context.Context, comment *Comment) (string, error) {
+func (f *fakeCommentRepository) Create(ctx context.Context, comment *Comment) (*CreateResult, error) {
 	if f.createErr != nil {
-		return "", f.createErr
+		return nil, f.createErr
 	}
 	f.created = append(f.created, *comment)
-	return f.createActivityID, nil
+	return f.createResult, nil
 }
 
 func (f *fakeCommentRepository) GetByID(ctx context.Context, commentID string) (*Comment, error) {
@@ -204,48 +205,10 @@ func (f *fakeTicketChecker) HasProjectPermission(ctx context.Context, projectID,
 }
 
 type fakeCommentDelivery struct {
-	inboxDeliveries         []inboxDelivery
-	projectDeliveries       []projectDelivery
-	projectTicketDeliveries []projectTicketDelivery
+	deliveries []apdelivery.QueueCandidate
 }
 
-func (f *fakeCommentDelivery) Enqueue(ctx context.Context, activityID string, targetInboxURL string) (*apdelivery.Delivery, error) {
-	f.inboxDeliveries = append(f.inboxDeliveries, inboxDelivery{
-		activityID: activityID,
-		inboxURL:   targetInboxURL,
-	})
-	return &apdelivery.Delivery{ActivityID: activityID, TargetInboxURL: targetInboxURL}, nil
-}
-
-func (f *fakeCommentDelivery) EnqueueProjectFollowers(ctx context.Context, projectID string, activityIDs ...string) error {
-	f.projectDeliveries = append(f.projectDeliveries, projectDelivery{
-		projectID:   projectID,
-		activityIDs: append([]string(nil), activityIDs...),
-	})
+func (f *fakeCommentDelivery) EnqueuePersisted(ctx context.Context, deliveries []apdelivery.QueueCandidate) error {
+	f.deliveries = append(f.deliveries, deliveries...)
 	return nil
-}
-
-func (f *fakeCommentDelivery) EnqueueProjectTicketRecipients(ctx context.Context, projectID string, ticketID string, activityIDs ...string) error {
-	f.projectTicketDeliveries = append(f.projectTicketDeliveries, projectTicketDelivery{
-		projectID:   projectID,
-		ticketID:    ticketID,
-		activityIDs: append([]string(nil), activityIDs...),
-	})
-	return nil
-}
-
-type inboxDelivery struct {
-	activityID string
-	inboxURL   string
-}
-
-type projectDelivery struct {
-	projectID   string
-	activityIDs []string
-}
-
-type projectTicketDelivery struct {
-	projectID   string
-	ticketID    string
-	activityIDs []string
 }

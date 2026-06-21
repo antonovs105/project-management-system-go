@@ -8,9 +8,19 @@ import (
 	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
+
+type testDeliveryEnqueuer struct {
+	deliveries []apdelivery.QueueCandidate
+}
+
+func (d *testDeliveryEnqueuer) EnqueuePersisted(ctx context.Context, deliveries []apdelivery.QueueCandidate) error {
+	d.deliveries = append(d.deliveries, deliveries...)
+	return nil
+}
 
 func TestService_CreateProject(t *testing.T) {
 	mockRepo := new(MockRepository)
@@ -289,6 +299,8 @@ func TestService_UpdateProjectMemberRoleRejectsBlankRole(t *testing.T) {
 func TestService_AddMemberToProjectResolvesHumanInviteeReference(t *testing.T) {
 	mockRepo := new(MockRepository)
 	service := NewService(mockRepo, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+	delivery := &testDeliveryEnqueuer{}
+	service.SetDelivery(delivery)
 	ctx := context.Background()
 	projectID := "project-1"
 	actorID := "owner-1"
@@ -307,13 +319,17 @@ func TestService_AddMemberToProjectResolvesHumanInviteeReference(t *testing.T) {
 			invite.RoleID == role.ID &&
 			invite.Role == role.Key &&
 			invite.Status == "pending"
-	})).Return(&MembershipResult{ProjectID: projectID}, nil).Once()
+	})).Return(&MembershipResult{
+		ProjectID:  projectID,
+		Deliveries: []apdelivery.QueueCandidate{{ID: "delivery-1", MaxAttempts: 10}},
+	}, nil).Once()
 
 	invite, err := service.AddMemberToProject(ctx, projectID, actorID, " alice@example.test ", "")
 
 	assert.NoError(t, err)
 	assert.NotNil(t, invite)
 	assert.Equal(t, inviteeID, invite.InviteeActorID)
+	assert.Equal(t, []apdelivery.QueueCandidate{{ID: "delivery-1", MaxAttempts: 10}}, delivery.deliveries)
 	mockRepo.AssertExpectations(t)
 }
 

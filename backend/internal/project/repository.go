@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
 	"github.com/antonovs105/project-management-system-go/internal/secrets"
 	"github.com/jmoiron/sqlx"
 )
@@ -767,6 +768,10 @@ func (r *PgRepository) Update(ctx context.Context, project *Project, actorID str
 	if err != nil {
 		return nil, err
 	}
+	deliveries, err := apdelivery.CreateRowsForInboxes(ctx, tx, activityID, "", recipientInboxes, apdelivery.DefaultMaxRetry)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -775,6 +780,7 @@ func (r *PgRepository) Update(ctx context.Context, project *Project, actorID str
 		ActivityID:       activityID,
 		ProjectID:        project.ID,
 		RecipientInboxes: recipientInboxes,
+		Deliveries:       deliveries,
 	}, nil
 }
 
@@ -811,6 +817,10 @@ func (r *PgRepository) Delete(ctx context.Context, id string, actorID string) (*
 	if err != nil {
 		return nil, err
 	}
+	deliveries, err := apdelivery.CreateRowsForInboxes(ctx, tx, activityID, "", recipientInboxes, apdelivery.DefaultMaxRetry)
+	if err != nil {
+		return nil, err
+	}
 
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM actor_follows
@@ -837,6 +847,7 @@ func (r *PgRepository) Delete(ctx context.Context, id string, actorID string) (*
 		ActivityID:       activityID,
 		ProjectID:        stored.ID,
 		RecipientInboxes: recipientInboxes,
+		Deliveries:       deliveries,
 	}, nil
 }
 
@@ -1220,6 +1231,10 @@ func (r *PgRepository) RemoveMember(ctx context.Context, projectID, actorID, tar
 	if err != nil {
 		return nil, err
 	}
+	deliveries, err := apdelivery.CreateRowsForInboxes(ctx, tx, activityID, "", recipientInboxes, apdelivery.DefaultMaxRetry)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -1228,6 +1243,7 @@ func (r *PgRepository) RemoveMember(ctx context.Context, projectID, actorID, tar
 		ActivityID:       activityID,
 		ProjectID:        projectID,
 		RecipientInboxes: recipientInboxes,
+		Deliveries:       deliveries,
 	}, nil
 }
 
@@ -1351,6 +1367,10 @@ func (r *PgRepository) CreateInvite(ctx context.Context, invite *ProjectInvite) 
 	}); err != nil {
 		return nil, err
 	}
+	deliveries, err := apdelivery.CreateRowsForInboxes(ctx, tx, activityID, "", recipientInboxes, apdelivery.DefaultMaxRetry)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -1359,6 +1379,7 @@ func (r *PgRepository) CreateInvite(ctx context.Context, invite *ProjectInvite) 
 		ActivityID:       activityID,
 		ProjectID:        invite.ProjectID,
 		RecipientInboxes: recipientInboxes,
+		Deliveries:       deliveries,
 	}, nil
 }
 
@@ -1472,6 +1493,10 @@ func (r *PgRepository) AcceptInvite(ctx context.Context, inviteID, userID string
 	`, activityID, invite.ID); err != nil {
 		return nil, err
 	}
+	deliveries, err := apdelivery.CreateRowsForInboxes(ctx, tx, activityID, "", recipientInboxes, apdelivery.DefaultMaxRetry)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -1480,6 +1505,7 @@ func (r *PgRepository) AcceptInvite(ctx context.Context, inviteID, userID string
 		ActivityID:       activityID,
 		ProjectID:        invite.ProjectID,
 		RecipientInboxes: recipientInboxes,
+		Deliveries:       deliveries,
 	}, nil
 }
 
@@ -1551,6 +1577,10 @@ func (r *PgRepository) RejectInvite(ctx context.Context, inviteID, userID string
 	`, activityID, invite.ID); err != nil {
 		return nil, err
 	}
+	deliveries, err := apdelivery.CreateRowsForInboxes(ctx, tx, activityID, "", recipientInboxes, apdelivery.DefaultMaxRetry)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -1559,6 +1589,7 @@ func (r *PgRepository) RejectInvite(ctx context.Context, inviteID, userID string
 		ActivityID:       activityID,
 		ProjectID:        invite.ProjectID,
 		RecipientInboxes: recipientInboxes,
+		Deliveries:       deliveries,
 	}, nil
 }
 
@@ -1627,6 +1658,10 @@ func (r *PgRepository) RevokeInvite(ctx context.Context, inviteID, actorID strin
 	`, activityID, invite.ID); err != nil {
 		return nil, err
 	}
+	deliveries, err := apdelivery.CreateRowsForInboxes(ctx, tx, activityID, "", recipientInboxes, apdelivery.DefaultMaxRetry)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -1635,6 +1670,7 @@ func (r *PgRepository) RevokeInvite(ctx context.Context, inviteID, actorID strin
 		ActivityID:       activityID,
 		ProjectID:        invite.ProjectID,
 		RecipientInboxes: recipientInboxes,
+		Deliveries:       deliveries,
 	}, nil
 }
 

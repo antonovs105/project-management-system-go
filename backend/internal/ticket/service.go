@@ -32,9 +32,7 @@ type Service struct {
 
 // DeliveryEnqueuer queues federation deliveries created by ticket actions.
 type DeliveryEnqueuer interface {
-	Enqueue(ctx context.Context, activityID string, targetInboxURL string) (*apdelivery.Delivery, error)
-	EnqueueProjectFollowers(ctx context.Context, projectID string, activityIDs ...string) error
-	EnqueueProjectTicketRecipients(ctx context.Context, projectID string, ticketID string, activityIDs ...string) error
+	EnqueuePersisted(ctx context.Context, deliveries []apdelivery.QueueCandidate) error
 }
 
 // NotificationSink receives local user notifications caused by ticket workflows.
@@ -208,11 +206,11 @@ func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, pro
 		AssigneeID:  req.AssigneeID,
 	}
 
-	activityIDs, err := s.repo.Create(ctx, t)
+	result, err := s.repo.Create(ctx, t)
 	if err != nil {
 		return nil, err
 	}
-	s.enqueueProjectTicketRecipients(ctx, projectID, t.ID, activityIDs...)
+	s.enqueueDeliveries(ctx, projectID, result.Deliveries)
 	s.publishTicketEvent(Event{Type: EventTicketCreated, ProjectID: projectID, TicketID: t.ID})
 	s.notifyTicketAssigned(ctx, reporterID, t)
 
@@ -355,11 +353,11 @@ func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, tic
 		ticketToUpdate.AssigneeID = *req.AssigneeID
 	}
 
-	activityIDs, err := s.repo.Update(ctx, ticketToUpdate, userID)
+	result, err := s.repo.Update(ctx, ticketToUpdate, userID)
 	if err != nil {
 		return err
 	}
-	s.enqueueProjectTicketRecipients(ctx, ticketToUpdate.ProjectID, ticketToUpdate.ID, activityIDs...)
+	s.enqueueDeliveries(ctx, ticketToUpdate.ProjectID, result.Deliveries)
 	s.publishTicketEvent(Event{Type: EventTicketUpdated, ProjectID: ticketToUpdate.ProjectID, TicketID: ticketToUpdate.ID})
 	if assigneeChanged(previousAssigneeID, ticketToUpdate.AssigneeID) {
 		s.notifyTicketAssigned(ctx, userID, ticketToUpdate)
@@ -382,11 +380,11 @@ func (s *Service) MoveTicket(ctx context.Context, req MoveTicketRequest, ticketI
 	if !ticketStatuses[req.Status] {
 		return nil, invalidTicketInput("invalid ticket status")
 	}
-	moved, activityIDs, err := s.repo.Move(ctx, ticketID, userID, req.Status, req.BeforeTicketID, req.AfterTicketID)
+	moved, result, err := s.repo.Move(ctx, ticketID, userID, req.Status, req.BeforeTicketID, req.AfterTicketID)
 	if err != nil {
 		return nil, err
 	}
-	s.enqueueProjectTicketRecipients(ctx, moved.ProjectID, moved.ID, activityIDs...)
+	s.enqueueDeliveries(ctx, moved.ProjectID, result.Deliveries)
 	s.publishTicketEvent(Event{Type: EventTicketUpdated, ProjectID: moved.ProjectID, TicketID: moved.ID})
 	return moved, nil
 }
@@ -447,7 +445,7 @@ func (s *Service) DeleteTicket(ctx context.Context, ticketID, userID string) err
 	if err != nil {
 		return err
 	}
-	s.enqueueRecipientInboxes(ctx, ticket.ProjectID, deleteResult)
+	s.enqueueDeliveries(ctx, ticket.ProjectID, deleteResult.Deliveries)
 	s.publishTicketEvent(Event{Type: EventTicketDeleted, ProjectID: ticket.ProjectID, TicketID: ticket.ID})
 	return nil
 }
@@ -535,43 +533,13 @@ func hasPath(adj map[string][]string, start, end string) bool {
 	return false
 }
 
-// enqueueProjectFollowers queues ticket activities to all remote project followers.
-func (s *Service) enqueueProjectFollowers(ctx context.Context, projectID string, activityIDs ...string) {
-	if s.delivery == nil || len(activityIDs) == 0 {
+// enqueueDeliveries queues delivery rows created in the ticket transaction.
+func (s *Service) enqueueDeliveries(ctx context.Context, projectID string, deliveries []apdelivery.QueueCandidate) {
+	if s.delivery == nil || len(deliveries) == 0 {
 		return
 	}
-	if err := s.delivery.EnqueueProjectFollowers(ctx, projectID, activityIDs...); err != nil {
+	if err := s.delivery.EnqueuePersisted(ctx, deliveries); err != nil {
 		log.Printf("failed to enqueue ActivityPub deliveries for project %s: %v", projectID, err)
-	}
-}
-
-// enqueueProjectTicketRecipients queues ticket activities to ticket-related recipients.
-func (s *Service) enqueueProjectTicketRecipients(ctx context.Context, projectID, ticketID string, activityIDs ...string) {
-	if s.delivery == nil || len(activityIDs) == 0 {
-		return
-	}
-	if err := s.delivery.EnqueueProjectTicketRecipients(ctx, projectID, ticketID, activityIDs...); err != nil {
-		log.Printf("failed to enqueue ActivityPub deliveries for project %s ticket %s: %v", projectID, ticketID, err)
-	}
-}
-
-// enqueueRecipientInboxes queues delete activities to precomputed remote inboxes.
-func (s *Service) enqueueRecipientInboxes(ctx context.Context, projectID string, result *DeleteResult) {
-	if s.delivery == nil || result == nil || len(result.ActivityIDs) == 0 {
-		return
-	}
-	for _, activityID := range result.ActivityIDs {
-		if activityID == "" {
-			continue
-		}
-		for _, inbox := range result.RecipientInboxes {
-			if inbox == "" {
-				continue
-			}
-			if _, err := s.delivery.Enqueue(ctx, activityID, inbox); err != nil {
-				log.Printf("failed to enqueue ActivityPub delivery for project %s inbox %s: %v", projectID, inbox, err)
-			}
-		}
 	}
 }
 
