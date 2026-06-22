@@ -1,6 +1,8 @@
+# Progo
+
 ## Overview
 
-This repository contains an full-stack project management application with federation support. The current system combines a Go backend, a React frontend, PostgreSQL persistence, Redis-backed background delivery, and Prometheus monitoring.
+Progo is a full-stack project management application with federation support. The current system combines a Go backend, a React frontend, PostgreSQL persistence, Redis-backed realtime/federation infrastructure, and Prometheus monitoring.
 
 ## Current State
 
@@ -9,11 +11,11 @@ This repository contains an full-stack project management application with feder
 - Instance roles: `owner`, `admin`, and `user`.
 - Project CRUD with project-local members, invitations, custom roles, and permission sets.
 - Ticket workflow with kanban-style status columns, drag-and-drop status updates, priorities, ticket types, parent/subtask relationships, links, and comments.
-- Project graph view backed by the ticket graph API.
+- Project graph view backed by the ticket graph API, with bounded filters for large projects.
 - ActivityPub foundation with local actor documents, WebFinger discovery, inbox/outbox routes, HTTP signatures, remote actor caching, signed delivery, retries, and delivery inspection.
 - Federation administration for domain blocks, remote actors, delivery summaries, retry actions, and audit events.
 - Health, readiness, structured request logging, body limits, rate limits on public surfaces, protected Prometheus metrics, and container health checks.
-- Static OpenAPI contract at `backend/docs/openapi.yaml`.
+- Static OpenAPI contract at `backend/docs/openapi.yaml`; authenticated REST routes are under `/api/v1`.
 
 ## Tech Stack
 
@@ -45,7 +47,7 @@ This repository contains an full-stack project management application with feder
 
 - Backend API container
 - Backend worker container
-- Frontend Vite container
+- Frontend container
 - PostgreSQL
 - Redis
 - Migration runner
@@ -53,12 +55,49 @@ This repository contains an full-stack project management application with feder
 
 ## Getting Started
 
+### Fresh VM Install
+
+For a new production-like instance, point your domain at the VM first and open ports `80` and `443`.
+
+The installer expects these commands to already exist on the VM:
+
+- `docker` with the `docker compose` plugin
+- `caddy`
+- `curl`, `tar`, `find`, `cp`, `rm`
+- `sudo` when not running as root
+
+Run the installer from an interactive SSH shell:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/antonovs105/project-management-system-go/main/deploy/install.sh | sh
+```
+
+The installer downloads deploy assets, creates `/opt/progo/app/progo.yml` interactively when missing, exports `/opt/progo/app/.env`, pulls the configured container images, runs migrations, deploys the inactive blue/green slot, checks health, and reloads Caddy.
+
+Rerunning the installer is update-safe for existing instances: it keeps the existing `progo.yml` and `.env`, refreshes deploy assets and migrations, creates a database backup, and switches traffic only after the new slot is healthy.
+
+Create the first owner account after the deployment is healthy:
+
+```bash
+cd /opt/progo/app
+COLOR=$(cat .active-color)
+printf 'change-this-password\n' | docker compose --env-file .env -f deploy/docker-compose.bluegreen.yml exec -T "backend-$COLOR" /app/pmsctl owner create --username owner --email owner@example.test --password-stdin
+```
+
+This can be run only while no owner account exists.
+
+Optional installer overrides:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/antonovs105/project-management-system-go/main/deploy/install.sh | PROGO_REF=main IMAGE_TAG=main APP_DIR=/opt/progo/app sh
+```
+
 ### Prerequisites
 
 - Docker and Docker Compose
 - Optional for local development: Go 1.25+, Node.js 22+, and pnpm
 
-### Run with Docker
+### Local Docker
 
 1. Clone this repository and enter the checkout.
 
@@ -88,7 +127,7 @@ This repository contains an full-stack project management application with feder
 5. Create the first owner account:
 
    ```powershell
-   "change-this-password" | docker compose run --rm -T backend ./pmsctl owner create --username owner --email owner@example.test --password-stdin
+   "change-this-password" | docker compose run --rm -T backend /app/pmsctl owner create --username owner --email owner@example.test --password-stdin
    ```
 
    This can be run only while no owner account exists.
@@ -153,19 +192,20 @@ pnpm test
 
 ### Maintenance CLI
 
-The backend image also builds `./pmsctl` for maintenance tasks:
+The backend image also builds `/app/pmsctl` for maintenance tasks:
 
 ```bash
-docker compose run --rm backend ./pmsctl owner create --help
-docker compose run --rm backend ./pmsctl federation discover --help
-docker compose run --rm backend ./pmsctl federation follow --help
-docker compose run --rm backend ./pmsctl federation accept-follow --help
+docker compose run --rm backend /app/pmsctl owner create --help
+docker compose run --rm backend /app/pmsctl federation discover --help
+docker compose run --rm backend /app/pmsctl federation follow --help
+docker compose run --rm backend /app/pmsctl federation accept-follow --help
 ```
 
 ## Configuration Notes
 
 - `APP_ROLE` can be `api`, `worker`, or `all`. Docker Compose runs separate API and worker services.
 - `APP_ENV=production` enables stricter runtime validation.
+- Authenticated application REST routes are served under `/api/v1`; public login, registration, OAuth, WebFinger, and ActivityPub routes stay at their protocol-specific paths.
 - `FEDERATION_ALLOW_INSECURE_HTTP=true` is intended only for local development.
 - `FEDERATION_ALLOW_PRIVATE_NETWORKS=true` is rejected in production.
 - `CORS_ALLOWED_ORIGINS` controls browser origins allowed to call the API.
@@ -186,6 +226,7 @@ frontend/
   src/pages/               Route-level pages
   src/store/               Client-side auth state
   tests/                   Frontend contract tests
+deploy/                    Fresh-VM installer and blue-green deployment assets
 migrations/                PostgreSQL migration files
 monitoring/prometheus/     Prometheus scrape configuration
 docker-compose.yml         Local multi-service runtime
