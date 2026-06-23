@@ -250,7 +250,7 @@ func (r *PgRepository) respondRemoteProjectInvite(ctx context.Context, userID st
 }
 
 // StoreRemoteProjectActivity stores an outbound ActivityPub activity for a remote project.
-func (r *PgRepository) StoreRemoteProjectActivity(ctx context.Context, userID string, projectID string, activityID string, activityAPID string, activityType string, objectAPID string, targetAPID *string, document []byte) (*RemoteProjectActivity, error) {
+func (r *PgRepository) StoreRemoteProjectActivity(ctx context.Context, userID string, projectID string, activityID string, activityAPID string, activityType string, objectAPID string, targetAPID *string, document []byte, objectDocument []byte, objectDeleted bool) (*RemoteProjectActivity, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -277,6 +277,34 @@ func (r *PgRepository) StoreRemoteProjectActivity(ctx context.Context, userID st
 		VALUES ($1, $2, $3)
 	`, userID, activityID, activityAPID); err != nil {
 		return nil, err
+	}
+	if len(objectDocument) > 0 {
+		objectType := "Ticket"
+		if objectDeleted {
+			objectType = "Tombstone"
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO ap_objects (
+				ap_id,
+				object_type,
+				actor_id,
+				local_ref_table,
+				local_ref_id,
+				document,
+				is_deleted
+			)
+			VALUES ($1, $2, $3, 'remote_project_invites', $4, $5, $6)
+			ON CONFLICT (ap_id) DO UPDATE
+			SET object_type = EXCLUDED.object_type,
+				actor_id = EXCLUDED.actor_id,
+				local_ref_table = EXCLUDED.local_ref_table,
+				local_ref_id = EXCLUDED.local_ref_id,
+				document = EXCLUDED.document,
+				is_deleted = EXCLUDED.is_deleted,
+				updated_at = now()
+		`, objectAPID, objectType, userID, project.ID, objectDocument, objectDeleted); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err

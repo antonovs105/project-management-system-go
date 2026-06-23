@@ -42,6 +42,8 @@ type serviceRepo struct {
 	remoteActivityObject string
 	remoteActivityTarget *string
 	remoteActivityDoc    []byte
+	remoteObjectDoc      []byte
+	remoteObjectDeleted  bool
 }
 
 func (r *serviceRepo) ListInboxActivities(ctx context.Context, userID string, options ListOptions) ([]InboxActivity, error) {
@@ -159,13 +161,15 @@ func (r *serviceRepo) RejectRemoteProjectInvite(ctx context.Context, userID stri
 	return &RemoteInviteResponse{Invite: &copy, ActivityID: activityID, TargetInboxURL: invite.TargetInboxURL}, nil
 }
 
-func (r *serviceRepo) StoreRemoteProjectActivity(ctx context.Context, userID string, projectID string, activityID string, activityAPID string, activityType string, objectAPID string, targetAPID *string, document []byte) (*RemoteProjectActivity, error) {
+func (r *serviceRepo) StoreRemoteProjectActivity(ctx context.Context, userID string, projectID string, activityID string, activityAPID string, activityType string, objectAPID string, targetAPID *string, document []byte, objectDocument []byte, objectDeleted bool) (*RemoteProjectActivity, error) {
 	r.remoteActivityID = activityID
 	r.remoteActivityAPID = activityAPID
 	r.remoteActivityType = activityType
 	r.remoteActivityObject = objectAPID
 	r.remoteActivityTarget = targetAPID
 	r.remoteActivityDoc = append([]byte(nil), document...)
+	r.remoteObjectDoc = append([]byte(nil), objectDocument...)
+	r.remoteObjectDeleted = objectDeleted
 	project := r.remoteProjectValue(projectID)
 	return &RemoteProjectActivity{ActivityID: activityID, TargetInboxURL: project.TargetInboxURL}, nil
 }
@@ -339,6 +343,33 @@ func TestServiceListsRemoteProjectTicketsWithSignedReads(t *testing.T) {
 	assert.Equal(t, []string{"user-1", "user-1"}, signer.actorIDs)
 }
 
+func TestServiceListsInlineRemoteProjectTicketsWithoutExtraReads(t *testing.T) {
+	repo := &serviceRepo{}
+	signer := &fakeSigner{}
+	ticketAPID := "https://remote.test/tickets/ticket-1"
+	collectionURL := remoteCollectionPageURL("https://remote.test/projects/board/tickets", defaultListLimit, 0)
+	ticketDoc := activitypub.TicketDocument(ticketAPID, "https://remote.test/projects/board", "https://remote.test/users/owner", "Inline ticket", "", "open", "medium", "task", nil, nil, time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC), false)
+	collectionRaw, err := json.Marshal(map[string]any{
+		"id":           collectionURL,
+		"type":         "OrderedCollectionPage",
+		"orderedItems": []map[string]any{ticketDoc},
+	})
+	require.NoError(t, err)
+	client := &fakeHTTPClient{responses: map[string][]byte{
+		collectionURL: collectionRaw,
+	}}
+	service := NewService(repo, WithSigner(signer), WithHTTPClient(client))
+
+	tickets, err := service.ListRemoteProjectTickets(context.Background(), "user-1", "remote-project-1", ListOptions{})
+
+	require.NoError(t, err)
+	require.Len(t, tickets, 1)
+	assert.Equal(t, EncodeRemoteID(ticketAPID), tickets[0].ID)
+	assert.Equal(t, "Inline ticket", tickets[0].Title)
+	assert.Equal(t, []string{collectionURL}, client.urls)
+	assert.Equal(t, []string{"user-1"}, signer.actorIDs)
+}
+
 func TestServiceRejectsInvalidPersonalFederationFilters(t *testing.T) {
 	repo := &serviceRepo{}
 	service := NewService(repo)
@@ -467,6 +498,12 @@ func TestServiceCreatesRemoteTicketAndQueuesDelivery(t *testing.T) {
 	assert.Equal(t, result.Ticket.APID, object["id"])
 	assert.Equal(t, "https://remote.test/projects/board", object["context"])
 	assert.Equal(t, "http://local.test/users/alice", object["attributedTo"])
+
+	var storedObject map[string]any
+	require.NoError(t, json.Unmarshal(repo.remoteObjectDoc, &storedObject))
+	assert.False(t, repo.remoteObjectDeleted)
+	assert.Equal(t, result.Ticket.APID, storedObject["id"])
+	assert.Equal(t, "Remote task", storedObject["name"])
 }
 
 func TestServiceDoesNotQueueDeliveryForExistingFollow(t *testing.T) {

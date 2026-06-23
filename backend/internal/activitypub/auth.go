@@ -93,6 +93,34 @@ func (a *AccessAuthorizer) AuthorizeProject(ctx context.Context, req *http.Reque
 	return nil
 }
 
+// AuthorizeRemoteProjectInvite requires the credential actor to own an accepted remote project invite.
+func (a *AccessAuthorizer) AuthorizeRemoteProjectInvite(ctx context.Context, req *http.Request, inviteID string) error {
+	actorID, err := a.credentialActorID(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	var allowed bool
+	if err := a.db.GetContext(ctx, &allowed, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM remote_project_invites
+			WHERE id = $2
+				AND invitee_actor_id = $1
+				AND status = 'accepted'
+		)
+	`, actorID, inviteID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrAccessDenied
+		}
+		return err
+	}
+	if !allowed {
+		return ErrAccessDenied
+	}
+	return nil
+}
+
 // credentialActorID resolves the actor authenticated by a local JWT or remote signature.
 func (a *AccessAuthorizer) credentialActorID(ctx context.Context, req *http.Request) (string, error) {
 	if req == nil {

@@ -48,7 +48,7 @@ type Repository interface {
 	StoreOutgoingFollow(ctx context.Context, actorID, remoteActorID, activityID, activityAPID, remoteActorAPID string, document []byte) (*RemoteFollow, bool, error)
 	AcceptRemoteProjectInvite(ctx context.Context, userID string, inviteID string, activityID string, activityAPID string, document []byte) (*RemoteInviteResponse, error)
 	RejectRemoteProjectInvite(ctx context.Context, userID string, inviteID string, activityID string, activityAPID string, document []byte) (*RemoteInviteResponse, error)
-	StoreRemoteProjectActivity(ctx context.Context, userID string, projectID string, activityID string, activityAPID string, activityType string, objectAPID string, targetAPID *string, document []byte) (*RemoteProjectActivity, error)
+	StoreRemoteProjectActivity(ctx context.Context, userID string, projectID string, activityID string, activityAPID string, activityType string, objectAPID string, targetAPID *string, document []byte, objectDocument []byte, objectDeleted bool) (*RemoteProjectActivity, error)
 }
 
 // RemoteActorResolver resolves ActivityPub actor resources and URLs.
@@ -209,9 +209,19 @@ func (s *Service) ListRemoteProjectTickets(ctx context.Context, userID string, p
 	if err := s.getRemoteJSON(ctx, userID, collectionURL, &collection); err != nil {
 		return nil, err
 	}
-	ticketAPIDs := collectionItemIDs(collection.OrderedItems)
-	tickets := make([]RemoteTicket, 0, len(ticketAPIDs))
-	for _, ticketAPID := range ticketAPIDs {
+	tickets := make([]RemoteTicket, 0, len(collection.OrderedItems))
+	for _, item := range collection.OrderedItems {
+		if remoteTicket, ok, err := remoteTicketFromCollectionItem(project.ID, project.ProjectAPID, item); ok || err != nil {
+			if err != nil {
+				return nil, err
+			}
+			tickets = append(tickets, *remoteTicket)
+			continue
+		}
+		ticketAPID := collectionItemID(item)
+		if ticketAPID == "" {
+			continue
+		}
 		remoteTicket, err := s.GetRemoteTicket(ctx, userID, project.ID, EncodeRemoteID(ticketAPID))
 		if err != nil {
 			return nil, err
@@ -260,11 +270,12 @@ func (s *Service) CreateRemoteTicket(ctx context.Context, userID string, project
 	if err != nil {
 		return nil, err
 	}
-	result, err := s.storeAndEnqueueRemoteProjectActivity(ctx, userID, project.ID, "Create", ticketAPID, &project.ProjectAPID, document)
+	ticketRaw := mustMarshalDocument(ticketDoc)
+	result, err := s.storeAndEnqueueRemoteProjectActivity(ctx, userID, project.ID, "Create", ticketAPID, &project.ProjectAPID, document, ticketRaw, false)
 	if err != nil {
 		return nil, err
 	}
-	ticket, err := remoteTicketFromDocument(project.ID, project.ProjectAPID, mustMarshalDocument(ticketDoc), ticketDoc)
+	ticket, err := remoteTicketFromDocument(project.ID, project.ProjectAPID, ticketRaw, ticketDoc)
 	if err != nil {
 		return nil, err
 	}
@@ -293,7 +304,8 @@ func (s *Service) UpdateRemoteTicket(ctx context.Context, userID string, project
 	if err != nil {
 		return nil, err
 	}
-	result, err := s.storeAndEnqueueRemoteProjectActivity(ctx, userID, project.ID, "Update", ticket.APID, &project.ProjectAPID, document)
+	updatedRaw := mustMarshalDocument(doc)
+	result, err := s.storeAndEnqueueRemoteProjectActivity(ctx, userID, project.ID, "Update", ticket.APID, &project.ProjectAPID, document, updatedRaw, false)
 	if err != nil {
 		return nil, err
 	}
@@ -325,7 +337,8 @@ func (s *Service) DeleteRemoteTicket(ctx context.Context, userID string, project
 	if err != nil {
 		return nil, err
 	}
-	return s.storeAndEnqueueRemoteProjectActivity(ctx, userID, project.ID, "Delete", ticketAPID, &project.ProjectAPID, document)
+	tombstone := activitypub.TombstoneDocument(ticketAPID, "Ticket", time.Now().UTC())
+	return s.storeAndEnqueueRemoteProjectActivity(ctx, userID, project.ID, "Delete", ticketAPID, &project.ProjectAPID, document, mustMarshalDocument(tombstone), true)
 }
 
 // AcceptRemoteProjectInvite accepts a pending remote project invite and queues an ActivityPub Accept.
@@ -525,7 +538,7 @@ func (s *Service) remoteProjectActivityDocument(activityType string, actorAPID s
 }
 
 // storeAndEnqueueRemoteProjectActivity stores an outbound activity and queues its delivery.
-func (s *Service) storeAndEnqueueRemoteProjectActivity(ctx context.Context, userID string, projectID string, activityType string, objectAPID string, targetAPID *string, document []byte) (*RemoteTicketWriteResult, error) {
+func (s *Service) storeAndEnqueueRemoteProjectActivity(ctx context.Context, userID string, projectID string, activityType string, objectAPID string, targetAPID *string, document []byte, objectDocument []byte, objectDeleted bool) (*RemoteTicketWriteResult, error) {
 	activityID, err := activitypub.NewID()
 	if err != nil {
 		return nil, err
@@ -535,7 +548,7 @@ func (s *Service) storeAndEnqueueRemoteProjectActivity(ctx context.Context, user
 	if err != nil {
 		return nil, err
 	}
-	activity, err := s.repo.StoreRemoteProjectActivity(ctx, userID, projectID, activityID, activityAPID, activityType, objectAPID, targetAPID, document)
+	activity, err := s.repo.StoreRemoteProjectActivity(ctx, userID, projectID, activityID, activityAPID, activityType, objectAPID, targetAPID, document, objectDocument, objectDeleted)
 	if err != nil {
 		return nil, err
 	}
@@ -638,23 +651,27 @@ type remoteCollectionDocument struct {
 	OrderedItems []json.RawMessage `json:"orderedItems"`
 }
 
-// collectionItemIDs extracts string item IDs from an ActivityStreams collection page.
-func collectionItemIDs(items []json.RawMessage) []string {
-	ids := make([]string, 0, len(items))
-	for _, item := range items {
-		var id string
-		if err := json.Unmarshal(item, &id); err == nil && strings.TrimSpace(id) != "" {
-			ids = append(ids, strings.TrimSpace(id))
-			continue
-		}
-		var object map[string]any
-		if err := json.Unmarshal(item, &object); err == nil {
-			if id := stringField(object, "id"); id != "" {
-				ids = append(ids, id)
-			}
-		}
+// remoteTicketFromCollectionItem decodes an inline ticket collection item when present.
+func remoteTicketFromCollectionItem(projectID string, projectAPID string, item json.RawMessage) (*RemoteTicket, bool, error) {
+	var object map[string]any
+	if err := json.Unmarshal(item, &object); err != nil || !documentTypeContains(object["type"], "forge:Ticket") {
+		return nil, false, nil
 	}
-	return ids
+	ticket, err := remoteTicketFromDocument(projectID, projectAPID, item, object)
+	return ticket, true, err
+}
+
+// collectionItemID extracts a string AP ID from a string or object collection item.
+func collectionItemID(item json.RawMessage) string {
+	var id string
+	if err := json.Unmarshal(item, &id); err == nil && strings.TrimSpace(id) != "" {
+		return strings.TrimSpace(id)
+	}
+	var object map[string]any
+	if err := json.Unmarshal(item, &object); err == nil {
+		return stringField(object, "id")
+	}
+	return ""
 }
 
 // EncodeRemoteID encodes an ActivityPub ID into a URL-safe local route token.

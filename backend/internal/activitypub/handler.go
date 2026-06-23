@@ -34,6 +34,7 @@ type Handler struct {
 type Authorizer interface {
 	AuthorizeActor(ctx context.Context, req *http.Request, actorID string) error
 	AuthorizeProject(ctx context.Context, req *http.Request, projectID string) error
+	AuthorizeRemoteProjectInvite(ctx context.Context, req *http.Request, inviteID string) error
 }
 
 // collectionPageRequest carries ActivityPub collection pagination flags.
@@ -392,15 +393,20 @@ func (h *Handler) projectTicketsCollection(c echo.Context, projectAPID string) e
 		))
 	}
 
-	ticketAPIDs := make([]string, 0)
-	if err := h.db.SelectContext(c.Request().Context(), &ticketAPIDs, `
-		SELECT ap_id
-		FROM tickets
-		WHERE project_id = $1
-		ORDER BY created_at DESC, id DESC
+	ticketDocuments := make([]json.RawMessage, 0)
+	if err := h.db.SelectContext(c.Request().Context(), &ticketDocuments, `
+		SELECT object.document
+		FROM tickets ticket
+		JOIN ap_objects object ON object.ap_id = ticket.ap_id
+		WHERE ticket.project_id = $1
+		ORDER BY ticket.created_at DESC, ticket.id DESC
 		LIMIT $2 OFFSET $3
 	`, projectID, page.Limit, page.Offset); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load project tickets"})
+	}
+	items, err := decodeRawItems(ticketDocuments)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to decode project tickets"})
 	}
 
 	next, prev := collectionPageLinks(collectionID, totalItems, page.Limit, page.Offset)
@@ -408,7 +414,7 @@ func (h *Handler) projectTicketsCollection(c echo.Context, projectAPID string) e
 		collectionPageURL(collectionID, page.Limit, page.Offset),
 		collectionID,
 		totalItems,
-		stringItems(ticketAPIDs),
+		items,
 		next,
 		prev,
 	))
@@ -439,6 +445,11 @@ func (h *Handler) authorizeObject(c echo.Context, localRefTable, localRefID sql.
 		`, localRefID.String); err != nil {
 			return h.objectScopeError(c, err)
 		}
+	case "remote_project_invites":
+		if err := h.authorizer.AuthorizeRemoteProjectInvite(c.Request().Context(), c.Request(), localRefID.String); err != nil {
+			return h.authorizationError(c, err)
+		}
+		return nil
 	default:
 		return nil
 	}

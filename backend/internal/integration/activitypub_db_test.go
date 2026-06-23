@@ -3107,7 +3107,7 @@ func requireProjectTicketsCollectionNotContains(t *testing.T, db *sqlx.DB, cfg a
 	ticketsPage := requireActivityPubDocument(t, db, cfg, "/projects/"+projectID+"/tickets?page=true&limit=50")
 	require.Equal(t, "OrderedCollectionPage", ticketsPage["type"])
 	require.Equal(t, ticketsID, ticketsPage["partOf"])
-	require.NotContains(t, requireOrderedItems(t, ticketsPage), ticketAPID)
+	require.NotContains(t, requireOrderedItemIDs(t, ticketsPage), ticketAPID)
 }
 
 func requireProjectTicketsCollectionContains(t *testing.T, db *sqlx.DB, cfg activitypub.Config, projectID, projectAPID, ticketAPID string) {
@@ -3117,7 +3117,7 @@ func requireProjectTicketsCollectionContains(t *testing.T, db *sqlx.DB, cfg acti
 	ticketsPage := requireActivityPubDocument(t, db, cfg, "/projects/"+projectID+"/tickets?page=true&limit=50")
 	require.Equal(t, "OrderedCollectionPage", ticketsPage["type"])
 	require.Equal(t, ticketsID, ticketsPage["partOf"])
-	require.Contains(t, requireOrderedItems(t, ticketsPage), ticketAPID)
+	require.Contains(t, requireOrderedItemIDs(t, ticketsPage), ticketAPID)
 }
 
 func requireOrderedItems(t *testing.T, doc map[string]any) []any {
@@ -3126,6 +3126,26 @@ func requireOrderedItems(t *testing.T, doc map[string]any) []any {
 	items, ok := doc["orderedItems"].([]any)
 	require.True(t, ok, "orderedItems should be an array")
 	return items
+}
+
+func requireOrderedItemIDs(t *testing.T, doc map[string]any) []string {
+	t.Helper()
+
+	items := requireOrderedItems(t, doc)
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		switch value := item.(type) {
+		case string:
+			ids = append(ids, value)
+		case map[string]any:
+			id, ok := value["id"].(string)
+			require.True(t, ok, "ordered item object should have an id")
+			ids = append(ids, id)
+		default:
+			require.Failf(t, "unsupported ordered item", "%T", item)
+		}
+	}
+	return ids
 }
 
 func requireJSONInt(t *testing.T, doc map[string]any, key string) int {
