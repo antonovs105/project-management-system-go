@@ -3,6 +3,7 @@ import { ArrowLeft } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
+import { ThemeToggle } from "../components/ThemeToggle";
 import { ErrorState, LoadingState, Panel } from "../components/ui";
 import { api, errorMessage } from "../lib/api";
 import { useI18n } from "../lib/i18n-context";
@@ -71,7 +72,8 @@ export function OAuthCallbackPage() {
   return (
     <main className="min-h-screen bg-zinc-100 px-4 py-10">
       <div className="mx-auto flex min-h-[calc(100vh-5rem)] w-full max-w-md flex-col justify-center">
-        <div className="mb-4 flex justify-end">
+        <div className="mb-4 flex justify-end gap-2">
+          <ThemeToggle />
           <LanguageSwitcher />
         </div>
         <Panel className="p-6">

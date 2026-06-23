@@ -12,6 +12,12 @@
     color: #09090b;
   }
 
+  html.dark {
+    color-scheme: dark;
+    background: #09090b;
+    color: #fafafa;
+  }
+
   * {
     box-sizing: border-box;
   }
@@ -26,6 +32,10 @@
     margin: 0;
     min-width: 320px;
     background: #f4f4f5;
+  }
+
+  html.dark body {
+    background: #09090b;
   }
 
   button,
@@ -47,5 +57,109 @@
 @layer components {
   .focus-ring {
     @apply outline-none ring-0 transition focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2;
+  }
+
+  .dark .focus-ring {
+    --tw-ring-color: #fafafa;
+    --tw-ring-offset-color: #09090b;
+  }
+
+  .dark .bg-white,
+  .dark .bg-white\/80,
+  .dark .bg-white\/95 {
+    background-color: #18181b;
+  }
+
+  .dark .bg-zinc-50 {
+    background-color: #18181b;
+  }
+
+  .dark .bg-zinc-100 {
+    background-color: #09090b;
+  }
+
+  .dark .bg-zinc-200 {
+    background-color: #27272a;
+  }
+
+  .dark .bg-zinc-300 {
+    background-color: #3f3f46;
+  }
+
+  .dark .border-zinc-100,
+  .dark .border-zinc-200 {
+    border-color: #27272a;
+  }
+
+  .dark .border-zinc-300 {
+    border-color: #3f3f46;
+  }
+
+  .dark .divide-zinc-100 > :not([hidden]) ~ :not([hidden]),
+  .dark .divide-zinc-200 > :not([hidden]) ~ :not([hidden]) {
+    border-color: #27272a;
+  }
+
+  .dark .text-zinc-950,
+  .dark .text-zinc-900,
+  .dark .text-zinc-800 {
+    color: #fafafa;
+  }
+
+  .dark .text-zinc-700,
+  .dark .text-zinc-600 {
+    color: #d4d4d8;
+  }
+
+  .dark .text-zinc-500 {
+    color: #a1a1aa;
+  }
+
+  .dark .text-zinc-400,
+  .dark .text-zinc-300 {
+    color: #71717a;
+  }
+
+  .dark .placeholder\:text-zinc-400::placeholder {
+    color: #71717a;
+  }
+
+  .dark .hover\:bg-white:hover,
+  .dark .hover\:bg-zinc-50:hover,
+  .dark .hover\:bg-zinc-100:hover {
+    background-color: #27272a;
+  }
+
+  .dark .hover\:border-zinc-300:hover {
+    border-color: #52525b;
+  }
+
+  .dark .hover\:text-zinc-950:hover,
+  .dark .hover\:text-zinc-900:hover {
+    color: #fafafa;
+  }
+
+  .dark .bg-emerald-50 {
+    background-color: #052e16;
+  }
+
+  .dark .border-emerald-200 {
+    border-color: #047857;
+  }
+
+  .dark .text-emerald-800 {
+    color: #a7f3d0;
+  }
+
+  .dark .bg-red-50 {
+    background-color: #450a0a;
+  }
+
+  .dark .border-red-200 {
+    border-color: #991b1b;
+  }
+
+  .dark .text-red-800 {
+    color: #fecaca;
   }
 }

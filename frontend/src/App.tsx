@@ -4,6 +4,8 @@ import { Toaster } from "sonner";
 import { AppLayout } from "./components/layout/AppLayout";
 import { ProtectedRoute } from "./components/layout/ProtectedRoute";
 import { I18nProvider } from "./components/I18nProvider";
+import { ThemeProvider } from "./components/ThemeProvider";
+import { useTheme } from "./lib/theme-context";
 import { AccountPage } from "./pages/AccountPage";
 import { AdminAuditPage } from "./pages/AdminAuditPage";
 import { AdminFederationPage } from "./pages/AdminFederationPage";
@@ -27,40 +29,47 @@ const queryClient = new QueryClient({
   },
 });
 
+function AppToaster() {
+  const { theme } = useTheme();
+  return <Toaster richColors closeButton theme={theme} />;
+}
+
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <I18nProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/login" element={<AuthPage mode="login" />} />
-            <Route path="/register" element={<AuthPage mode="register" />} />
-            <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
-            <Route path="/terms" element={<LegalPage />} />
+      <ThemeProvider>
+        <I18nProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/login" element={<AuthPage mode="login" />} />
+              <Route path="/register" element={<AuthPage mode="register" />} />
+              <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
+              <Route path="/terms" element={<LegalPage />} />
 
-            <Route element={<ProtectedRoute />}>
-              <Route element={<AppLayout />}>
-                <Route index element={<Navigate to="/projects" replace />} />
-                <Route path="/projects" element={<ProjectsPage />} />
-                <Route path="/invitations" element={<InvitationsPage />} />
-                <Route path="/federation" element={<FederationPage />} />
-                <Route path="/projects/:projectId" element={<ProjectWorkspace />} />
-                <Route path="/projects/:projectId/graph" element={<ProjectWorkspace />} />
-                <Route path="/projects/:projectId/deliveries" element={<ProjectWorkspace />} />
-                <Route path="/projects/:projectId/settings" element={<ProjectWorkspace />} />
-                <Route path="/remote-projects/:projectId" element={<RemoteProjectWorkspace />} />
-                <Route path="/account" element={<AccountPage />} />
-                <Route path="/admin/users" element={<AdminUsersPage />} />
-                <Route path="/admin/federation" element={<AdminFederationPage />} />
-                <Route path="/admin/audit" element={<AdminAuditPage />} />
+              <Route element={<ProtectedRoute />}>
+                <Route element={<AppLayout />}>
+                  <Route index element={<Navigate to="/projects" replace />} />
+                  <Route path="/projects" element={<ProjectsPage />} />
+                  <Route path="/invitations" element={<InvitationsPage />} />
+                  <Route path="/federation" element={<FederationPage />} />
+                  <Route path="/projects/:projectId" element={<ProjectWorkspace />} />
+                  <Route path="/projects/:projectId/graph" element={<ProjectWorkspace />} />
+                  <Route path="/projects/:projectId/deliveries" element={<ProjectWorkspace />} />
+                  <Route path="/projects/:projectId/settings" element={<ProjectWorkspace />} />
+                  <Route path="/remote-projects/:projectId" element={<RemoteProjectWorkspace />} />
+                  <Route path="/account" element={<AccountPage />} />
+                  <Route path="/admin/users" element={<AdminUsersPage />} />
+                  <Route path="/admin/federation" element={<AdminFederationPage />} />
+                  <Route path="/admin/audit" element={<AdminAuditPage />} />
+                </Route>
               </Route>
-            </Route>
 
-            <Route path="*" element={<Navigate to="/projects" replace />} />
-          </Routes>
-          <Toaster richColors closeButton />
-        </BrowserRouter>
-      </I18nProvider>
+              <Route path="*" element={<Navigate to="/projects" replace />} />
+            </Routes>
+            <AppToaster />
+          </BrowserRouter>
+        </I18nProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

@@ -17,6 +17,7 @@ import { useState } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { LanguageSwitcher } from "../../components/LanguageSwitcher";
 import { NotificationBell } from "../../components/NotificationBell";
+import { ThemeToggle } from "../../components/ThemeToggle";
 import { api } from "../../lib/api";
 import { initials } from "../../lib/format";
 import { useI18n } from "../../lib/i18n-context";
@@ -176,6 +177,7 @@ export function AppLayout() {
           </div>
           <div className="flex items-center gap-2">
             <NotificationBell />
+            <ThemeToggle />
             <LanguageSwitcher />
           </div>
         </header>

@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
+import { ThemeToggle } from "../components/ThemeToggle";
 import { Button, ErrorState, Panel, TextField } from "../components/ui";
 import { api, errorMessage, oauthStartURL } from "../lib/api";
 import { useI18n } from "../lib/i18n-context";
@@ -122,7 +123,8 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
       </section>
 
       <section className="flex min-h-screen flex-col items-center justify-center px-4 py-10">
-        <div className="mb-4 flex w-full max-w-md justify-end">
+        <div className="mb-4 flex w-full max-w-md justify-end gap-2">
+          <ThemeToggle />
           <LanguageSwitcher />
         </div>
         <Panel className="w-full max-w-md p-6">

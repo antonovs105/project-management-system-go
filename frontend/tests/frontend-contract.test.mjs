@@ -100,6 +100,21 @@ test("remote project ticket list auto-refreshes while realtime federation is abs
   assert.ok(workspace.includes("refetchOnReconnect: true"), "remote tickets must refresh after network reconnect");
 });
 
+test("frontend exposes a persistent light and dark theme switch", () => {
+  const app = read("src/App.tsx");
+  const provider = read("src/components/ThemeProvider.tsx");
+  const toggle = read("src/components/ThemeToggle.tsx");
+  const layout = read("src/components/layout/AppLayout.tsx");
+  const css = read("src/index.css");
+
+  assert.ok(app.includes("<ThemeProvider>"), "App must mount the theme provider");
+  assert.ok(provider.includes('const storageKey = "progo.theme"'), "theme choice must persist under a stable key");
+  assert.ok(provider.includes('classList.toggle("dark"'), "theme provider must toggle the document dark class");
+  assert.ok(toggle.includes("useTheme"), "theme toggle must use the shared theme state");
+  assert.ok(layout.includes("<ThemeToggle />"), "workspace header must expose the theme toggle");
+  assert.ok(css.includes("html.dark"), "global CSS must define dark mode surface styles");
+});
+
 test("frontend exposes bilingual locale dictionaries and copyright notice", () => {
   const app = read("src/App.tsx");
   const i18n = read("src/lib/i18n-messages.ts");

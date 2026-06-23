@@ -1,6 +1,7 @@
 import { ArrowLeft, CircleDot } from "lucide-react";
 import { Link } from "react-router-dom";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
+import { ThemeToggle } from "../components/ThemeToggle";
 import { Panel } from "../components/ui";
 import { useI18n } from "../lib/i18n-context";
 import type { MessageKey } from "../lib/i18n-messages";
@@ -25,7 +26,10 @@ export function LegalPage() {
             </span>
             {t("app.name")}
           </Link>
-          <LanguageSwitcher />
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <LanguageSwitcher />
+          </div>
         </div>
 
         <Panel className="overflow-hidden">
