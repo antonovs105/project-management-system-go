@@ -178,7 +178,17 @@ wait_for_url() {
     i=$((i + 1))
   done
   echo "$label did not become ready: $url" >&2
-  exit 1
+  return 1
+}
+
+print_public_readiness_hint() {
+  echo "public readiness failed after local containers became healthy." >&2
+  echo "Check that DNS for $DOMAIN points to this VM, TCP 80/443 are open, and Caddy is running." >&2
+  echo "Useful VM checks:" >&2
+  echo "  getent hosts $DOMAIN" >&2
+  echo "  sudo systemctl status caddy --no-pager" >&2
+  echo "  sudo journalctl -u caddy -n 80 --no-pager" >&2
+  echo "  curl -vk $PUBLIC_BASE_URL/ready" >&2
 }
 
 backup_database() {
@@ -307,12 +317,15 @@ wait_for_url "http://127.0.0.1:$FRONTEND_PORT/health" "frontend-$inactive"
 
 write_caddyfile "$BACKEND_PORT" "$FRONTEND_PORT"
 
-if [ -n "$PUBLIC_BASE_URL" ]; then
-  wait_for_url "$PUBLIC_BASE_URL/ready" "public backend"
-fi
-
 printf '%s\n' "$inactive" > "$STATE_FILE"
 printf '%s\n' "${IMAGE_TAG:-$BACKEND_IMAGE}" > "$TAG_FILE"
+
+if [ -n "$PUBLIC_BASE_URL" ]; then
+  if ! wait_for_url "$PUBLIC_BASE_URL/ready" "public backend"; then
+    print_public_readiness_hint
+    exit 1
+  fi
+fi
 
 if [ "$active" = "legacy" ]; then
   stop_legacy
