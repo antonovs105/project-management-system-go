@@ -474,7 +474,7 @@ func (s *Service) isProjectUpdateTicket(ctx context.Context, targetActorID, targ
 		return false, nil
 	}
 	ticket := activity.ObjectTicket
-	if err := validateInboundTicketIdentity(ticket, activity.ActorAPID, targetAPID); err != nil {
+	if err := validateInboundTicketIdentity(ticket, targetAPID); err != nil {
 		return false, err
 	}
 	if !ticket.HasName && !ticket.HasContent && !ticket.HasStatus && !ticket.HasPriority && !ticket.HasTicketType && !ticket.HasIsResolved {
@@ -523,7 +523,7 @@ func (s *Service) isProjectCreateTicket(ctx context.Context, targetActorID, targ
 		return false, nil
 	}
 	ticket := activity.ObjectTicket
-	if err := validateInboundTicketIdentity(ticket, activity.ActorAPID, targetAPID); err != nil {
+	if err := validateInboundTicketIdentity(ticket, targetAPID); err != nil {
 		return false, err
 	}
 	if strings.TrimSpace(ticket.Name) == "" {
@@ -541,16 +541,16 @@ func (s *Service) isProjectCreateTicket(ctx context.Context, targetActorID, targ
 	return true, nil
 }
 
-// validateInboundTicketIdentity checks common remote ticket identity and ownership fields.
-func validateInboundTicketIdentity(ticket *InboundTicket, actorAPID, targetAPID string) error {
+// validateInboundTicketIdentity checks common remote ticket identity and project scope fields.
+func validateInboundTicketIdentity(ticket *InboundTicket, targetAPID string) error {
 	if ticket.InvalidFieldType {
 		return fmt.Errorf("%w: ticket field type", ErrInvalidActivity)
 	}
 	if ticket.ID == "" || !isAbsoluteURI(ticket.ID) {
 		return fmt.Errorf("%w: ticket id", ErrInvalidActivity)
 	}
-	if ticket.AttributedTo == "" || ticket.AttributedTo != actorAPID {
-		return ErrForbiddenActor
+	if ticket.AttributedTo == "" || !isAbsoluteURI(ticket.AttributedTo) {
+		return fmt.Errorf("%w: ticket attributedTo", ErrInvalidActivity)
 	}
 	if ticket.Context != targetAPID {
 		return fmt.Errorf("%w: ticket context must match inbox actor", ErrInvalidActivity)

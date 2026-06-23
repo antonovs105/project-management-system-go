@@ -10,6 +10,7 @@
 /backend/vendor/
 /backend/.env
 /backend/.gocache/
+/backend/.cache/
 /.gocache/
 coverage.out
 coverage.html

@@ -87,10 +87,11 @@ func (r *PgRepository) Create(ctx context.Context, ticket *Ticket) (*ActivityRes
 		}
 	}
 
-	if err := r.writeTicketObject(ctx, tx, ticket); err != nil {
+	ticketDoc, err := r.writeTicketObject(ctx, tx, ticket)
+	if err != nil {
 		return nil, err
 	}
-	activityID, err := r.writeTicketActivity(ctx, tx, "Create", ticket, ticket.ReporterID, ticket.APID, nil)
+	activityID, err := r.writeTicketActivity(ctx, tx, "Create", ticket, ticket.ReporterID, ticketDoc, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -266,11 +267,12 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket, actorID strin
 		}
 	}
 
-	if err := r.writeTicketObject(ctx, tx, ticket); err != nil {
+	ticketDoc, err := r.writeTicketObject(ctx, tx, ticket)
+	if err != nil {
 		return nil, err
 	}
 	activityIDs := make([]string, 0, 2)
-	updateActivityID, err := r.writeTicketActivity(ctx, tx, "Update", ticket, actorID, ticket.APID, nil)
+	updateActivityID, err := r.writeTicketActivity(ctx, tx, "Update", ticket, actorID, ticketDoc, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -368,10 +370,11 @@ func (r *PgRepository) Move(ctx context.Context, ticketID, actorID, status strin
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := r.writeTicketObject(ctx, tx, moved); err != nil {
+	ticketDoc, err := r.writeTicketObject(ctx, tx, moved)
+	if err != nil {
 		return nil, nil, err
 	}
-	activityID, err := r.writeTicketActivity(ctx, tx, "Update", moved, actorID, moved.APID, nil)
+	activityID, err := r.writeTicketActivity(ctx, tx, "Update", moved, actorID, ticketDoc, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -717,24 +720,24 @@ func rebalanceStatusRanks(ctx context.Context, tx *sqlx.Tx, projectID, status, e
 }
 
 // writeTicketObject writes the current ForgeFed Ticket JSON-LD snapshot.
-func (r *PgRepository) writeTicketObject(ctx context.Context, tx *sqlx.Tx, ticket *Ticket) error {
+func (r *PgRepository) writeTicketObject(ctx context.Context, tx *sqlx.Tx, ticket *Ticket) (map[string]any, error) {
 	projectAPID, err := lookupActorAPID(ctx, tx, ticket.ProjectID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	reporterAPID, err := lookupActorAPID(ctx, tx, ticket.ReporterID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	assignees, err := lookupAssigneeAPIDs(ctx, tx, ticket.ID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var parentAPID *string
 	if ticket.ParentID != nil {
 		var value string
 		if err := tx.GetContext(ctx, &value, `SELECT ap_id FROM tickets WHERE id = $1`, *ticket.ParentID); err != nil {
-			return err
+			return nil, err
 		}
 		parentAPID = &value
 	}
@@ -755,7 +758,7 @@ func (r *PgRepository) writeTicketObject(ctx context.Context, tx *sqlx.Tx, ticke
 	)
 	rawDoc, err := json.Marshal(doc)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO ap_objects (ap_id, object_type, actor_id, local_ref_table, local_ref_id, document)
@@ -768,7 +771,7 @@ func (r *PgRepository) writeTicketObject(ctx context.Context, tx *sqlx.Tx, ticke
 			local_ref_id = EXCLUDED.local_ref_id,
 			is_deleted = false
 	`, ticket.APID, ticket.ReporterID, ticket.ID, rawDoc)
-	return err
+	return doc, err
 }
 
 // writeTicketActivity stores an ActivityStreams activity for a ticket change.
@@ -798,7 +801,7 @@ func (r *PgRepository) writeTicketActivity(ctx context.Context, tx *sqlx.Tx, act
 	if value, ok := target.(string); ok {
 		targetAPID = value
 	}
-	objectAPID := ""
+	objectAPID := ticket.APID
 	if value, ok := object.(string); ok {
 		objectAPID = value
 	}

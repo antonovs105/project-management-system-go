@@ -1019,7 +1019,7 @@ func TestActivityPubFoundationConstraints(t *testing.T) {
 			remoteinbox.WithDelivery(deliveryService),
 		)
 
-		invite, err := projectService.AddMemberToProject(ctx, project.ID, owner.ID, remoteActor.ID, "developer")
+		invite, err := projectService.AddMemberToProject(ctx, project.ID, owner.ID, remoteActor.ID, "manager")
 		require.NoError(t, err)
 		acceptInviteAPID := "https://remote.example/activities/accept-follow-bot-invite"
 		acceptInviteBody := []byte(`{"id":"` + acceptInviteAPID + `","type":"Accept","actor":"` + remoteActor.APID + `","object":"` + invite.APID + `","target":"` + project.APID + `"}`)
@@ -2056,6 +2056,40 @@ func TestRemoteInboxRejectsUnsafeInboundActivities(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects remote ticket delete without project permission", func(t *testing.T) {
+		fx := newInboxIntegrationFixture(t, db)
+		remoteActor, privateKey := createRemoteActor(t, fx.Ctx, db, "remote-developer")
+		projectService := project.NewService(project.NewRepository(db, fx.Cfg), fx.Cfg)
+
+		invite, err := projectService.AddMemberToProject(fx.Ctx, fx.Project.ID, fx.Project.OwnerID, remoteActor.ID, project.RoleDeveloper)
+		require.NoError(t, err)
+		acceptInviteAPID := "https://remote.example/activities/accept-developer-invite"
+		acceptInviteBody := []byte(`{"id":"` + acceptInviteAPID + `","type":"Accept","actor":"` + remoteActor.APID + `","object":"` + invite.APID + `","target":"` + fx.Project.APID + `"}`)
+		acceptInviteReq := signedRemoteInboxRequest(t, fx.Ctx, fx.Project.APID, remoteActor, privateKey, acceptInviteBody)
+		_, err = fx.Receiver.Receive(fx.Ctx, acceptInviteReq, fx.Project.APID, acceptInviteBody)
+		require.NoError(t, err)
+		requireInviteStatus(t, db, invite.ID, "accepted")
+		requireFollow(t, db, remoteActor.ID, fx.Project.ID, "accepted")
+
+		remoteTicketAPID := "https://remote.example/tickets/developer-ticket"
+		createTicketAPID := "https://remote.example/activities/create-developer-ticket"
+		createTicketBody := []byte(`{"id":"` + createTicketAPID + `","type":"Create","actor":"` + remoteActor.APID + `","object":{"id":"` + remoteTicketAPID + `","type":"forge:Ticket","attributedTo":"` + remoteActor.APID + `","context":"` + fx.Project.APID + `","name":"Developer ticket","content":"Create is allowed.","forge:priority":"medium","forge:ticketType":"task","forge:isResolved":false}}`)
+		createTicketReq := signedRemoteInboxRequest(t, fx.Ctx, fx.Project.APID, remoteActor, privateKey, createTicketBody)
+		_, err = fx.Receiver.Receive(fx.Ctx, createTicketReq, fx.Project.APID, createTicketBody)
+		require.NoError(t, err)
+		requireActivityForObject(t, db, "Create", remoteTicketAPID)
+		requireTicketByAPID(t, db, remoteTicketAPID)
+
+		deleteTicketAPID := "https://remote.example/activities/delete-developer-ticket"
+		deleteTicketBody := []byte(`{"id":"` + deleteTicketAPID + `","type":"Delete","actor":"` + remoteActor.APID + `","object":"` + remoteTicketAPID + `","target":"` + fx.Project.APID + `"}`)
+		deleteTicketReq := signedRemoteInboxRequest(t, fx.Ctx, fx.Project.APID, remoteActor, privateKey, deleteTicketBody)
+		_, err = fx.Receiver.Receive(fx.Ctx, deleteTicketReq, fx.Project.APID, deleteTicketBody)
+
+		require.ErrorIs(t, err, remoteinbox.ErrForbiddenActor)
+		requireNoActivityByAPID(t, db, deleteTicketAPID)
+		requireTicketByAPID(t, db, remoteTicketAPID)
+	})
+
 	t.Run("rejects duplicate activity id from another actor", func(t *testing.T) {
 		fx := newInboxIntegrationFixture(t, db)
 		firstActor, firstPrivateKey := createRemoteActor(t, fx.Ctx, db, "duplicate-first")
@@ -2485,6 +2519,15 @@ func requireNoTicketByAPID(t *testing.T, db *sqlx.DB, apID string) {
 	err := db.Get(&count, `SELECT count(*) FROM tickets WHERE ap_id = $1`, apID)
 	require.NoError(t, err)
 	require.Zero(t, count)
+}
+
+func requireTicketByAPID(t *testing.T, db *sqlx.DB, apID string) {
+	t.Helper()
+
+	var count int
+	err := db.Get(&count, `SELECT count(*) FROM tickets WHERE ap_id = $1`, apID)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
 }
 
 func requireNoObjectByAPID(t *testing.T, db *sqlx.DB, apID string) {

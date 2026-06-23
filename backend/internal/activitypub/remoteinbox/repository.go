@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	"github.com/antonovs105/project-management-system-go/internal/project"
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
 )
@@ -614,19 +615,11 @@ func (r *PgRepository) insertRemoteNoteCommentTx(ctx context.Context, tx *sqlx.T
 		return err
 	}
 
-	var acceptedFollower bool
-	if err := tx.GetContext(ctx, &acceptedFollower, `
-		SELECT EXISTS(
-			SELECT 1
-			FROM actor_follows
-			WHERE follower_actor_id = $1
-				AND followed_actor_id = $2
-				AND state = 'accepted'
-		)
-	`, activity.ActorID, targetActorID); err != nil {
+	allowed, err := actorHasProjectPermissionTx(ctx, tx, targetActorID, activity.ActorID, project.PermissionCommentsCreate)
+	if err != nil {
 		return err
 	}
-	if !acceptedFollower {
+	if !allowed {
 		return ErrForbiddenActor
 	}
 
@@ -669,19 +662,11 @@ func (r *PgRepository) insertRemoteNoteCommentTx(ctx context.Context, tx *sqlx.T
 func (r *PgRepository) insertRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity) error {
 	ticket := activity.ObjectTicket
 
-	var acceptedFollower bool
-	if err := tx.GetContext(ctx, &acceptedFollower, `
-		SELECT EXISTS(
-			SELECT 1
-			FROM actor_follows
-			WHERE follower_actor_id = $1
-				AND followed_actor_id = $2
-				AND state = 'accepted'
-		)
-	`, activity.ActorID, targetActorID); err != nil {
+	allowed, err := actorHasProjectPermissionTx(ctx, tx, targetActorID, activity.ActorID, project.PermissionTicketsCreate)
+	if err != nil {
 		return err
 	}
-	if !acceptedFollower {
+	if !allowed {
 		return ErrForbiddenActor
 	}
 
@@ -753,26 +738,17 @@ func (r *PgRepository) insertRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, ta
 func (r *PgRepository) updateRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity) error {
 	ticket := activity.ObjectTicket
 
-	var acceptedFollower bool
-	if err := tx.GetContext(ctx, &acceptedFollower, `
-		SELECT EXISTS(
-			SELECT 1
-			FROM actor_follows
-			WHERE follower_actor_id = $1
-				AND followed_actor_id = $2
-				AND state = 'accepted'
-		)
-	`, activity.ActorID, targetActorID); err != nil {
+	allowed, err := actorHasProjectPermissionTx(ctx, tx, targetActorID, activity.ActorID, project.PermissionTicketsUpdate)
+	if err != nil {
 		return err
 	}
-	if !acceptedFollower {
+	if !allowed {
 		return ErrForbiddenActor
 	}
 
 	var stored struct {
 		ID          string `db:"id"`
 		ProjectID   string `db:"project_id"`
-		ReporterID  string `db:"reporter_id"`
 		Title       string `db:"title"`
 		Description string `db:"description"`
 		Status      string `db:"status"`
@@ -780,7 +756,7 @@ func (r *PgRepository) updateRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, ta
 		Type        string `db:"type"`
 	}
 	if err := tx.GetContext(ctx, &stored, `
-		SELECT id::text, project_id::text, reporter_id::text, title, description, status, priority, type
+		SELECT id::text, project_id::text, title, description, status, priority, type
 		FROM tickets
 		WHERE ap_id = $1
 		FOR UPDATE
@@ -790,7 +766,7 @@ func (r *PgRepository) updateRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, ta
 		}
 		return err
 	}
-	if stored.ProjectID != targetActorID || stored.ReporterID != activity.ActorID {
+	if stored.ProjectID != targetActorID {
 		return ErrActivityConflict
 	}
 
@@ -857,7 +833,7 @@ func (r *PgRepository) updateRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, ta
 		return err
 	}
 
-	_, err := tx.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO ap_objects (ap_id, object_type, actor_id, local_ref_table, local_ref_id, document)
 		VALUES ($1, 'Ticket', $2, 'tickets', $3, $4)
 		ON CONFLICT (ap_id) DO UPDATE
@@ -876,29 +852,20 @@ func (r *PgRepository) insertRemoteTicketAssigneeTx(ctx context.Context, tx *sql
 	assigneeAPID := *activity.ObjectAPID
 	ticketAPID := *activity.TargetAPID
 
-	var acceptedFollower bool
-	if err := tx.GetContext(ctx, &acceptedFollower, `
-		SELECT EXISTS(
-			SELECT 1
-			FROM actor_follows
-			WHERE follower_actor_id = $1
-				AND followed_actor_id = $2
-				AND state = 'accepted'
-		)
-	`, activity.ActorID, targetActorID); err != nil {
+	allowed, err := actorHasProjectPermissionTx(ctx, tx, targetActorID, activity.ActorID, project.PermissionTicketsUpdate)
+	if err != nil {
 		return err
 	}
-	if !acceptedFollower {
+	if !allowed {
 		return ErrForbiddenActor
 	}
 
 	var storedTicket struct {
-		ID         string `db:"id"`
-		ProjectID  string `db:"project_id"`
-		ReporterID string `db:"reporter_id"`
+		ID        string `db:"id"`
+		ProjectID string `db:"project_id"`
 	}
 	if err := tx.GetContext(ctx, &storedTicket, `
-		SELECT id::text, project_id::text, reporter_id::text
+		SELECT id::text, project_id::text
 		FROM tickets
 		WHERE ap_id = $1
 		FOR UPDATE
@@ -908,7 +875,7 @@ func (r *PgRepository) insertRemoteTicketAssigneeTx(ctx context.Context, tx *sql
 		}
 		return err
 	}
-	if storedTicket.ProjectID != targetActorID || storedTicket.ReporterID != activity.ActorID {
+	if storedTicket.ProjectID != targetActorID {
 		return ErrActivityConflict
 	}
 
@@ -968,29 +935,20 @@ func (r *PgRepository) deleteRemoteTicketAssigneeTx(ctx context.Context, tx *sql
 	assigneeAPID := *activity.ObjectAPID
 	ticketAPID := *activity.TargetAPID
 
-	var acceptedFollower bool
-	if err := tx.GetContext(ctx, &acceptedFollower, `
-		SELECT EXISTS(
-			SELECT 1
-			FROM actor_follows
-			WHERE follower_actor_id = $1
-				AND followed_actor_id = $2
-				AND state = 'accepted'
-		)
-	`, activity.ActorID, targetActorID); err != nil {
+	allowed, err := actorHasProjectPermissionTx(ctx, tx, targetActorID, activity.ActorID, project.PermissionTicketsUpdate)
+	if err != nil {
 		return err
 	}
-	if !acceptedFollower {
+	if !allowed {
 		return ErrForbiddenActor
 	}
 
 	var storedTicket struct {
-		ID         string `db:"id"`
-		ProjectID  string `db:"project_id"`
-		ReporterID string `db:"reporter_id"`
+		ID        string `db:"id"`
+		ProjectID string `db:"project_id"`
 	}
 	if err := tx.GetContext(ctx, &storedTicket, `
-		SELECT id::text, project_id::text, reporter_id::text
+		SELECT id::text, project_id::text
 		FROM tickets
 		WHERE ap_id = $1
 		FOR UPDATE
@@ -1000,7 +958,7 @@ func (r *PgRepository) deleteRemoteTicketAssigneeTx(ctx context.Context, tx *sql
 		}
 		return err
 	}
-	if storedTicket.ProjectID != targetActorID || storedTicket.ReporterID != activity.ActorID {
+	if storedTicket.ProjectID != targetActorID {
 		return ErrActivityConflict
 	}
 
@@ -1038,29 +996,20 @@ func (r *PgRepository) deleteRemoteTicketAssigneeTx(ctx context.Context, tx *sql
 func (r *PgRepository) deleteRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity) error {
 	ticketAPID := *activity.ObjectAPID
 
-	var acceptedFollower bool
-	if err := tx.GetContext(ctx, &acceptedFollower, `
-		SELECT EXISTS(
-			SELECT 1
-			FROM actor_follows
-			WHERE follower_actor_id = $1
-				AND followed_actor_id = $2
-				AND state = 'accepted'
-		)
-	`, activity.ActorID, targetActorID); err != nil {
+	allowed, err := actorHasProjectPermissionTx(ctx, tx, targetActorID, activity.ActorID, project.PermissionTicketsDelete)
+	if err != nil {
 		return err
 	}
-	if !acceptedFollower {
+	if !allowed {
 		return ErrForbiddenActor
 	}
 
 	var storedTicket struct {
-		ID         string `db:"id"`
-		ProjectID  string `db:"project_id"`
-		ReporterID string `db:"reporter_id"`
+		ID        string `db:"id"`
+		ProjectID string `db:"project_id"`
 	}
 	if err := tx.GetContext(ctx, &storedTicket, `
-		SELECT id::text, project_id::text, reporter_id::text
+		SELECT id::text, project_id::text
 		FROM tickets
 		WHERE ap_id = $1
 		FOR UPDATE
@@ -1070,7 +1019,7 @@ func (r *PgRepository) deleteRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, ta
 		}
 		return err
 	}
-	if storedTicket.ProjectID != targetActorID || storedTicket.ReporterID != activity.ActorID {
+	if storedTicket.ProjectID != targetActorID {
 		return ErrActivityConflict
 	}
 
@@ -1096,6 +1045,30 @@ func (r *PgRepository) deleteRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, ta
 		return ErrInvalidActivity
 	}
 	return nil
+}
+
+// actorHasProjectPermissionTx reports whether an actor can perform permission-scoped project work.
+func actorHasProjectPermissionTx(ctx context.Context, tx *sqlx.Tx, projectID string, actorID string, permission string) (bool, error) {
+	var allowed bool
+	err := tx.GetContext(ctx, &allowed, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM project_members member
+			JOIN project_role_permissions role_permission ON role_permission.role_id = member.role_id
+			WHERE member.project_id = $1
+				AND member.user_id = $2
+				AND role_permission.permission = $3
+		) OR EXISTS(
+			SELECT 1
+			FROM project_invites invite
+			JOIN project_role_permissions role_permission ON role_permission.role_id = invite.role_id
+			WHERE invite.project_id = $1
+				AND invite.invitee_actor_id = $2
+				AND invite.status = 'accepted'
+				AND role_permission.permission = $3
+		)
+	`, projectID, actorID, permission)
+	return allowed, err
 }
 
 // tombstoneTicketCommentsTx tombstones all comment objects under a deleted ticket.
