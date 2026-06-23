@@ -3,6 +3,7 @@ set -eu
 
 APP_DIR=${APP_DIR:-/opt/progo/app}
 ENV_FILE=${ENV_FILE:-"$APP_DIR/.env"}
+PROGO_CONFIG_FILE=${PROGO_CONFIG_FILE:-"$APP_DIR/progo.yml"}
 COMPOSE_FILE=${COMPOSE_FILE:-"$APP_DIR/deploy/docker-compose.bluegreen.yml"}
 STATE_FILE=${STATE_FILE:-"$APP_DIR/.active-color"}
 TAG_FILE=${TAG_FILE:-"$APP_DIR/.active-image-tag"}
@@ -22,6 +23,11 @@ fi
 
 if [ ! -f "$COMPOSE_FILE" ]; then
   echo "missing compose file: $COMPOSE_FILE" >&2
+  exit 1
+fi
+
+if [ ! -f "$PROGO_CONFIG_FILE" ]; then
+  echo "missing runtime config: $PROGO_CONFIG_FILE" >&2
   exit 1
 fi
 
@@ -72,6 +78,7 @@ fi
 export INSTANCE_NAME
 export BACKEND_IMAGE
 export FRONTEND_IMAGE
+export PROGO_CONFIG_FILE
 export FEDERATION_NETWORK
 export MIGRATIONS_DIR
 export POSTGRES_USER POSTGRES_DB

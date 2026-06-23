@@ -57,6 +57,13 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
     staleTime: 60_000,
   });
 
+  const oauthProviders = useQuery({
+    queryKey: queryKeys.oauthProviders,
+    queryFn: api.listOAuthProviders,
+    retry: false,
+    staleTime: 60_000,
+  });
+
   const login = useMutation({
     mutationFn: api.login,
     onSuccess: ({ token }) => {
@@ -103,7 +110,7 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
 
   const pending = login.isPending || register.isPending;
   const registrationEnabled = publicInstance.data?.registration_enabled ?? true;
-  const availableOAuthProviders = publicInstance.data?.oauth_providers ?? [];
+  const availableOAuthProviders = oauthProviders.data ?? publicInstance.data?.oauth_providers ?? [];
 
   return (
     <main className="grid min-h-screen bg-zinc-100 lg:grid-cols-[1fr_460px]">

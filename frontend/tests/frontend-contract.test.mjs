@@ -8,6 +8,10 @@ function read(path) {
   return readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 }
 
+function readRoot(path) {
+  return readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
+}
+
 function sourceFiles(dir) {
   return readdirSync(dir).flatMap((entry) => {
     const path = join(dir, entry);
@@ -113,6 +117,24 @@ test("frontend exposes a persistent light and dark theme switch", () => {
   assert.ok(toggle.includes("useTheme"), "theme toggle must use the shared theme state");
   assert.ok(layout.includes("<ThemeToggle />"), "workspace header must expose the theme toggle");
   assert.ok(css.includes("html.dark"), "global CSS must define dark mode surface styles");
+});
+
+test("auth page queries optional OAuth providers directly", () => {
+  const authPage = read("src/pages/AuthPage.tsx");
+
+  assert.ok(authPage.includes("api.listOAuthProviders"), "auth page must not rely only on /instance metadata for OAuth buttons");
+  assert.ok(authPage.includes("queryKeys.oauthProviders"), "OAuth provider query must use a stable query key");
+  assert.ok(authPage.includes("oauthProviders.data ?? publicInstance.data?.oauth_providers"), "auth page must keep /instance OAuth metadata as fallback");
+});
+
+test("blue-green deploy mounts runtime config into backend containers", () => {
+  const compose = readRoot("deploy/docker-compose.bluegreen.yml");
+  const deploy = readRoot("deploy/bluegreen-deploy.sh");
+
+  assert.ok(deploy.includes('PROGO_CONFIG_FILE=${PROGO_CONFIG_FILE:-"$APP_DIR/progo.yml"}'), "deploy script must default to the runtime YAML config");
+  assert.ok(deploy.includes("missing runtime config"), "deploy script must fail clearly when runtime config is absent");
+  assert.ok(compose.includes("PROGO_CONFIG: /etc/progo/progo.yml"), "backend containers must receive PROGO_CONFIG");
+  assert.ok(compose.includes("${PROGO_CONFIG_FILE:?PROGO_CONFIG_FILE is required}:/etc/progo/progo.yml:ro"), "runtime config must be mounted read-only");
 });
 
 test("frontend exposes bilingual locale dictionaries and copyright notice", () => {
