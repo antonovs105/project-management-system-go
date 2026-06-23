@@ -229,7 +229,7 @@ $DOMAIN {
   encode zstd gzip
 
   @backend_api {
-    path /api* /auth* /.well-known/* /users* /tickets* /comments* /activities* /health /ready
+    path /api* /auth* /.well-known/* /users* /tickets* /comments* /activities* /instance /health /ready
   }
   handle @backend_api {
     reverse_proxy 127.0.0.1:$backend_port

@@ -136,6 +136,7 @@ test("blue-green deploy mounts runtime config into backend containers", () => {
   assert.ok(deploy.includes("printf '{}\\n'"), "deploy script must create a valid empty YAML fallback");
   assert.ok(compose.includes("PROGO_CONFIG: /etc/progo/progo.yml"), "backend containers must receive PROGO_CONFIG");
   assert.ok(compose.includes("${PROGO_CONFIG_FILE:?PROGO_CONFIG_FILE is required}:/etc/progo/progo.yml:ro"), "runtime config must be mounted read-only");
+  assert.ok(deploy.includes("/instance /health /ready"), "Caddy must proxy public instance metadata to the backend");
 });
 
 test("frontend exposes bilingual locale dictionaries and copyright notice", () => {
