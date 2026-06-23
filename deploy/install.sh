@@ -55,6 +55,9 @@ download_assets() {
   cp -R "$source_dir/deploy" "$APP_DIR/deploy"
   cp -R "$source_dir/migrations" "$APP_DIR/migrations"
   chmod +x "$APP_DIR/deploy/bluegreen-deploy.sh"
+  if [ -f "$APP_DIR/deploy/pmsctl.sh" ]; then
+    chmod +x "$APP_DIR/deploy/pmsctl.sh"
+  fi
 }
 
 run_pmsctl() {

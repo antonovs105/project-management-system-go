@@ -80,8 +80,7 @@ Create the first owner account after the deployment is healthy:
 
 ```bash
 cd /opt/progo/app
-COLOR=$(cat .active-color)
-printf 'change-this-password\n' | docker compose --env-file .env -f deploy/docker-compose.bluegreen.yml exec -T "backend-$COLOR" /app/pmsctl owner create --username owner --email owner@example.test --password-stdin
+printf 'change-this-password\n' | ./deploy/pmsctl.sh owner create --username owner --email owner@example.test --password-stdin
 ```
 
 This can be run only while no owner account exists.
@@ -199,6 +198,14 @@ docker compose run --rm backend /app/pmsctl owner create --help
 docker compose run --rm backend /app/pmsctl federation discover --help
 docker compose run --rm backend /app/pmsctl federation follow --help
 docker compose run --rm backend /app/pmsctl federation accept-follow --help
+```
+
+On a blue-green VM install, run the CLI inside the active backend container:
+
+```bash
+cd /opt/progo/app
+./deploy/pmsctl.sh owner create --help
+./deploy/pmsctl.sh federation discover --help
 ```
 
 ## Configuration Notes
