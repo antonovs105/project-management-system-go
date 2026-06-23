@@ -132,7 +132,8 @@ test("blue-green deploy mounts runtime config into backend containers", () => {
   const deploy = readRoot("deploy/bluegreen-deploy.sh");
 
   assert.ok(deploy.includes('PROGO_CONFIG_FILE=${PROGO_CONFIG_FILE:-"$APP_DIR/progo.yml"}'), "deploy script must default to the runtime YAML config");
-  assert.ok(deploy.includes("missing runtime config"), "deploy script must fail clearly when runtime config is absent");
+  assert.ok(deploy.includes("env-only compatibility config"), "deploy script must remain compatible with existing .env-only installs");
+  assert.ok(deploy.includes("printf '{}\\n'"), "deploy script must create a valid empty YAML fallback");
   assert.ok(compose.includes("PROGO_CONFIG: /etc/progo/progo.yml"), "backend containers must receive PROGO_CONFIG");
   assert.ok(compose.includes("${PROGO_CONFIG_FILE:?PROGO_CONFIG_FILE is required}:/etc/progo/progo.yml:ro"), "runtime config must be mounted read-only");
 });

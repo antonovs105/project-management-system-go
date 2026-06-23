@@ -26,9 +26,16 @@ if [ ! -f "$COMPOSE_FILE" ]; then
   exit 1
 fi
 
-if [ ! -f "$PROGO_CONFIG_FILE" ]; then
-  echo "missing runtime config: $PROGO_CONFIG_FILE" >&2
-  exit 1
+if [ -f "$PROGO_CONFIG_FILE" ]; then
+  echo "using runtime config: $PROGO_CONFIG_FILE"
+else
+  GENERATED_PROGO_CONFIG_FILE=${GENERATED_PROGO_CONFIG_FILE:-"$APP_DIR/.progo.env-only.yml"}
+  if [ ! -f "$GENERATED_PROGO_CONFIG_FILE" ]; then
+    umask 077
+    printf '{}\n' > "$GENERATED_PROGO_CONFIG_FILE"
+  fi
+  echo "runtime config not found at $PROGO_CONFIG_FILE; using env-only compatibility config: $GENERATED_PROGO_CONFIG_FILE"
+  PROGO_CONFIG_FILE=$GENERATED_PROGO_CONFIG_FILE
 fi
 
 env_value() {
