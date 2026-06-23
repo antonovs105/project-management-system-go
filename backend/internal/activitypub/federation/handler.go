@@ -2,6 +2,7 @@ package federation
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -281,6 +282,7 @@ func writeFederationError(c echo.Context, err error) error {
 	case errors.Is(err, ErrRemoteRequestFailed):
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
 	default:
+		log.Printf("personal_federation_error route=%s user_id=%s error=%v", c.Path(), currentUserID(c), err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load federation data"})
 	}
 }

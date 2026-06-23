@@ -1,0 +1,5 @@
+-- Intentionally left empty.
+--
+-- This migration repairs already-installed instances where migration 000028 was
+-- marked applied but the helper function or column is missing. Dropping them
+-- here would break instances that still depend on migration 000028.
