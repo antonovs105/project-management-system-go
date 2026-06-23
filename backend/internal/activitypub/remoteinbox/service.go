@@ -832,14 +832,16 @@ func extractInboundProjectInvite(value any) *InboundProjectInvite {
 	}
 	name, _, nameOK := optionalStringValue(raw, "name")
 	role, _, roleOK := optionalStringValue(raw, "role")
-	if !nameOK || !roleOK {
+	permissions, permissionsOK := optionalStringListValue(raw, "permissions")
+	if !nameOK || !roleOK || !permissionsOK {
 		return nil
 	}
 	invite := &InboundProjectInvite{
-		ProjectAPID: projectAPID,
-		Name:        name,
-		Role:        role,
-		TargetAPID:  extractAPID(raw["target"]),
+		ProjectAPID:     projectAPID,
+		Name:            name,
+		Role:            role,
+		RolePermissions: permissions,
+		TargetAPID:      extractAPID(raw["target"]),
 	}
 	return invite
 }
@@ -914,6 +916,30 @@ func optionalStringValue(raw map[string]any, key string) (string, bool, bool) {
 	}
 	typed, ok := value.(string)
 	return typed, true, ok
+}
+
+// optionalStringListValue reads an optional string-list field and reports type validity.
+func optionalStringListValue(raw map[string]any, key string) ([]string, bool) {
+	value, exists := raw[key]
+	if !exists {
+		return nil, true
+	}
+	values, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+	result := make([]string, 0, len(values))
+	for _, item := range values {
+		typed, ok := item.(string)
+		if !ok {
+			return nil, false
+		}
+		typed = strings.TrimSpace(typed)
+		if typed != "" {
+			result = append(result, typed)
+		}
+	}
+	return result, true
 }
 
 // optionalBoolValue reads an optional boolean field and reports type validity.

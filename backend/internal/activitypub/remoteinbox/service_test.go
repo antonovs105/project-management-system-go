@@ -764,7 +764,7 @@ func TestServiceReceiveStoresUserProjectInvite(t *testing.T) {
 		ActorID:   "remote-owner",
 		ActorAPID: "https://remote.example/users/owner",
 	}})
-	body := []byte(`{"id":"https://remote.example/activities/invite-1","type":"Invite","actor":"https://remote.example/users/owner","object":{"id":"https://remote.example/projects/board","type":"Group","name":"Remote Board","target":"http://localhost:8080/users/alice","role":"viewer"},"target":"http://localhost:8080/users/alice"}`)
+	body := []byte(`{"id":"https://remote.example/activities/invite-1","type":"Invite","actor":"https://remote.example/users/owner","object":{"id":"https://remote.example/projects/board","type":"Group","name":"Remote Board","target":"http://localhost:8080/users/alice","role":"developer","permissions":["project.read","tickets.create","tickets.update"]},"target":"http://localhost:8080/users/alice"}`)
 
 	accepted, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/users/alice", body)
 
@@ -774,7 +774,8 @@ func TestServiceReceiveStoresUserProjectInvite(t *testing.T) {
 	require.NotNil(t, repo.projectInvite.ObjectInvite)
 	assert.Equal(t, "https://remote.example/projects/board", repo.projectInvite.ObjectInvite.ProjectAPID)
 	assert.Equal(t, "Remote Board", repo.projectInvite.ObjectInvite.Name)
-	assert.Equal(t, "viewer", repo.projectInvite.ObjectInvite.Role)
+	assert.Equal(t, "developer", repo.projectInvite.ObjectInvite.Role)
+	assert.Equal(t, []string{"project.read", "tickets.create", "tickets.update"}, repo.projectInvite.ObjectInvite.RolePermissions)
 }
 
 func TestServiceReceiveStoresProjectAcceptInvite(t *testing.T) {

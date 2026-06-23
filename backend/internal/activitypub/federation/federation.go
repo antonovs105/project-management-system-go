@@ -3,6 +3,8 @@ package federation
 import (
 	"errors"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 var (
@@ -71,22 +73,23 @@ type RemoteFollow struct {
 
 // RemoteProjectInvite is a remote project invitation addressed to the authenticated user.
 type RemoteProjectInvite struct {
-	ID             string     `db:"id" json:"id"`
-	InviteAPID     string     `db:"invite_ap_id" json:"invite_ap_id"`
-	ActivityID     string     `db:"activity_id" json:"activity_id"`
-	ProjectAPID    string     `db:"project_ap_id" json:"project_ap_id"`
-	ProjectName    string     `db:"project_name" json:"project_name"`
-	InviterActorID string     `db:"inviter_actor_id" json:"inviter_actor_id"`
-	InviterAPID    string     `db:"inviter_ap_id" json:"inviter_ap_id"`
-	InviterHandle  string     `db:"inviter_handle" json:"inviter_handle"`
-	InviterName    string     `db:"inviter_name" json:"inviter_name"`
-	InviteeActorID string     `db:"invitee_actor_id" json:"invitee_actor_id"`
-	Role           string     `db:"role" json:"role"`
-	TargetInboxURL string     `db:"target_inbox_url" json:"target_inbox_url"`
-	Status         string     `db:"status" json:"status"`
-	CreatedAt      time.Time  `db:"created_at" json:"created_at"`
-	UpdatedAt      time.Time  `db:"updated_at" json:"updated_at"`
-	ResolvedAt     *time.Time `db:"resolved_at" json:"resolved_at,omitempty"`
+	ID              string         `db:"id" json:"id"`
+	InviteAPID      string         `db:"invite_ap_id" json:"invite_ap_id"`
+	ActivityID      string         `db:"activity_id" json:"activity_id"`
+	ProjectAPID     string         `db:"project_ap_id" json:"project_ap_id"`
+	ProjectName     string         `db:"project_name" json:"project_name"`
+	InviterActorID  string         `db:"inviter_actor_id" json:"inviter_actor_id"`
+	InviterAPID     string         `db:"inviter_ap_id" json:"inviter_ap_id"`
+	InviterHandle   string         `db:"inviter_handle" json:"inviter_handle"`
+	InviterName     string         `db:"inviter_name" json:"inviter_name"`
+	InviteeActorID  string         `db:"invitee_actor_id" json:"invitee_actor_id"`
+	Role            string         `db:"role" json:"role"`
+	RolePermissions pq.StringArray `db:"role_permissions" json:"role_permissions"`
+	TargetInboxURL  string         `db:"target_inbox_url" json:"target_inbox_url"`
+	Status          string         `db:"status" json:"status"`
+	CreatedAt       time.Time      `db:"created_at" json:"created_at"`
+	UpdatedAt       time.Time      `db:"updated_at" json:"updated_at"`
+	ResolvedAt      *time.Time     `db:"resolved_at" json:"resolved_at,omitempty"`
 }
 
 // RemoteActor is a user-facing remote ActivityPub actor projection.
@@ -132,20 +135,21 @@ type RemoteProjectInviteResult struct {
 
 // RemoteProject is an accepted remote project workspace visible to the authenticated user.
 type RemoteProject struct {
-	ID             string     `db:"id" json:"id"`
-	ProjectAPID    string     `db:"project_ap_id" json:"project_ap_id"`
-	ProjectName    string     `db:"project_name" json:"project_name"`
-	Role           string     `db:"role" json:"role"`
-	TargetInboxURL string     `db:"target_inbox_url" json:"target_inbox_url"`
-	InviterActorID string     `db:"inviter_actor_id" json:"inviter_actor_id"`
-	InviterAPID    string     `db:"inviter_ap_id" json:"inviter_ap_id"`
-	InviterHandle  string     `db:"inviter_handle" json:"inviter_handle"`
-	InviterName    string     `db:"inviter_name" json:"inviter_name"`
-	RemoteActorID  *string    `db:"remote_actor_id" json:"remote_actor_id,omitempty"`
-	RemoteHandle   *string    `db:"remote_handle" json:"remote_handle,omitempty"`
-	CreatedAt      time.Time  `db:"created_at" json:"created_at"`
-	UpdatedAt      time.Time  `db:"updated_at" json:"updated_at"`
-	ResolvedAt     *time.Time `db:"resolved_at" json:"resolved_at,omitempty"`
+	ID              string         `db:"id" json:"id"`
+	ProjectAPID     string         `db:"project_ap_id" json:"project_ap_id"`
+	ProjectName     string         `db:"project_name" json:"project_name"`
+	Role            string         `db:"role" json:"role"`
+	RolePermissions pq.StringArray `db:"role_permissions" json:"role_permissions"`
+	TargetInboxURL  string         `db:"target_inbox_url" json:"target_inbox_url"`
+	InviterActorID  string         `db:"inviter_actor_id" json:"inviter_actor_id"`
+	InviterAPID     string         `db:"inviter_ap_id" json:"inviter_ap_id"`
+	InviterHandle   string         `db:"inviter_handle" json:"inviter_handle"`
+	InviterName     string         `db:"inviter_name" json:"inviter_name"`
+	RemoteActorID   *string        `db:"remote_actor_id" json:"remote_actor_id,omitempty"`
+	RemoteHandle    *string        `db:"remote_handle" json:"remote_handle,omitempty"`
+	CreatedAt       time.Time      `db:"created_at" json:"created_at"`
+	UpdatedAt       time.Time      `db:"updated_at" json:"updated_at"`
+	ResolvedAt      *time.Time     `db:"resolved_at" json:"resolved_at,omitempty"`
 }
 
 // RemoteTicket is a normalized remote ForgeFed ticket for the local UI.

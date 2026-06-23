@@ -325,13 +325,14 @@ func remoteProjectInviteSelect() string {
 			invite.invite_ap_id,
 			invite.activity_id::text,
 			invite.project_ap_id,
-			invite.project_name,
+			COALESCE(NULLIF(NULLIF(invite.project_name, ''), invite.project_ap_id), NULLIF(remote_project.name, ''), NULLIF(remote_project.handle, ''), invite.project_ap_id) AS project_name,
 			invite.inviter_actor_id::text,
 			inviter.ap_id AS inviter_ap_id,
 			inviter.handle AS inviter_handle,
 			inviter.name AS inviter_name,
 			invite.invitee_actor_id::text,
 			invite.role,
+			remote_project_role_permissions(invite.role, invite.role_permissions) AS role_permissions,
 			invite.target_inbox_url,
 			invite.status,
 			invite.created_at,
@@ -340,6 +341,9 @@ func remoteProjectInviteSelect() string {
 		FROM remote_project_invites invite
 		JOIN actors inviter ON inviter.id = invite.inviter_actor_id
 		LEFT JOIN ap_activities response ON response.id = invite.response_activity_id
+		LEFT JOIN actors remote_project
+			ON remote_project.ap_id = invite.project_ap_id
+			AND remote_project.is_local = false
 	`
 }
 
@@ -349,8 +353,9 @@ func remoteProjectSelect() string {
 		SELECT
 			invite.id::text,
 			invite.project_ap_id,
-			invite.project_name,
+			COALESCE(NULLIF(NULLIF(invite.project_name, ''), invite.project_ap_id), NULLIF(remote_project.name, ''), NULLIF(remote_project.handle, ''), invite.project_ap_id) AS project_name,
 			invite.role,
+			remote_project_role_permissions(invite.role, invite.role_permissions) AS role_permissions,
 			invite.target_inbox_url,
 			invite.inviter_actor_id::text,
 			inviter.ap_id AS inviter_ap_id,

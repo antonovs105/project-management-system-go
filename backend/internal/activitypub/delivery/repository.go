@@ -164,6 +164,9 @@ func (r *PgRepository) StartAttempt(ctx context.Context, deliveryID string) (*De
 	if state == StateDelivered {
 		return nil, ErrDeliveryDone
 	}
+	if state == StateProcessing {
+		return nil, ErrDeliveryDone
+	}
 	if state == StateDead || attempts >= maxAttempts {
 		return nil, ErrDeliveryExhausted
 	}

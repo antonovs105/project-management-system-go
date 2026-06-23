@@ -1283,6 +1283,23 @@ func (r *PgRepository) CreateInvite(ctx context.Context, invite *ProjectInvite) 
 	if err != nil {
 		return nil, err
 	}
+	var projectName string
+	if err := tx.GetContext(ctx, &projectName, `
+		SELECT name
+		FROM projects
+		WHERE id = $1
+	`, invite.ProjectID); err != nil {
+		return nil, err
+	}
+	rolePermissions := make([]string, 0)
+	if err := tx.SelectContext(ctx, &rolePermissions, `
+		SELECT permission
+		FROM project_role_permissions
+		WHERE role_id = $1
+		ORDER BY permission ASC
+	`, invite.RoleID); err != nil {
+		return nil, err
+	}
 	inviterAPID, err := lookupActorAPID(ctx, tx, invite.InviterActorID)
 	if err != nil {
 		return nil, err
@@ -1319,10 +1336,12 @@ func (r *PgRepository) CreateInvite(ctx context.Context, invite *ProjectInvite) 
 	invite.APID = activityAPID
 
 	object := map[string]any{
-		"type":   "Group",
-		"id":     projectAPID,
-		"target": inviteeAPID,
-		"role":   invite.Role,
+		"type":        "Group",
+		"id":          projectAPID,
+		"name":        projectName,
+		"target":      inviteeAPID,
+		"role":        invite.Role,
+		"permissions": rolePermissions,
 	}
 	doc := activitypub.ActivityDocument("Invite", activityAPID, inviterAPID, object, inviteeAPID, time.Now().UTC())
 	rawDoc, err := json.Marshal(doc)

@@ -82,10 +82,11 @@ type InboundTicket struct {
 
 // InboundProjectInvite is the normalized embedded project object in an Invite.
 type InboundProjectInvite struct {
-	ProjectAPID string
-	Name        string
-	Role        string
-	TargetAPID  string
+	ProjectAPID     string
+	Name            string
+	Role            string
+	RolePermissions []string
+	TargetAPID      string
 }
 
 // AcceptedActivity describes an accepted or deduplicated inbound activity.

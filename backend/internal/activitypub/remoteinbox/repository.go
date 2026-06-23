@@ -337,10 +337,11 @@ func (r *PgRepository) StoreInboundProjectInvite(ctx context.Context, targetActo
 				project_ap_id,
 				project_name,
 				role,
+				role_permissions,
 				target_inbox_url,
 				status
 			)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending')
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')
 			ON CONFLICT (invite_ap_id) DO NOTHING
 		`,
 			activity.ID,
@@ -350,6 +351,7 @@ func (r *PgRepository) StoreInboundProjectInvite(ctx context.Context, targetActo
 			activity.ObjectInvite.ProjectAPID,
 			projectName,
 			role,
+			pq.Array(activity.ObjectInvite.RolePermissions),
 			activitypub.Inbox(activity.ObjectInvite.ProjectAPID),
 		); err != nil {
 			return nil, err
