@@ -721,10 +721,10 @@ func projectCollaboratorSelectQuery() string {
 // projectCollaboratorRolesSQL returns role assignments for local and accepted remote collaborators.
 func projectCollaboratorRolesSQL() string {
 	return `
-		SELECT member.project_id::text, member.user_id::text AS actor_id, member.role_id::text AS role_id
+		SELECT member.project_id, member.user_id::text AS actor_id, member.role_id
 		FROM project_members member
 		UNION ALL
-		SELECT invite.project_id::text, invite.invitee_actor_id::text AS actor_id, invite.role_id::text AS role_id
+		SELECT invite.project_id, invite.invitee_actor_id::text AS actor_id, invite.role_id
 		FROM project_invites invite
 		JOIN actors invitee ON invitee.id = invite.invitee_actor_id
 		WHERE invite.status = 'accepted'
