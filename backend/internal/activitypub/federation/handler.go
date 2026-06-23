@@ -28,6 +28,14 @@ func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.GET("/me/remote-project-invites", h.ListRemoteProjectInvites)
 	api.POST("/me/remote-project-invites/:id/accept", h.AcceptRemoteProjectInvite)
 	api.POST("/me/remote-project-invites/:id/reject", h.RejectRemoteProjectInvite)
+	api.GET("/remote-projects", h.ListRemoteProjects)
+	api.GET("/remote-projects/:id", h.GetRemoteProject)
+	api.GET("/remote-projects/:id/tickets", h.ListRemoteProjectTickets)
+	api.POST("/remote-projects/:id/tickets", h.CreateRemoteTicket)
+	api.GET("/remote-projects/:id/tickets/:ticketID", h.GetRemoteTicket)
+	api.PATCH("/remote-projects/:id/tickets/:ticketID", h.UpdateRemoteTicket)
+	api.POST("/remote-projects/:id/tickets/:ticketID/move", h.MoveRemoteTicket)
+	api.DELETE("/remote-projects/:id/tickets/:ticketID", h.DeleteRemoteTicket)
 }
 
 // remoteActorRequest accepts remote actor identifiers for discovery and follow actions.
@@ -87,6 +95,98 @@ func (h *Handler) AcceptRemoteProjectInvite(c echo.Context) error {
 // RejectRemoteProjectInvite rejects a pending remote project invite for the current user.
 func (h *Handler) RejectRemoteProjectInvite(c echo.Context) error {
 	result, err := h.service.RejectRemoteProjectInvite(c.Request().Context(), currentUserID(c), strings.TrimSpace(c.Param("id")))
+	if err != nil {
+		return writeFederationError(c, err)
+	}
+	return c.JSON(http.StatusAccepted, result)
+}
+
+// ListRemoteProjects returns accepted remote project workspaces for the current user.
+func (h *Handler) ListRemoteProjects(c echo.Context) error {
+	options, err := listOptions(c, false)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	projects, err := h.service.ListRemoteProjects(c.Request().Context(), currentUserID(c), options)
+	if err != nil {
+		return writeFederationError(c, err)
+	}
+	return c.JSON(http.StatusOK, projects)
+}
+
+// GetRemoteProject returns one accepted remote project workspace.
+func (h *Handler) GetRemoteProject(c echo.Context) error {
+	project, err := h.service.GetRemoteProject(c.Request().Context(), currentUserID(c), strings.TrimSpace(c.Param("id")))
+	if err != nil {
+		return writeFederationError(c, err)
+	}
+	return c.JSON(http.StatusOK, project)
+}
+
+// ListRemoteProjectTickets returns remote project tickets through signed federation reads.
+func (h *Handler) ListRemoteProjectTickets(c echo.Context) error {
+	options, err := listOptions(c, false)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	tickets, err := h.service.ListRemoteProjectTickets(c.Request().Context(), currentUserID(c), strings.TrimSpace(c.Param("id")), options)
+	if err != nil {
+		return writeFederationError(c, err)
+	}
+	return c.JSON(http.StatusOK, tickets)
+}
+
+// GetRemoteTicket returns one remote ticket through a signed federation read.
+func (h *Handler) GetRemoteTicket(c echo.Context) error {
+	ticket, err := h.service.GetRemoteTicket(c.Request().Context(), currentUserID(c), strings.TrimSpace(c.Param("id")), strings.TrimSpace(c.Param("ticketID")))
+	if err != nil {
+		return writeFederationError(c, err)
+	}
+	return c.JSON(http.StatusOK, ticket)
+}
+
+// CreateRemoteTicket queues a Create Ticket activity to the remote project inbox.
+func (h *Handler) CreateRemoteTicket(c echo.Context) error {
+	var req RemoteTicketRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid remote ticket request"})
+	}
+	result, err := h.service.CreateRemoteTicket(c.Request().Context(), currentUserID(c), strings.TrimSpace(c.Param("id")), req)
+	if err != nil {
+		return writeFederationError(c, err)
+	}
+	return c.JSON(http.StatusAccepted, result)
+}
+
+// UpdateRemoteTicket queues an Update Ticket activity to the remote project inbox.
+func (h *Handler) UpdateRemoteTicket(c echo.Context) error {
+	var req RemoteTicketUpdateRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid remote ticket request"})
+	}
+	result, err := h.service.UpdateRemoteTicket(c.Request().Context(), currentUserID(c), strings.TrimSpace(c.Param("id")), strings.TrimSpace(c.Param("ticketID")), req)
+	if err != nil {
+		return writeFederationError(c, err)
+	}
+	return c.JSON(http.StatusAccepted, result)
+}
+
+// MoveRemoteTicket queues a status-only Update Ticket activity to the remote project inbox.
+func (h *Handler) MoveRemoteTicket(c echo.Context) error {
+	var req RemoteTicketMoveRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid remote ticket request"})
+	}
+	result, err := h.service.MoveRemoteTicket(c.Request().Context(), currentUserID(c), strings.TrimSpace(c.Param("id")), strings.TrimSpace(c.Param("ticketID")), req)
+	if err != nil {
+		return writeFederationError(c, err)
+	}
+	return c.JSON(http.StatusAccepted, result)
+}
+
+// DeleteRemoteTicket queues a Delete activity to the remote project inbox.
+func (h *Handler) DeleteRemoteTicket(c echo.Context) error {
+	result, err := h.service.DeleteRemoteTicket(c.Request().Context(), currentUserID(c), strings.TrimSpace(c.Param("id")), strings.TrimSpace(c.Param("ticketID")))
 	if err != nil {
 		return writeFederationError(c, err)
 	}
@@ -172,6 +272,12 @@ func writeFederationError(c echo.Context, err error) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
 	case errors.Is(err, ErrRemoteInviteNotPending):
 		return c.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
+	case errors.Is(err, ErrRemoteProjectNotFound), errors.Is(err, ErrRemoteTicketNotFound):
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	case errors.Is(err, ErrInvalidRemoteTicketInput):
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case errors.Is(err, ErrRemoteRequestFailed):
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
 	default:
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load federation data"})
 	}

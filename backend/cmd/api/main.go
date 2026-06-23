@@ -570,6 +570,8 @@ func main() {
 		apfederation.WithConfig(apConfig),
 		apfederation.WithRemoteActorResolver(remoteActorService),
 		apfederation.WithDelivery(deliveryService),
+		apfederation.WithSigner(sigService),
+		apfederation.WithRemoteRequestPolicy(requireHTTPSFederation, allowPrivateFederationNetworks),
 	))
 	moderationHandler := apmoderation.NewHandler(apmoderation.NewService(apmoderation.NewRepository(db), deliveryQueue))
 	auditHandler := adminaudit.NewHandler(adminaudit.NewService(adminaudit.NewRepository(db)))

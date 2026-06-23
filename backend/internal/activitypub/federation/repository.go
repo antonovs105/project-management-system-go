@@ -128,6 +128,37 @@ func (r *PgRepository) ListRemoteProjectInvites(ctx context.Context, userID stri
 	return invites, nil
 }
 
+// ListRemoteProjects returns accepted remote project workspaces for a local actor.
+func (r *PgRepository) ListRemoteProjects(ctx context.Context, userID string, options ListOptions) ([]RemoteProject, error) {
+	projects := make([]RemoteProject, 0)
+	if err := r.db.SelectContext(ctx, &projects, remoteProjectSelect()+`
+		WHERE invite.invitee_actor_id = $1
+			AND invite.status = 'accepted'
+		ORDER BY COALESCE(response.created_at, invite.updated_at) DESC, invite.created_at DESC
+		LIMIT $2 OFFSET $3
+	`, userID, options.Limit, options.Offset); err != nil {
+		return nil, err
+	}
+	return projects, nil
+}
+
+// GetRemoteProject loads one accepted remote project workspace for a local actor.
+func (r *PgRepository) GetRemoteProject(ctx context.Context, userID string, projectID string) (*RemoteProject, error) {
+	var project RemoteProject
+	err := r.db.GetContext(ctx, &project, remoteProjectSelect()+`
+		WHERE invite.id = $1
+			AND invite.invitee_actor_id = $2
+			AND invite.status = 'accepted'
+	`, projectID, userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrRemoteProjectNotFound
+		}
+		return nil, err
+	}
+	return &project, nil
+}
+
 // GetRemoteProjectInvite loads one remote project invite for the current user.
 func (r *PgRepository) GetRemoteProjectInvite(ctx context.Context, userID string, inviteID string) (*RemoteProjectInvite, error) {
 	var invite RemoteProjectInvite
@@ -218,6 +249,41 @@ func (r *PgRepository) respondRemoteProjectInvite(ctx context.Context, userID st
 	}, nil
 }
 
+// StoreRemoteProjectActivity stores an outbound ActivityPub activity for a remote project.
+func (r *PgRepository) StoreRemoteProjectActivity(ctx context.Context, userID string, projectID string, activityID string, activityAPID string, activityType string, objectAPID string, targetAPID *string, document []byte) (*RemoteProjectActivity, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	project, err := loadRemoteProjectForUpdate(ctx, tx, projectID, userID)
+	if err != nil {
+		return nil, err
+	}
+	var target any
+	if targetAPID != nil {
+		target = *targetAPID
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO ap_activities (id, ap_id, activity_type, actor_id, object_ap_id, target_ap_id, document)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, activityID, activityAPID, activityType, userID, objectAPID, target, document); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO actor_outbox_items (actor_id, activity_id, activity_ap_id)
+		VALUES ($1, $2, $3)
+	`, userID, activityID, activityAPID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &RemoteProjectActivity{ActivityID: activityID, TargetInboxURL: project.TargetInboxURL}, nil
+}
+
 // getContexter is the subset shared by sqlx.DB and sqlx.Tx for one-row loads.
 type getContexter interface {
 	GetContext(ctx context.Context, dest any, query string, args ...any) error
@@ -249,6 +315,33 @@ func remoteProjectInviteSelect() string {
 	`
 }
 
+// remoteProjectSelect returns the shared accepted remote project query.
+func remoteProjectSelect() string {
+	return `
+		SELECT
+			invite.id::text,
+			invite.project_ap_id,
+			invite.project_name,
+			invite.role,
+			invite.target_inbox_url,
+			invite.inviter_actor_id::text,
+			inviter.ap_id AS inviter_ap_id,
+			inviter.handle AS inviter_handle,
+			inviter.name AS inviter_name,
+			remote_project.id::text AS remote_actor_id,
+			remote_project.handle AS remote_handle,
+			invite.created_at,
+			invite.updated_at,
+			response.created_at AS resolved_at
+		FROM remote_project_invites invite
+		JOIN actors inviter ON inviter.id = invite.inviter_actor_id
+		LEFT JOIN ap_activities response ON response.id = invite.response_activity_id
+		LEFT JOIN actors remote_project
+			ON remote_project.ap_id = invite.project_ap_id
+			AND remote_project.is_local = false
+	`
+}
+
 // loadRemoteProjectInviteForUpdate loads and locks one remote invite for mutation.
 func loadRemoteProjectInviteForUpdate(ctx context.Context, tx *sqlx.Tx, inviteID string, userID string) (*RemoteProjectInvite, error) {
 	var invite RemoteProjectInvite
@@ -264,6 +357,24 @@ func loadRemoteProjectInviteForUpdate(ctx context.Context, tx *sqlx.Tx, inviteID
 		return nil, err
 	}
 	return &invite, nil
+}
+
+// loadRemoteProjectForUpdate locks one accepted remote project invite for outbound work.
+func loadRemoteProjectForUpdate(ctx context.Context, tx *sqlx.Tx, projectID string, userID string) (*RemoteProject, error) {
+	var project RemoteProject
+	err := tx.GetContext(ctx, &project, remoteProjectSelect()+`
+		WHERE invite.id = $1
+			AND invite.invitee_actor_id = $2
+			AND invite.status = 'accepted'
+		FOR UPDATE OF invite
+	`, projectID, userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrRemoteProjectNotFound
+		}
+		return nil, err
+	}
+	return &project, nil
 }
 
 // loadRemoteProjectInvite loads one remote invite projection without locking.
