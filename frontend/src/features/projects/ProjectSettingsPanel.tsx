@@ -162,13 +162,14 @@ function ticketsToCSV(tickets: Ticket[]): string {
 }
 
 function membersToCSV(members: ProjectMember[]): string {
-  const header = ["user_id", "username", "email", "handle", "name", "role_id", "role", "role_name", "created_at"];
+  const header = ["user_id", "username", "email", "handle", "name", "is_remote", "role_id", "role", "role_name", "created_at"];
   const rows = members.map((member) => [
     member.user_id,
     member.username,
     member.email,
     member.handle,
     member.name,
+    String(member.is_remote),
     member.role_id,
     member.role,
     member.role_name,
@@ -843,7 +844,7 @@ function ProjectMemberActions({ project }: { project: Project }) {
                 <UserPlus size={15} />
                 Members
               </h3>
-              <p className="mt-1 text-xs text-zinc-500">Accepted local users on this project.</p>
+              <p className="mt-1 text-xs text-zinc-500">Accepted local and remote collaborators on this project.</p>
             </div>
             <Button onClick={exportMembersCSV} disabled={memberRows.length === 0}>
               <Download size={15} />
@@ -871,6 +872,9 @@ function ProjectMemberActions({ project }: { project: Project }) {
                         <span className="truncate font-medium text-zinc-950">{title}</span>
                         {member.user_id === project.owner_id ? (
                           <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs text-zinc-500">owner</span>
+                        ) : null}
+                        {member.is_remote ? (
+                          <span className="rounded-full border border-zinc-200 bg-zinc-950 px-2 py-0.5 text-xs text-white">remote</span>
                         ) : null}
                       </div>
                       <div className="mt-1 truncate text-xs text-zinc-500">{actorSubtitle(member.handle, member.email)}</div>

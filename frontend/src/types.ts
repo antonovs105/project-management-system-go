@@ -159,6 +159,7 @@ export interface ProjectMember {
   email: string;
   handle: string;
   name: string;
+  is_remote: boolean;
   created_at: string;
 }
 

@@ -1754,6 +1754,20 @@ func TestRemoteInboxHandlesInviteResponses(t *testing.T) {
 		requireActivityForObjectAndActor(t, db, "Accept", invite.APID, remoteActor.ID)
 		requireInboxItem(t, db, createdProject.ID, "Accept", invite.APID)
 
+		members, err := projectService.ListProjectMembers(ctx, createdProject.ID, owner.ID, project.ProjectListOptions{Limit: 20})
+		require.NoError(t, err)
+		require.Contains(t, memberIDs(members), remoteActor.ID)
+		remoteMember := requireProjectMemberProjection(t, members, remoteActor.ID)
+		assert.True(t, remoteMember.IsRemote)
+		assert.Equal(t, project.RoleViewer, remoteMember.Role)
+		assert.Equal(t, remoteActor.Handle, remoteMember.Handle)
+
+		updatedMember, err := projectService.UpdateProjectMemberRole(ctx, createdProject.ID, owner.ID, remoteActor.ID, project.RoleDeveloper)
+		require.NoError(t, err)
+		assert.True(t, updatedMember.IsRemote)
+		assert.Equal(t, project.RoleDeveloper, updatedMember.Role)
+		requireInviteRole(t, db, invite.ID, project.RoleDeveloper)
+
 		duplicate, err := receiver.Receive(ctx, req, createdProject.APID, body)
 		require.NoError(t, err)
 		require.True(t, duplicate.Duplicate)
@@ -2567,6 +2581,40 @@ func requireProjectRole(t *testing.T, db *sqlx.DB, userID, projectID, expectedRo
 		JOIN project_roles project_role ON project_role.id = member.role_id
 		WHERE member.user_id = $1 AND member.project_id = $2
 	`, userID, projectID)
+	require.NoError(t, err)
+	require.Equal(t, expectedRole, role)
+}
+
+func memberIDs(members []project.ProjectMember) []string {
+	ids := make([]string, 0, len(members))
+	for _, member := range members {
+		ids = append(ids, member.UserID)
+	}
+	return ids
+}
+
+func requireProjectMemberProjection(t *testing.T, members []project.ProjectMember, userID string) project.ProjectMember {
+	t.Helper()
+
+	for _, member := range members {
+		if member.UserID == userID {
+			return member
+		}
+	}
+	require.Failf(t, "project member not found", "user_id=%s", userID)
+	return project.ProjectMember{}
+}
+
+func requireInviteRole(t *testing.T, db *sqlx.DB, inviteID, expectedRole string) {
+	t.Helper()
+
+	var role string
+	err := db.Get(&role, `
+		SELECT project_role.key
+		FROM project_invites invite
+		JOIN project_roles project_role ON project_role.id = invite.role_id
+		WHERE invite.id = $1
+	`, inviteID)
 	require.NoError(t, err)
 	require.Equal(t, expectedRole, role)
 }

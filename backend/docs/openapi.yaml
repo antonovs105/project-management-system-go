@@ -3384,7 +3384,7 @@ components:
               type: string
     ProjectMember:
       type: object
-      required: [user_id, project_id, role_id, role, role_name, username, email, handle, name, created_at]
+      required: [user_id, project_id, role_id, role, role_name, username, email, handle, name, is_remote, created_at]
       properties:
         user_id:
           type: string
@@ -3408,6 +3408,8 @@ components:
           type: string
         name:
           type: string
+        is_remote:
+          type: boolean
         created_at:
           type: string
           format: date-time

@@ -188,6 +188,7 @@ type ProjectMember struct {
 	Email     string    `db:"email" json:"email"`
 	Handle    string    `db:"handle" json:"handle"`
 	Name      string    `db:"name" json:"name"`
+	IsRemote  bool      `db:"is_remote" json:"is_remote"`
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
