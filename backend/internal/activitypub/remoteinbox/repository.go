@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
@@ -26,6 +27,7 @@ type Repository interface {
 	StoreInboundAddTicketAssignee(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	StoreInboundRemoveTicketAssignee(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	StoreInboundDeleteTicket(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
+	StoreInboundProjectInvite(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	StoreInboundAcceptInvite(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	StoreInboundRejectInvite(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error)
 	StoreInboundFollowResponse(ctx context.Context, targetActorID string, activity *InboundActivity, response FollowResponseType) (*AcceptedActivity, error)
@@ -284,6 +286,61 @@ func (r *PgRepository) StoreInboundDeleteTicket(ctx context.Context, targetActor
 	}
 	if !accepted.Duplicate {
 		if err := r.deleteRemoteTicketTx(ctx, tx, targetActorID, activity); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return accepted, nil
+}
+
+// StoreInboundProjectInvite stores a remote project Invite addressed to a local user.
+func (r *PgRepository) StoreInboundProjectInvite(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
+	if activity.ObjectInvite == nil {
+		return nil, ErrInvalidActivity
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	accepted, err := r.storeInboundActivityTx(ctx, tx, targetActorID, activity)
+	if err != nil {
+		return nil, err
+	}
+	if !accepted.Duplicate {
+		projectName := strings.TrimSpace(activity.ObjectInvite.Name)
+		if projectName == "" {
+			projectName = activity.ObjectInvite.ProjectAPID
+		}
+		role := strings.TrimSpace(activity.ObjectInvite.Role)
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO remote_project_invites (
+				invite_ap_id,
+				activity_id,
+				invitee_actor_id,
+				inviter_actor_id,
+				project_ap_id,
+				project_name,
+				role,
+				target_inbox_url,
+				status
+			)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending')
+			ON CONFLICT (invite_ap_id) DO NOTHING
+		`,
+			activity.ID,
+			accepted.ActivityID,
+			targetActorID,
+			activity.ActorID,
+			activity.ObjectInvite.ProjectAPID,
+			projectName,
+			role,
+			activitypub.Inbox(activity.ObjectInvite.ProjectAPID),
+		); err != nil {
 			return nil, err
 		}
 	}

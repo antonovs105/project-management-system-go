@@ -25,6 +25,9 @@ func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.GET("/me/federation/follows", h.ListRemoteFollows)
 	api.POST("/me/federation/discover", h.DiscoverRemoteActor)
 	api.POST("/me/federation/follows", h.FollowRemoteActor)
+	api.GET("/me/remote-project-invites", h.ListRemoteProjectInvites)
+	api.POST("/me/remote-project-invites/:id/accept", h.AcceptRemoteProjectInvite)
+	api.POST("/me/remote-project-invites/:id/reject", h.RejectRemoteProjectInvite)
 }
 
 // remoteActorRequest accepts remote actor identifiers for discovery and follow actions.
@@ -57,6 +60,37 @@ func (h *Handler) ListRemoteFollows(c echo.Context) error {
 		return writeFederationError(c, err)
 	}
 	return c.JSON(http.StatusOK, follows)
+}
+
+// ListRemoteProjectInvites returns remote project invites addressed to the current user.
+func (h *Handler) ListRemoteProjectInvites(c echo.Context) error {
+	options, err := listOptions(c, true)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	invites, err := h.service.ListRemoteProjectInvites(c.Request().Context(), currentUserID(c), options)
+	if err != nil {
+		return writeFederationError(c, err)
+	}
+	return c.JSON(http.StatusOK, invites)
+}
+
+// AcceptRemoteProjectInvite accepts a pending remote project invite for the current user.
+func (h *Handler) AcceptRemoteProjectInvite(c echo.Context) error {
+	result, err := h.service.AcceptRemoteProjectInvite(c.Request().Context(), currentUserID(c), strings.TrimSpace(c.Param("id")))
+	if err != nil {
+		return writeFederationError(c, err)
+	}
+	return c.JSON(http.StatusAccepted, result)
+}
+
+// RejectRemoteProjectInvite rejects a pending remote project invite for the current user.
+func (h *Handler) RejectRemoteProjectInvite(c echo.Context) error {
+	result, err := h.service.RejectRemoteProjectInvite(c.Request().Context(), currentUserID(c), strings.TrimSpace(c.Param("id")))
+	if err != nil {
+		return writeFederationError(c, err)
+	}
+	return c.JSON(http.StatusAccepted, result)
 }
 
 // DiscoverRemoteActor resolves and caches a remote actor for the current user.
@@ -134,6 +168,10 @@ func writeFederationError(c echo.Context, err error) error {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
 	case errors.Is(err, ErrLocalActorNotFound):
 		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	case errors.Is(err, ErrRemoteInviteNotFound):
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	case errors.Is(err, ErrRemoteInviteNotPending):
+		return c.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
 	default:
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load federation data"})
 	}

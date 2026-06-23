@@ -24,8 +24,12 @@ const (
 type Repository interface {
 	ListInboxActivities(ctx context.Context, userID string, options ListOptions) ([]InboxActivity, error)
 	ListRemoteFollows(ctx context.Context, userID string, options ListOptions) ([]RemoteFollow, error)
+	ListRemoteProjectInvites(ctx context.Context, userID string, options ListOptions) ([]RemoteProjectInvite, error)
+	GetRemoteProjectInvite(ctx context.Context, userID string, inviteID string) (*RemoteProjectInvite, error)
 	LocalUserActor(ctx context.Context, userID string) (*LocalActor, error)
 	StoreOutgoingFollow(ctx context.Context, actorID, remoteActorID, activityID, activityAPID, remoteActorAPID string, document []byte) (*RemoteFollow, bool, error)
+	AcceptRemoteProjectInvite(ctx context.Context, userID string, inviteID string, activityID string, activityAPID string, document []byte) (*RemoteInviteResponse, error)
+	RejectRemoteProjectInvite(ctx context.Context, userID string, inviteID string, activityID string, activityAPID string, document []byte) (*RemoteInviteResponse, error)
 }
 
 // RemoteActorResolver resolves ActivityPub actor resources and URLs.
@@ -99,6 +103,108 @@ func (s *Service) ListRemoteFollows(ctx context.Context, userID string, options 
 		return nil, err
 	}
 	return s.repo.ListRemoteFollows(ctx, userID, options)
+}
+
+// ListRemoteProjectInvites returns remote project invites addressed to the current user.
+func (s *Service) ListRemoteProjectInvites(ctx context.Context, userID string, options ListOptions) ([]RemoteProjectInvite, error) {
+	options, err := normalizeListOptions(options, true)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.ListRemoteProjectInvites(ctx, userID, options)
+}
+
+// AcceptRemoteProjectInvite accepts a pending remote project invite and queues an ActivityPub Accept.
+func (s *Service) AcceptRemoteProjectInvite(ctx context.Context, userID string, inviteID string) (*RemoteProjectInviteResult, error) {
+	if err := s.refreshRemoteInviteProject(ctx, userID, inviteID); err != nil {
+		return nil, err
+	}
+	activityID, activityAPID, document, err := s.remoteInviteResponseDocument(ctx, userID, inviteID, "Accept")
+	if err != nil {
+		return nil, err
+	}
+	response, err := s.repo.AcceptRemoteProjectInvite(ctx, userID, inviteID, activityID, activityAPID, document)
+	if err != nil {
+		return nil, err
+	}
+	return s.enqueueRemoteInviteResponse(ctx, response)
+}
+
+// RejectRemoteProjectInvite rejects a pending remote project invite and queues an ActivityPub Reject.
+func (s *Service) RejectRemoteProjectInvite(ctx context.Context, userID string, inviteID string) (*RemoteProjectInviteResult, error) {
+	activityID, activityAPID, document, err := s.remoteInviteResponseDocument(ctx, userID, inviteID, "Reject")
+	if err != nil {
+		return nil, err
+	}
+	response, err := s.repo.RejectRemoteProjectInvite(ctx, userID, inviteID, activityID, activityAPID, document)
+	if err != nil {
+		return nil, err
+	}
+	return s.enqueueRemoteInviteResponse(ctx, response)
+}
+
+// remoteInviteResponseDocument builds the signed-actor ActivityPub response body.
+func (s *Service) remoteInviteResponseDocument(ctx context.Context, userID string, inviteID string, activityType string) (string, string, []byte, error) {
+	localActor, err := s.repo.LocalUserActor(ctx, userID)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("%w: %v", ErrLocalActorNotFound, err)
+	}
+	invite, err := s.repo.GetRemoteProjectInvite(ctx, userID, inviteID)
+	if err != nil {
+		return "", "", nil, err
+	}
+	if invite.Status != "pending" {
+		return "", "", nil, ErrRemoteInviteNotPending
+	}
+	activityID, err := activitypub.NewID()
+	if err != nil {
+		return "", "", nil, err
+	}
+	activityAPID := activitypub.ActivityAPID(s.cfg, activityID)
+	document, err := activitypub.MarshalDocument(activitypub.ActivityDocument(
+		activityType,
+		activityAPID,
+		localActor.APID,
+		invite.InviteAPID,
+		invite.ProjectAPID,
+		time.Now().UTC(),
+	))
+	if err != nil {
+		return "", "", nil, err
+	}
+	return activityID, activityAPID, document, nil
+}
+
+// refreshRemoteInviteProject best-effort caches the invited remote project actor.
+func (s *Service) refreshRemoteInviteProject(ctx context.Context, userID string, inviteID string) error {
+	if s.resolver == nil {
+		return nil
+	}
+	invite, err := s.repo.GetRemoteProjectInvite(ctx, userID, inviteID)
+	if err != nil {
+		return err
+	}
+	if invite.ProjectAPID == "" || !isHTTPURL(invite.ProjectAPID) {
+		return nil
+	}
+	_, _ = s.resolver.Fetch(ctx, invite.ProjectAPID)
+	return nil
+}
+
+// enqueueRemoteInviteResponse queues the stored invite response for remote delivery.
+func (s *Service) enqueueRemoteInviteResponse(ctx context.Context, response *RemoteInviteResponse) (*RemoteProjectInviteResult, error) {
+	if response == nil || response.Invite == nil {
+		return nil, ErrRemoteInviteNotFound
+	}
+	result := &RemoteProjectInviteResult{Invite: *response.Invite}
+	if s.delivery != nil && response.ActivityID != "" && response.TargetInboxURL != "" {
+		delivery, err := s.delivery.Enqueue(ctx, response.ActivityID, response.TargetInboxURL)
+		if err != nil {
+			return nil, err
+		}
+		result.Delivery = followDeliveryProjection(delivery)
+	}
+	return result, nil
 }
 
 // DiscoverRemoteActor resolves and caches a remote actor by acct: resource, handle, or URL.

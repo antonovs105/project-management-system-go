@@ -36,6 +36,8 @@ import type {
   ProjectRoleKey,
   PublicInstanceConfig,
   RemoteActorInspection,
+  RemoteProjectInvite,
+  RemoteProjectInviteResult,
   Ticket,
   TicketPriority,
   TicketStatus,
@@ -490,6 +492,23 @@ export const api = {
 
   async revokeInvite(inviteId: ID): Promise<void> {
     await http.post(`${apiPrefix}/invites/${inviteId}/revoke`);
+  },
+
+  async listRemoteProjectInvites(filters: ProjectInviteFilters = {}): Promise<RemoteProjectInvite[]> {
+    const { data } = await http.get<RemoteProjectInvite[] | null>(`${apiPrefix}/me/remote-project-invites`, {
+      params: { limit: 100, offset: 0, state: filters.status || undefined },
+    });
+    return asArray(data);
+  },
+
+  async acceptRemoteProjectInvite(inviteId: ID): Promise<RemoteProjectInviteResult> {
+    const { data } = await http.post<RemoteProjectInviteResult>(`${apiPrefix}/me/remote-project-invites/${inviteId}/accept`);
+    return data;
+  },
+
+  async rejectRemoteProjectInvite(inviteId: ID): Promise<RemoteProjectInviteResult> {
+    const { data } = await http.post<RemoteProjectInviteResult>(`${apiPrefix}/me/remote-project-invites/${inviteId}/reject`);
+    return data;
   },
 
   async listProjectRoles(projectId: ID): Promise<ProjectRole[]> {

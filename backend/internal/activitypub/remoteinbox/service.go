@@ -196,6 +196,10 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 	if err != nil {
 		return nil, err
 	}
+	isUserProjectInvite, err := s.isUserProjectInvite(ctx, targetActorID, targetAPID, activity)
+	if err != nil {
+		return nil, err
+	}
 	isAcceptedFollow, err := s.isFollowResponse(ctx, targetActorID, targetAPID, activity, "Accept")
 	if err != nil {
 		return nil, err
@@ -259,6 +263,9 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 	if isProjectRejectInvite {
 		return s.repo.StoreInboundRejectInvite(ctx, targetActorID, activity)
 	}
+	if isUserProjectInvite {
+		return s.repo.StoreInboundProjectInvite(ctx, targetActorID, activity)
+	}
 	if isAcceptedFollow {
 		return s.repo.StoreInboundFollowResponse(ctx, targetActorID, activity, FollowResponseAccept)
 	}
@@ -282,6 +289,33 @@ func (s *Service) Receive(ctx context.Context, req *http.Request, targetAPID str
 		}
 	}
 	return accepted, nil
+}
+
+// isUserProjectInvite validates an inbound project Invite addressed to a local user actor.
+func (s *Service) isUserProjectInvite(ctx context.Context, targetActorID, targetAPID string, activity *InboundActivity) (bool, error) {
+	if activity.Type != "Invite" {
+		return false, nil
+	}
+	isProjectActor, err := s.repo.IsProjectActor(ctx, targetActorID)
+	if err != nil {
+		return false, err
+	}
+	if isProjectActor {
+		return false, nil
+	}
+	if activity.ObjectInvite == nil {
+		return false, fmt.Errorf("%w: invite object must be a project", ErrInvalidActivity)
+	}
+	if !isAbsoluteURI(activity.ObjectInvite.ProjectAPID) || activity.ObjectInvite.ProjectAPID == targetAPID {
+		return false, fmt.Errorf("%w: invite object must be a remote project", ErrInvalidActivity)
+	}
+	if activity.TargetAPID != nil && *activity.TargetAPID != targetAPID {
+		return false, fmt.Errorf("%w: invite target must match inbox actor", ErrInvalidActivity)
+	}
+	if activity.ObjectInvite.TargetAPID != "" && activity.ObjectInvite.TargetAPID != targetAPID {
+		return false, fmt.Errorf("%w: invite object target must match inbox actor", ErrInvalidActivity)
+	}
+	return true, nil
 }
 
 // isFollowResponse validates Accept or Reject responses for a local user's outbound Follow.
@@ -659,6 +693,9 @@ func parseActivity(body []byte) (*InboundActivity, error) {
 	if objectTicket := extractInboundTicket(rawObject); objectTicket != nil {
 		activity.ObjectTicket = objectTicket
 	}
+	if objectInvite := extractInboundProjectInvite(rawObject); objectInvite != nil {
+		activity.ObjectInvite = objectInvite
+	}
 	if targetAPID := extractAPID(raw["target"]); targetAPID != "" {
 		activity.TargetAPID = &targetAPID
 	}
@@ -781,6 +818,30 @@ func extractInboundTicket(value any) *InboundTicket {
 		InvalidFieldType: !validName || !validContent || !validStatus || !validPriority || !validTicketType || !validIsResolved,
 		Document:         document,
 	}
+}
+
+// extractInboundProjectInvite normalizes the embedded project object in an Invite.
+func extractInboundProjectInvite(value any) *InboundProjectInvite {
+	raw, ok := value.(map[string]any)
+	if !ok || !hasObjectType(raw["type"], "Group") {
+		return nil
+	}
+	projectAPID := extractAPID(raw)
+	if projectAPID == "" {
+		return nil
+	}
+	name, _, nameOK := optionalStringValue(raw, "name")
+	role, _, roleOK := optionalStringValue(raw, "role")
+	if !nameOK || !roleOK {
+		return nil
+	}
+	invite := &InboundProjectInvite{
+		ProjectAPID: projectAPID,
+		Name:        name,
+		Role:        role,
+		TargetAPID:  extractAPID(raw["target"]),
+	}
+	return invite
 }
 
 // normalizeTicketStatus validates and normalizes inbound ticket workflow status.

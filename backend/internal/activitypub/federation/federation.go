@@ -14,6 +14,10 @@ var (
 	ErrRemoteActorUnavailable = errors.New("remote federation actor unavailable")
 	// ErrLocalActorNotFound reports an authenticated user without a local actor.
 	ErrLocalActorNotFound = errors.New("local federation actor not found")
+	// ErrRemoteInviteNotFound reports a missing or inaccessible remote project invite.
+	ErrRemoteInviteNotFound = errors.New("remote project invite not found")
+	// ErrRemoteInviteNotPending reports a remote project invite that has already been resolved.
+	ErrRemoteInviteNotPending = errors.New("remote project invite is not pending")
 )
 
 // InboxActivity is a normalized personal federation inbox item for app UI.
@@ -57,6 +61,26 @@ type RemoteFollow struct {
 	UpdatedAt         time.Time `db:"updated_at" json:"updated_at"`
 }
 
+// RemoteProjectInvite is a remote project invitation addressed to the authenticated user.
+type RemoteProjectInvite struct {
+	ID             string     `db:"id" json:"id"`
+	InviteAPID     string     `db:"invite_ap_id" json:"invite_ap_id"`
+	ActivityID     string     `db:"activity_id" json:"activity_id"`
+	ProjectAPID    string     `db:"project_ap_id" json:"project_ap_id"`
+	ProjectName    string     `db:"project_name" json:"project_name"`
+	InviterActorID string     `db:"inviter_actor_id" json:"inviter_actor_id"`
+	InviterAPID    string     `db:"inviter_ap_id" json:"inviter_ap_id"`
+	InviterHandle  string     `db:"inviter_handle" json:"inviter_handle"`
+	InviterName    string     `db:"inviter_name" json:"inviter_name"`
+	InviteeActorID string     `db:"invitee_actor_id" json:"invitee_actor_id"`
+	Role           string     `db:"role" json:"role"`
+	TargetInboxURL string     `db:"target_inbox_url" json:"target_inbox_url"`
+	Status         string     `db:"status" json:"status"`
+	CreatedAt      time.Time  `db:"created_at" json:"created_at"`
+	UpdatedAt      time.Time  `db:"updated_at" json:"updated_at"`
+	ResolvedAt     *time.Time `db:"resolved_at" json:"resolved_at,omitempty"`
+}
+
 // RemoteActor is a user-facing remote ActivityPub actor projection.
 type RemoteActor struct {
 	ID                string     `json:"id"`
@@ -90,6 +114,19 @@ type FollowRemoteActorResult struct {
 	Follow   RemoteFollow    `json:"follow"`
 	Delivery *FollowDelivery `json:"delivery,omitempty"`
 	Created  bool            `json:"created"`
+}
+
+// RemoteProjectInviteResult describes an accepted or rejected remote project invite.
+type RemoteProjectInviteResult struct {
+	Invite   RemoteProjectInvite `json:"invite"`
+	Delivery *FollowDelivery     `json:"delivery,omitempty"`
+}
+
+// RemoteInviteResponse carries a stored response activity that must be delivered.
+type RemoteInviteResponse struct {
+	Invite         *RemoteProjectInvite
+	ActivityID     string
+	TargetInboxURL string
 }
 
 // LocalActor is the authenticated local ActivityPub actor used for outbound work.

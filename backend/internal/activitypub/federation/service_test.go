@@ -14,17 +14,23 @@ import (
 )
 
 type serviceRepo struct {
-	inboxOptions      ListOptions
-	followOptions     ListOptions
-	localActor        *LocalActor
-	storeActorID      string
-	storeRemoteID     string
-	storeActivityID   string
-	storeActivityAPID string
-	storeRemoteAPID   string
-	storeDocument     []byte
-	storeCreated      bool
-	storedFollow      *RemoteFollow
+	inboxOptions         ListOptions
+	followOptions        ListOptions
+	inviteOptions        ListOptions
+	localActor           *LocalActor
+	remoteInvite         *RemoteProjectInvite
+	storeActorID         string
+	storeRemoteID        string
+	storeActivityID      string
+	storeActivityAPID    string
+	storeRemoteAPID      string
+	storeDocument        []byte
+	storeCreated         bool
+	storedFollow         *RemoteFollow
+	responseActivityID   string
+	responseActivityAPID string
+	responseDocument     []byte
+	responseStatus       string
 }
 
 func (r *serviceRepo) ListInboxActivities(ctx context.Context, userID string, options ListOptions) ([]InboxActivity, error) {
@@ -35,6 +41,25 @@ func (r *serviceRepo) ListInboxActivities(ctx context.Context, userID string, op
 func (r *serviceRepo) ListRemoteFollows(ctx context.Context, userID string, options ListOptions) ([]RemoteFollow, error) {
 	r.followOptions = options
 	return []RemoteFollow{{ActorID: "actor-1", State: options.State}}, nil
+}
+
+func (r *serviceRepo) ListRemoteProjectInvites(ctx context.Context, userID string, options ListOptions) ([]RemoteProjectInvite, error) {
+	r.inviteOptions = options
+	return []RemoteProjectInvite{{ID: "invite-1", Status: options.State}}, nil
+}
+
+func (r *serviceRepo) GetRemoteProjectInvite(ctx context.Context, userID string, inviteID string) (*RemoteProjectInvite, error) {
+	if r.remoteInvite != nil {
+		return r.remoteInvite, nil
+	}
+	return &RemoteProjectInvite{
+		ID:             inviteID,
+		InviteAPID:     "https://remote.test/activities/invite-1",
+		ProjectAPID:    "https://remote.test/projects/board",
+		ProjectName:    "Remote Board",
+		TargetInboxURL: "https://remote.test/projects/board/inbox",
+		Status:         "pending",
+	}, nil
 }
 
 func (r *serviceRepo) LocalUserActor(ctx context.Context, userID string) (*LocalActor, error) {
@@ -65,6 +90,34 @@ func (r *serviceRepo) StoreOutgoingFollow(ctx context.Context, actorID, remoteAc
 		OutboxURL:         "https://remote.test/projects/project-1/outbox",
 		State:             "pending",
 	}, r.storeCreated, nil
+}
+
+func (r *serviceRepo) AcceptRemoteProjectInvite(ctx context.Context, userID string, inviteID string, activityID string, activityAPID string, document []byte) (*RemoteInviteResponse, error) {
+	r.responseActivityID = activityID
+	r.responseActivityAPID = activityAPID
+	r.responseDocument = append([]byte(nil), document...)
+	r.responseStatus = "accepted"
+	invite, err := r.GetRemoteProjectInvite(ctx, userID, inviteID)
+	if err != nil {
+		return nil, err
+	}
+	copy := *invite
+	copy.Status = "accepted"
+	return &RemoteInviteResponse{Invite: &copy, ActivityID: activityID, TargetInboxURL: invite.TargetInboxURL}, nil
+}
+
+func (r *serviceRepo) RejectRemoteProjectInvite(ctx context.Context, userID string, inviteID string, activityID string, activityAPID string, document []byte) (*RemoteInviteResponse, error) {
+	r.responseActivityID = activityID
+	r.responseActivityAPID = activityAPID
+	r.responseDocument = append([]byte(nil), document...)
+	r.responseStatus = "rejected"
+	invite, err := r.GetRemoteProjectInvite(ctx, userID, inviteID)
+	if err != nil {
+		return nil, err
+	}
+	copy := *invite
+	copy.Status = "rejected"
+	return &RemoteInviteResponse{Invite: &copy, ActivityID: activityID, TargetInboxURL: invite.TargetInboxURL}, nil
 }
 
 type fakeResolver struct {
@@ -137,6 +190,18 @@ func TestServiceFiltersRemoteFollowsByState(t *testing.T) {
 	assert.Equal(t, defaultListLimit, repo.followOptions.Limit)
 }
 
+func TestServiceFiltersRemoteProjectInvitesByState(t *testing.T) {
+	repo := &serviceRepo{}
+	service := NewService(repo)
+
+	invites, err := service.ListRemoteProjectInvites(context.Background(), "user-1", ListOptions{State: "pending"})
+
+	require.NoError(t, err)
+	require.Len(t, invites, 1)
+	assert.Equal(t, "pending", repo.inviteOptions.State)
+	assert.Equal(t, defaultListLimit, repo.inviteOptions.Limit)
+}
+
 func TestServiceRejectsInvalidPersonalFederationFilters(t *testing.T) {
 	repo := &serviceRepo{}
 	service := NewService(repo)
@@ -148,6 +213,9 @@ func TestServiceRejectsInvalidPersonalFederationFilters(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidFilter)
 
 	_, err = service.ListRemoteFollows(context.Background(), "user-1", ListOptions{State: "blocked"})
+	require.ErrorIs(t, err, ErrInvalidFilter)
+
+	_, err = service.ListRemoteProjectInvites(context.Background(), "user-1", ListOptions{State: "blocked"})
 	require.ErrorIs(t, err, ErrInvalidFilter)
 }
 
@@ -193,6 +261,36 @@ func TestServiceFollowsRemoteActorAndQueuesDelivery(t *testing.T) {
 	assert.Equal(t, "http://local.test/users/alice", document["actor"])
 	assert.Equal(t, "https://remote.test/projects/project-1", document["object"])
 	assert.Equal(t, repo.storeActivityAPID, document["id"])
+}
+
+func TestServiceAcceptsRemoteProjectInviteAndQueuesDelivery(t *testing.T) {
+	repo := &serviceRepo{}
+	resolver := &fakeResolver{actor: testRemoteActor()}
+	queued := &fakeDelivery{}
+	service := NewService(
+		repo,
+		WithConfig(activitypub.NewConfig("http://local.test", "local.test")),
+		WithRemoteActorResolver(resolver),
+		WithDelivery(queued),
+	)
+
+	result, err := service.AcceptRemoteProjectInvite(context.Background(), "user-1", "invite-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://remote.test/projects/board", resolver.fetchedURL)
+	assert.Equal(t, "accepted", repo.responseStatus)
+	assert.Equal(t, repo.responseActivityID, queued.activityID)
+	assert.Equal(t, "https://remote.test/projects/board/inbox", queued.targetInboxURL)
+	assert.Equal(t, "accepted", result.Invite.Status)
+	require.NotNil(t, result.Delivery)
+
+	var document map[string]any
+	require.NoError(t, json.Unmarshal(repo.responseDocument, &document))
+	assert.Equal(t, "Accept", document["type"])
+	assert.Equal(t, "http://local.test/users/alice", document["actor"])
+	assert.Equal(t, "https://remote.test/activities/invite-1", document["object"])
+	assert.Equal(t, "https://remote.test/projects/board", document["target"])
+	assert.Equal(t, repo.responseActivityAPID, document["id"])
 }
 
 func TestServiceDoesNotQueueDeliveryForExistingFollow(t *testing.T) {

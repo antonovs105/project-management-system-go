@@ -460,6 +460,80 @@ paths:
           $ref: "#/components/responses/Error"
         "502":
           $ref: "#/components/responses/Error"
+  /api/v1/me/remote-project-invites:
+    get:
+      tags: [Federation]
+      operationId: listRemoteProjectInvites
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [pending, accepted, rejected]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        "200":
+          description: Remote project invites addressed to the authenticated user.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RemoteProjectInvite"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/me/remote-project-invites/{inviteID}/accept:
+    post:
+      tags: [Federation]
+      operationId: acceptRemoteProjectInvite
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/InviteID"
+      responses:
+        "202":
+          description: Remote project invite accepted and response delivery queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemoteProjectInviteResult"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/me/remote-project-invites/{inviteID}/reject:
+    post:
+      tags: [Federation]
+      operationId: rejectRemoteProjectInvite
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/InviteID"
+      responses:
+        "202":
+          description: Remote project invite rejected and response delivery queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemoteProjectInviteResult"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
   /api/v1/admin/users:
     get:
       tags: [Auth]
@@ -2685,6 +2759,77 @@ components:
           $ref: "#/components/schemas/FederationFollowDelivery"
         created:
           type: boolean
+    RemoteProjectInvite:
+      type: object
+      required:
+        - id
+        - invite_ap_id
+        - activity_id
+        - project_ap_id
+        - project_name
+        - inviter_actor_id
+        - inviter_ap_id
+        - inviter_handle
+        - inviter_name
+        - invitee_actor_id
+        - role
+        - target_inbox_url
+        - status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        invite_ap_id:
+          type: string
+          format: uri
+        activity_id:
+          type: string
+          format: uuid
+        project_ap_id:
+          type: string
+          format: uri
+        project_name:
+          type: string
+        inviter_actor_id:
+          type: string
+          format: uuid
+        inviter_ap_id:
+          type: string
+          format: uri
+        inviter_handle:
+          type: string
+        inviter_name:
+          type: string
+        invitee_actor_id:
+          type: string
+          format: uuid
+        role:
+          type: string
+        target_inbox_url:
+          type: string
+          format: uri
+        status:
+          type: string
+          enum: [pending, accepted, rejected]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+    RemoteProjectInviteResult:
+      type: object
+      required: [invite]
+      properties:
+        invite:
+          $ref: "#/components/schemas/RemoteProjectInvite"
+        delivery:
+          $ref: "#/components/schemas/FederationFollowDelivery"
     FederationDelivery:
       allOf:
         - $ref: "#/components/schemas/ProjectDelivery"

@@ -87,6 +87,37 @@ export interface ProjectInviteInspection extends ProjectInvite {
   invitee_name: string;
 }
 
+export interface RemoteProjectInvite {
+  id: ID;
+  invite_ap_id: string;
+  activity_id: ID;
+  project_ap_id: string;
+  project_name: string;
+  inviter_actor_id: ID;
+  inviter_ap_id: string;
+  inviter_handle: string;
+  inviter_name: string;
+  invitee_actor_id: ID;
+  role: string;
+  target_inbox_url: string;
+  status: "pending" | "accepted" | "rejected";
+  created_at: string;
+  updated_at: string;
+  resolved_at?: string;
+}
+
+export interface RemoteProjectInviteResult {
+  invite: RemoteProjectInvite;
+  delivery?: {
+    id: ID;
+    activity_ap_id: string;
+    target_inbox_url: string;
+    state: DeliveryState;
+    created_at: string;
+    updated_at: string;
+  };
+}
+
 export interface ProjectMember {
   user_id: ID;
   project_id: ID;

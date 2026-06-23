@@ -114,6 +114,174 @@ func (r *PgRepository) ListRemoteFollows(ctx context.Context, userID string, opt
 	return follows, nil
 }
 
+// ListRemoteProjectInvites returns remote project invites addressed to a local actor.
+func (r *PgRepository) ListRemoteProjectInvites(ctx context.Context, userID string, options ListOptions) ([]RemoteProjectInvite, error) {
+	invites := make([]RemoteProjectInvite, 0)
+	if err := r.db.SelectContext(ctx, &invites, remoteProjectInviteSelect()+`
+		WHERE invite.invitee_actor_id = $1
+			AND ($2 = '' OR invite.status = $2)
+		ORDER BY invite.updated_at DESC, invite.created_at DESC
+		LIMIT $3 OFFSET $4
+	`, userID, options.State, options.Limit, options.Offset); err != nil {
+		return nil, err
+	}
+	return invites, nil
+}
+
+// GetRemoteProjectInvite loads one remote project invite for the current user.
+func (r *PgRepository) GetRemoteProjectInvite(ctx context.Context, userID string, inviteID string) (*RemoteProjectInvite, error) {
+	var invite RemoteProjectInvite
+	err := r.db.GetContext(ctx, &invite, remoteProjectInviteSelect()+`
+		WHERE invite.id = $1
+			AND invite.invitee_actor_id = $2
+	`, inviteID, userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrRemoteInviteNotFound
+		}
+		return nil, err
+	}
+	return &invite, nil
+}
+
+// AcceptRemoteProjectInvite accepts a pending remote project invite.
+func (r *PgRepository) AcceptRemoteProjectInvite(ctx context.Context, userID string, inviteID string, activityID string, activityAPID string, document []byte) (*RemoteInviteResponse, error) {
+	return r.respondRemoteProjectInvite(ctx, userID, inviteID, "Accept", "accepted", activityID, activityAPID, document)
+}
+
+// RejectRemoteProjectInvite rejects a pending remote project invite.
+func (r *PgRepository) RejectRemoteProjectInvite(ctx context.Context, userID string, inviteID string, activityID string, activityAPID string, document []byte) (*RemoteInviteResponse, error) {
+	return r.respondRemoteProjectInvite(ctx, userID, inviteID, "Reject", "rejected", activityID, activityAPID, document)
+}
+
+// respondRemoteProjectInvite stores a local Accept or Reject response for a remote invite.
+func (r *PgRepository) respondRemoteProjectInvite(ctx context.Context, userID string, inviteID string, activityType string, status string, activityID string, activityAPID string, document []byte) (*RemoteInviteResponse, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	invite, err := loadRemoteProjectInviteForUpdate(ctx, tx, inviteID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if invite.Status != "pending" {
+		return nil, ErrRemoteInviteNotPending
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO ap_activities (id, ap_id, activity_type, actor_id, object_ap_id, target_ap_id, document)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, activityID, activityAPID, activityType, userID, invite.InviteAPID, invite.ProjectAPID, document); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO actor_outbox_items (actor_id, activity_id, activity_ap_id)
+		VALUES ($1, $2, $3)
+	`, userID, activityID, activityAPID); err != nil {
+		return nil, err
+	}
+	if status == "accepted" {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO actor_follows (follower_actor_id, followed_actor_id, state)
+			SELECT $1, actor.id, 'accepted'
+			FROM actors actor
+			WHERE actor.ap_id = $2
+				AND actor.is_local = false
+			ON CONFLICT (follower_actor_id, followed_actor_id)
+			DO UPDATE SET state = 'accepted'
+		`, userID, invite.ProjectAPID); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE remote_project_invites
+		SET status = $2,
+			response_activity_id = $3
+		WHERE id = $1
+	`, invite.ID, status, activityID); err != nil {
+		return nil, err
+	}
+
+	updated, err := loadRemoteProjectInvite(ctx, tx, invite.ID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &RemoteInviteResponse{
+		Invite:         updated,
+		ActivityID:     activityID,
+		TargetInboxURL: invite.TargetInboxURL,
+	}, nil
+}
+
+// getContexter is the subset shared by sqlx.DB and sqlx.Tx for one-row loads.
+type getContexter interface {
+	GetContext(ctx context.Context, dest any, query string, args ...any) error
+}
+
+// remoteProjectInviteSelect returns the shared remote invite projection query.
+func remoteProjectInviteSelect() string {
+	return `
+		SELECT
+			invite.id::text,
+			invite.invite_ap_id,
+			invite.activity_id::text,
+			invite.project_ap_id,
+			invite.project_name,
+			invite.inviter_actor_id::text,
+			inviter.ap_id AS inviter_ap_id,
+			inviter.handle AS inviter_handle,
+			inviter.name AS inviter_name,
+			invite.invitee_actor_id::text,
+			invite.role,
+			invite.target_inbox_url,
+			invite.status,
+			invite.created_at,
+			invite.updated_at,
+			response.created_at AS resolved_at
+		FROM remote_project_invites invite
+		JOIN actors inviter ON inviter.id = invite.inviter_actor_id
+		LEFT JOIN ap_activities response ON response.id = invite.response_activity_id
+	`
+}
+
+// loadRemoteProjectInviteForUpdate loads and locks one remote invite for mutation.
+func loadRemoteProjectInviteForUpdate(ctx context.Context, tx *sqlx.Tx, inviteID string, userID string) (*RemoteProjectInvite, error) {
+	var invite RemoteProjectInvite
+	err := tx.GetContext(ctx, &invite, remoteProjectInviteSelect()+`
+		WHERE invite.id = $1
+			AND invite.invitee_actor_id = $2
+		FOR UPDATE OF invite
+	`, inviteID, userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrRemoteInviteNotFound
+		}
+		return nil, err
+	}
+	return &invite, nil
+}
+
+// loadRemoteProjectInvite loads one remote invite projection without locking.
+func loadRemoteProjectInvite(ctx context.Context, q getContexter, inviteID string, userID string) (*RemoteProjectInvite, error) {
+	var invite RemoteProjectInvite
+	err := q.GetContext(ctx, &invite, remoteProjectInviteSelect()+`
+		WHERE invite.id = $1
+			AND invite.invitee_actor_id = $2
+	`, inviteID, userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrRemoteInviteNotFound
+		}
+		return nil, err
+	}
+	return &invite, nil
+}
+
 // StoreOutgoingFollow stores a local Follow activity and pending follow relation.
 func (r *PgRepository) StoreOutgoingFollow(ctx context.Context, actorID, remoteActorID, activityID, activityAPID, remoteActorAPID string, document []byte) (*RemoteFollow, bool, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)

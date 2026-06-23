@@ -25,6 +25,7 @@ type memoryRepository struct {
 	assignedTicket     *InboundActivity
 	unassignedTicket   *InboundActivity
 	deletedTicket      *InboundActivity
+	projectInvite      *InboundActivity
 	acceptedInvite     *InboundActivity
 	rejectedInvite     *InboundActivity
 	followResponse     *InboundActivity
@@ -48,6 +49,7 @@ type memoryRepository struct {
 	assignTicketErr    error
 	unassignTicketErr  error
 	deleteTicketErr    error
+	projectInviteErr   error
 	acceptInviteErr    error
 	rejectInviteErr    error
 	followResponseErr  error
@@ -198,6 +200,22 @@ func (m *memoryRepository) StoreInboundDeleteTicket(ctx context.Context, targetA
 	}
 	return &AcceptedActivity{
 		ActivityID:   "deleted-ticket-activity",
+		ActivityAPID: activity.ID,
+		ReceivedAt:   time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC),
+	}, nil
+}
+
+func (m *memoryRepository) StoreInboundProjectInvite(ctx context.Context, targetActorID string, activity *InboundActivity) (*AcceptedActivity, error) {
+	if m.projectInviteErr != nil {
+		return nil, m.projectInviteErr
+	}
+	copy := *activity
+	m.projectInvite = &copy
+	if m.storeResult != nil {
+		return m.storeResult, nil
+	}
+	return &AcceptedActivity{
+		ActivityID:   "project-invite-activity",
 		ActivityAPID: activity.ID,
 		ReceivedAt:   time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC),
 	}, nil
@@ -738,6 +756,25 @@ func TestServiceReceiveRejectsProjectDeleteTicketProjectObject(t *testing.T) {
 	_, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/projects/project-1", body)
 
 	require.ErrorIs(t, err, ErrInvalidActivity)
+}
+
+func TestServiceReceiveStoresUserProjectInvite(t *testing.T) {
+	repo := &memoryRepository{targetActorID: "user-actor"}
+	service := NewService(repo, fakeVerifier{verified: &httpsig.VerifiedRequest{
+		ActorID:   "remote-owner",
+		ActorAPID: "https://remote.example/users/owner",
+	}})
+	body := []byte(`{"id":"https://remote.example/activities/invite-1","type":"Invite","actor":"https://remote.example/users/owner","object":{"id":"https://remote.example/projects/board","type":"Group","name":"Remote Board","target":"http://localhost:8080/users/alice","role":"viewer"},"target":"http://localhost:8080/users/alice"}`)
+
+	accepted, err := service.Receive(context.Background(), newInboxRequest(t, string(body)), "http://localhost:8080/users/alice", body)
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://remote.example/activities/invite-1", accepted.ActivityAPID)
+	require.NotNil(t, repo.projectInvite)
+	require.NotNil(t, repo.projectInvite.ObjectInvite)
+	assert.Equal(t, "https://remote.example/projects/board", repo.projectInvite.ObjectInvite.ProjectAPID)
+	assert.Equal(t, "Remote Board", repo.projectInvite.ObjectInvite.Name)
+	assert.Equal(t, "viewer", repo.projectInvite.ObjectInvite.Role)
 }
 
 func TestServiceReceiveStoresProjectAcceptInvite(t *testing.T) {

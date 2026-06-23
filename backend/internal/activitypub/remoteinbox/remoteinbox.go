@@ -29,16 +29,17 @@ var (
 
 // InboundActivity is the normalized form of a remote inbox activity.
 type InboundActivity struct {
-	ID             string            `json:"id"`
-	Type           string            `json:"type"`
-	ActorAPID      string            `json:"actor"`
-	ActorID        string            `json:"-"`
-	ObjectAPID     *string           `json:"object,omitempty"`
-	ObjectActivity *EmbeddedActivity `json:"-"`
-	ObjectNote     *InboundNote      `json:"-"`
-	ObjectTicket   *InboundTicket    `json:"-"`
-	TargetAPID     *string           `json:"target,omitempty"`
-	Document       json.RawMessage   `json:"-"`
+	ID             string                `json:"id"`
+	Type           string                `json:"type"`
+	ActorAPID      string                `json:"actor"`
+	ActorID        string                `json:"-"`
+	ObjectAPID     *string               `json:"object,omitempty"`
+	ObjectActivity *EmbeddedActivity     `json:"-"`
+	ObjectNote     *InboundNote          `json:"-"`
+	ObjectTicket   *InboundTicket        `json:"-"`
+	ObjectInvite   *InboundProjectInvite `json:"-"`
+	TargetAPID     *string               `json:"target,omitempty"`
+	Document       json.RawMessage       `json:"-"`
 }
 
 // EmbeddedActivity represents the object of an Undo or response activity.
@@ -77,6 +78,14 @@ type InboundTicket struct {
 	HasIsResolved    bool
 	InvalidFieldType bool
 	Document         json.RawMessage
+}
+
+// InboundProjectInvite is the normalized embedded project object in an Invite.
+type InboundProjectInvite struct {
+	ProjectAPID string
+	Name        string
+	Role        string
+	TargetAPID  string
 }
 
 // AcceptedActivity describes an accepted or deduplicated inbound activity.

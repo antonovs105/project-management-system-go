@@ -45,6 +45,9 @@ func TestOpenAPIContractDocumentsRegisteredRoutes(t *testing.T) {
 		{method: "post", path: "/api/v1/me/federation/discover"},
 		{method: "get", path: "/api/v1/me/federation/follows"},
 		{method: "post", path: "/api/v1/me/federation/follows"},
+		{method: "get", path: "/api/v1/me/remote-project-invites"},
+		{method: "post", path: "/api/v1/me/remote-project-invites/{inviteID}/accept"},
+		{method: "post", path: "/api/v1/me/remote-project-invites/{inviteID}/reject"},
 		{method: "get", path: "/api/v1/admin/users"},
 		{method: "patch", path: "/api/v1/admin/users/{userID}/role"},
 		{method: "get", path: "/api/v1/admin/audit-events"},
@@ -144,6 +147,9 @@ func TestOpenAPIContractDocumentsDeliveryResponseShapes(t *testing.T) {
 	require.Equal(t, "#/components/schemas/FederationRemoteActor", responseRef(t, doc, "post", "/api/v1/me/federation/discover", "200", "application/json"))
 	require.Equal(t, "#/components/schemas/FederationRemoteFollow", responseItemsRef(t, doc, "get", "/api/v1/me/federation/follows", "200", "application/json"))
 	require.Equal(t, "#/components/schemas/FollowRemoteActorResult", responseRef(t, doc, "post", "/api/v1/me/federation/follows", "202", "application/json"))
+	require.Equal(t, "#/components/schemas/RemoteProjectInvite", responseItemsRef(t, doc, "get", "/api/v1/me/remote-project-invites", "200", "application/json"))
+	require.Equal(t, "#/components/schemas/RemoteProjectInviteResult", responseRef(t, doc, "post", "/api/v1/me/remote-project-invites/{inviteID}/accept", "202", "application/json"))
+	require.Equal(t, "#/components/schemas/RemoteProjectInviteResult", responseRef(t, doc, "post", "/api/v1/me/remote-project-invites/{inviteID}/reject", "202", "application/json"))
 	require.Equal(t, "#/components/schemas/ProjectInviteInspection", responseItemsRef(t, doc, "get", "/api/v1/me/invites", "200", "application/json"))
 	require.Equal(t, "#/components/schemas/ProjectMember", responseItemsRef(t, doc, "get", "/api/v1/projects/{projectID}/members", "200", "application/json"))
 	require.Equal(t, "#/components/schemas/ProjectMember", responseRef(t, doc, "patch", "/api/v1/projects/{projectID}/members/{userID}", "200", "application/json"))

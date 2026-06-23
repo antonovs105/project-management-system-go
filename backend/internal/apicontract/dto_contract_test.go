@@ -138,6 +138,31 @@ func TestRESTDTOsUseStableSnakeCaseFields(t *testing.T) {
 			forbidKeys: []string{"projectID", "projectName", "projectHandle", "roleName", "inviterUsername", "inviteeUsername"},
 		},
 		{
+			name: "remote project invite",
+			value: apfederation.RemoteProjectInvite{
+				ID:             "remote-invite-1",
+				InviteAPID:     "https://remote.test/activities/invite-1",
+				ActivityID:     "activity-1",
+				ProjectAPID:    "https://remote.test/projects/board",
+				ProjectName:    "Remote Board",
+				InviterActorID: "remote-owner",
+				InviterAPID:    "https://remote.test/users/owner",
+				InviterHandle:  "owner@remote.test",
+				InviterName:    "Owner",
+				InviteeActorID: "local-user",
+				Role:           "viewer",
+				TargetInboxURL: "https://remote.test/projects/board/inbox",
+				Status:         "pending",
+				CreatedAt:      now,
+				UpdatedAt:      now,
+			},
+			wantKeys: []string{
+				"id", "invite_ap_id", "activity_id", "project_ap_id", "project_name", "inviter_actor_id", "inviter_ap_id",
+				"inviter_handle", "inviter_name", "invitee_actor_id", "role", "target_inbox_url", "status", "created_at", "updated_at",
+			},
+			forbidKeys: []string{"inviteAPID", "projectAPID", "projectName", "targetInboxURL", "inviterActorID"},
+		},
+		{
 			name: "ticket",
 			value: ticket.Ticket{
 				ID:          "ticket-1",
