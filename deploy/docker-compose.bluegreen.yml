@@ -40,10 +40,7 @@ services:
     init: true
     ports:
       - "127.0.0.1:${BLUE_BACKEND_PORT:-18080}:8080"
-    volumes:
-      - ${PROGO_CONFIG_FILE:?PROGO_CONFIG_FILE is required}:/etc/progo/progo.yml:ro
     environment:
-      PROGO_CONFIG: /etc/progo/progo.yml
       DB_SOURCE: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-pms}?sslmode=disable
       APP_ENV: ${APP_ENV:-production}
       APP_ROLE: api
@@ -104,10 +101,7 @@ services:
     init: true
     ports:
       - "127.0.0.1:${GREEN_BACKEND_PORT:-18081}:8080"
-    volumes:
-      - ${PROGO_CONFIG_FILE:?PROGO_CONFIG_FILE is required}:/etc/progo/progo.yml:ro
     environment:
-      PROGO_CONFIG: /etc/progo/progo.yml
       DB_SOURCE: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-pms}?sslmode=disable
       APP_ENV: ${APP_ENV:-production}
       APP_ROLE: api
@@ -168,10 +162,7 @@ services:
     init: true
     ports:
       - "127.0.0.1:${BLUE_BACKEND_WORKER_METRICS_PORT:-19091}:9091"
-    volumes:
-      - ${PROGO_CONFIG_FILE:?PROGO_CONFIG_FILE is required}:/etc/progo/progo.yml:ro
     environment:
-      PROGO_CONFIG: /etc/progo/progo.yml
       DB_SOURCE: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-pms}?sslmode=disable
       APP_ENV: ${APP_ENV:-production}
       APP_ROLE: worker
@@ -228,10 +219,7 @@ services:
     init: true
     ports:
       - "127.0.0.1:${GREEN_BACKEND_WORKER_METRICS_PORT:-19092}:9091"
-    volumes:
-      - ${PROGO_CONFIG_FILE:?PROGO_CONFIG_FILE is required}:/etc/progo/progo.yml:ro
     environment:
-      PROGO_CONFIG: /etc/progo/progo.yml
       DB_SOURCE: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-pms}?sslmode=disable
       APP_ENV: ${APP_ENV:-production}
       APP_ROLE: worker

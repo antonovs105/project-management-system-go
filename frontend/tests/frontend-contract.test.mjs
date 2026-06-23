@@ -127,15 +127,12 @@ test("auth page queries optional OAuth providers directly", () => {
   assert.ok(authPage.includes("oauthProviders.data ?? publicInstance.data?.oauth_providers"), "auth page must keep /instance OAuth metadata as fallback");
 });
 
-test("blue-green deploy mounts runtime config into backend containers", () => {
+test("blue-green deploy keeps env-only compatibility and proxies public metadata", () => {
   const compose = readRoot("deploy/docker-compose.bluegreen.yml");
   const deploy = readRoot("deploy/bluegreen-deploy.sh");
 
-  assert.ok(deploy.includes('PROGO_CONFIG_FILE=${PROGO_CONFIG_FILE:-"$APP_DIR/progo.yml"}'), "deploy script must default to the runtime YAML config");
-  assert.ok(deploy.includes("env-only compatibility config"), "deploy script must remain compatible with existing .env-only installs");
-  assert.ok(deploy.includes("printf '{}\\n'"), "deploy script must create a valid empty YAML fallback");
-  assert.ok(compose.includes("PROGO_CONFIG: /etc/progo/progo.yml"), "backend containers must receive PROGO_CONFIG");
-  assert.ok(compose.includes("${PROGO_CONFIG_FILE:?PROGO_CONFIG_FILE is required}:/etc/progo/progo.yml:ro"), "runtime config must be mounted read-only");
+  assert.equal(deploy.includes("PROGO_CONFIG_FILE"), false, "blue-green deploy must not require progo.yml for existing .env-only instances");
+  assert.equal(compose.includes("PROGO_CONFIG"), false, "backend containers must not receive a mandatory runtime config mount");
   assert.ok(deploy.includes("/instance /health /ready"), "Caddy must proxy public instance metadata to the backend");
 });
 

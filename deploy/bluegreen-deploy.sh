@@ -3,7 +3,6 @@ set -eu
 
 APP_DIR=${APP_DIR:-/opt/progo/app}
 ENV_FILE=${ENV_FILE:-"$APP_DIR/.env"}
-PROGO_CONFIG_FILE=${PROGO_CONFIG_FILE:-"$APP_DIR/progo.yml"}
 COMPOSE_FILE=${COMPOSE_FILE:-"$APP_DIR/deploy/docker-compose.bluegreen.yml"}
 STATE_FILE=${STATE_FILE:-"$APP_DIR/.active-color"}
 TAG_FILE=${TAG_FILE:-"$APP_DIR/.active-image-tag"}
@@ -24,18 +23,6 @@ fi
 if [ ! -f "$COMPOSE_FILE" ]; then
   echo "missing compose file: $COMPOSE_FILE" >&2
   exit 1
-fi
-
-if [ -f "$PROGO_CONFIG_FILE" ]; then
-  echo "using runtime config: $PROGO_CONFIG_FILE"
-else
-  GENERATED_PROGO_CONFIG_FILE=${GENERATED_PROGO_CONFIG_FILE:-"$APP_DIR/.progo.env-only.yml"}
-  if [ ! -f "$GENERATED_PROGO_CONFIG_FILE" ]; then
-    umask 077
-    printf '{}\n' > "$GENERATED_PROGO_CONFIG_FILE"
-  fi
-  echo "runtime config not found at $PROGO_CONFIG_FILE; using env-only compatibility config: $GENERATED_PROGO_CONFIG_FILE"
-  PROGO_CONFIG_FILE=$GENERATED_PROGO_CONFIG_FILE
 fi
 
 env_value() {
@@ -85,7 +72,6 @@ fi
 export INSTANCE_NAME
 export BACKEND_IMAGE
 export FRONTEND_IMAGE
-export PROGO_CONFIG_FILE
 export FEDERATION_NETWORK
 export MIGRATIONS_DIR
 export POSTGRES_USER POSTGRES_DB
