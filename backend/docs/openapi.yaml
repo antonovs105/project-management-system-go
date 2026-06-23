@@ -534,6 +534,185 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
+  /api/v1/remote-projects:
+    get:
+      tags: [Federation]
+      operationId: listRemoteProjects
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        "200":
+          description: Accepted remote project workspaces visible to the authenticated user.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RemoteProject"
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/remote-projects/{remoteProjectID}:
+    parameters:
+      - $ref: "#/components/parameters/RemoteProjectID"
+    get:
+      tags: [Federation]
+      operationId: getRemoteProject
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Accepted remote project workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemoteProject"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/remote-projects/{remoteProjectID}/tickets:
+    parameters:
+      - $ref: "#/components/parameters/RemoteProjectID"
+    get:
+      tags: [Federation]
+      operationId: listRemoteProjectTickets
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        "200":
+          description: Remote project tickets fetched through signed ActivityPub reads.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RemoteTicket"
+        "404":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [Federation]
+      operationId: createRemoteTicket
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: "#/components/requestBodies/CreateTicket"
+      responses:
+        "202":
+          description: Remote ticket Create activity queued for delivery.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemoteTicketWriteResult"
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/remote-projects/{remoteProjectID}/tickets/{remoteTicketID}:
+    parameters:
+      - $ref: "#/components/parameters/RemoteProjectID"
+      - $ref: "#/components/parameters/RemoteTicketID"
+    get:
+      tags: [Federation]
+      operationId: getRemoteTicket
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Remote ticket fetched through a signed ActivityPub read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemoteTicket"
+        "404":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
+    patch:
+      tags: [Federation]
+      operationId: updateRemoteTicket
+      security:
+        - bearerAuth: []
+      requestBody:
+        $ref: "#/components/requestBodies/UpdateTicket"
+      responses:
+        "202":
+          description: Remote ticket Update activity queued for delivery.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemoteTicketWriteResult"
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [Federation]
+      operationId: deleteRemoteTicket
+      security:
+        - bearerAuth: []
+      responses:
+        "202":
+          description: Remote ticket Delete activity queued for delivery.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemoteTicketWriteResult"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/remote-projects/{remoteProjectID}/tickets/{remoteTicketID}/move:
+    parameters:
+      - $ref: "#/components/parameters/RemoteProjectID"
+      - $ref: "#/components/parameters/RemoteTicketID"
+    post:
+      tags: [Federation]
+      operationId: moveRemoteTicket
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  $ref: "#/components/schemas/TicketStatus"
+      responses:
+        "202":
+          description: Remote ticket status Update activity queued for delivery.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemoteTicketWriteResult"
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
   /api/v1/admin/users:
     get:
       tags: [Auth]
@@ -1841,6 +2020,20 @@ components:
       schema:
         type: string
         format: uuid
+    RemoteProjectID:
+      name: remoteProjectID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RemoteTicketID:
+      name: remoteTicketID
+      in: path
+      required: true
+      description: URL-safe base64 encoding of the remote ticket ActivityPub ID.
+      schema:
+        type: string
     RoleID:
       name: roleID
       in: path
@@ -2157,6 +2350,8 @@ components:
                   - string
                   - "null"
                 format: uuid
+              is_resolved:
+                type: boolean
   responses:
     ActivityPubDocument:
       description: ActivityStreams JSON-LD document.
@@ -2828,6 +3023,114 @@ components:
       properties:
         invite:
           $ref: "#/components/schemas/RemoteProjectInvite"
+        delivery:
+          $ref: "#/components/schemas/FederationFollowDelivery"
+    RemoteProject:
+      type: object
+      required:
+        - id
+        - project_ap_id
+        - project_name
+        - role
+        - target_inbox_url
+        - inviter_actor_id
+        - inviter_ap_id
+        - inviter_handle
+        - inviter_name
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_ap_id:
+          type: string
+          format: uri
+        project_name:
+          type: string
+        role:
+          type: string
+        target_inbox_url:
+          type: string
+          format: uri
+        inviter_actor_id:
+          type: string
+          format: uuid
+        inviter_ap_id:
+          type: string
+          format: uri
+        inviter_handle:
+          type: string
+        inviter_name:
+          type: string
+        remote_actor_id:
+          type:
+            - string
+            - "null"
+          format: uuid
+        remote_handle:
+          type:
+            - string
+            - "null"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+    RemoteTicket:
+      type: object
+      required: [id, ap_id, title, description, status, priority, type, project_id, reporter_id, is_resolved, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          description: URL-safe base64 encoding of the ticket ActivityPub ID.
+        ap_id:
+          type: string
+          format: uri
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          $ref: "#/components/schemas/TicketStatus"
+        priority:
+          $ref: "#/components/schemas/TicketPriority"
+        type:
+          $ref: "#/components/schemas/TicketType"
+        rank:
+          type: string
+        parent_id:
+          type:
+            - string
+            - "null"
+        project_id:
+          type: string
+          format: uuid
+        reporter_id:
+          type: string
+        assignee_id:
+          type:
+            - string
+            - "null"
+        is_resolved:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    RemoteTicketWriteResult:
+      type: object
+      properties:
+        ticket:
+          $ref: "#/components/schemas/RemoteTicket"
         delivery:
           $ref: "#/components/schemas/FederationFollowDelivery"
     FederationDelivery:
