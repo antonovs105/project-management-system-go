@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, CheckCircle2, Clock3, ExternalLink, Mail, RefreshCw, XCircle } from "lucide-react";
+import { ArrowRight, CheckCircle2, Clock3, Mail, RefreshCw, XCircle } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -133,7 +133,7 @@ function RemoteInviteRow({
   labels: {
     accept: string;
     reject: string;
-    open: string;
+    viewFederation: string;
     role: string;
     status: string;
     unknownActor: string;
@@ -182,15 +182,13 @@ function RemoteInviteRow({
           </>
         ) : null}
         {invite.status === "accepted" ? (
-          <a
+          <Link
             className="focus-ring inline-flex h-9 items-center justify-center gap-2 rounded-full border border-zinc-200 bg-white px-4 text-sm font-medium text-zinc-800 shadow-sm transition hover:border-zinc-300 hover:bg-zinc-50"
-            href={invite.project_ap_id}
-            target="_blank"
-            rel="noreferrer"
+            to="/federation"
           >
-            {labels.open}
-            <ExternalLink size={16} />
-          </a>
+            {labels.viewFederation}
+            <ArrowRight size={16} />
+          </Link>
         ) : null}
       </div>
     </div>
@@ -370,7 +368,7 @@ export function InvitationsPage() {
                 labels={{
                   accept: t("actions.accept"),
                   reject: t("actions.reject"),
-                  open: t("actions.open"),
+                  viewFederation: t("projects.viewFederation"),
                   role: t("invitations.role"),
                   status: t(`status.${invite.status}`),
                   unknownActor: t("invitations.unknownActor"),

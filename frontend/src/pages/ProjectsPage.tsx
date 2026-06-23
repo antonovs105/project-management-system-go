@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight, FolderKanban, Plus, RefreshCw } from "lucide-react";
+import { ArrowUpRight, FolderKanban, Network, Plus, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -8,7 +8,7 @@ import { relativeDate } from "../lib/format";
 import { useI18n } from "../lib/i18n-context";
 import { fieldLimits } from "../lib/limits";
 import { queryKeys } from "../lib/queryKeys";
-import { Button, EmptyState, ErrorState, LoadingState, Modal, Panel, TextAreaField, TextField } from "../components/ui";
+import { Badge, Button, EmptyState, ErrorState, LoadingState, Modal, Panel, TextAreaField, TextField } from "../components/ui";
 
 export function ProjectsPage() {
   const queryClient = useQueryClient();
@@ -21,6 +21,10 @@ export function ProjectsPage() {
   const projects = useQuery({
     queryKey: queryKeys.projects,
     queryFn: api.listProjects,
+  });
+  const remoteFollows = useQuery({
+    queryKey: queryKeys.personalFederationFollows("accepted"),
+    queryFn: () => api.listPersonalFederationFollows({ state: "accepted" }),
   });
 
   const capabilities = useQuery({
@@ -40,6 +44,9 @@ export function ProjectsPage() {
   });
 
   const canCreateProjects = capabilities.data?.can_create_projects ?? false;
+  const localProjects = projects.data || [];
+  const remoteProjects = (remoteFollows.data || []).filter((follow) => follow.actor_type === "Group");
+  const hasAnyProjects = localProjects.length > 0 || remoteProjects.length > 0;
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -89,7 +96,11 @@ export function ProjectsPage() {
         <ErrorState title={t("projects.capabilitiesFailed")} body={errorMessage(capabilities.error, t("projects.capabilitiesFailedBody"))} />
       ) : null}
 
-      {projects.data && projects.data.length === 0 ? (
+      {remoteFollows.isError ? (
+        <ErrorState title={t("projects.remoteLoadFailed")} body={errorMessage(remoteFollows.error, t("projects.remoteLoadFailedBody"))} />
+      ) : null}
+
+      {projects.data && !remoteFollows.isLoading && !hasAnyProjects ? (
         <EmptyState
           icon={<FolderKanban size={36} />}
           title={t("projects.emptyTitle")}
@@ -105,9 +116,9 @@ export function ProjectsPage() {
         />
       ) : null}
 
-      {projects.data && projects.data.length > 0 ? (
+      {localProjects.length > 0 ? (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {projects.data.map((project) => (
+          {localProjects.map((project) => (
             <Link key={project.id} to={`/projects/${project.id}`} className="group focus-ring rounded-2xl">
               <Panel className="h-full overflow-hidden p-4 transition hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-md">
                 <div className="flex items-start gap-3">
@@ -132,6 +143,54 @@ export function ProjectsPage() {
             </Link>
           ))}
         </div>
+      ) : null}
+
+      {remoteProjects.length > 0 ? (
+        <Panel className="overflow-hidden">
+          <div className="flex flex-col gap-2 border-b border-zinc-100 p-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="flex items-center gap-2 text-base font-semibold text-zinc-950">
+                <Network size={18} />
+                {t("projects.remoteTitle")}
+              </h2>
+              <p className="mt-1 text-sm text-zinc-500">{t("projects.remoteSubtitle")}</p>
+            </div>
+            <Badge className="border-zinc-200 bg-zinc-50 text-zinc-500">{t("common.shown", { count: remoteProjects.length })}</Badge>
+          </div>
+          <div className="grid gap-4 p-4 md:grid-cols-2 xl:grid-cols-3">
+            {remoteProjects.map((project) => (
+              <div key={project.actor_id} className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-zinc-200 bg-zinc-50 text-zinc-700 shadow-sm">
+                    <Network size={20} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <h3 className="truncate text-base font-semibold text-zinc-950">{project.name || project.handle || project.actor_ap_id}</h3>
+                      <Badge className="border-zinc-950 bg-zinc-950 text-white">{t("projects.remoteBadge")}</Badge>
+                    </div>
+                    <p className="mt-1 line-clamp-2 min-h-10 text-sm text-zinc-500">
+                      {project.summary || t("projects.remoteProjectBody")}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-4 border-t border-zinc-100 pt-3">
+                  <p className="truncate text-xs text-zinc-500">{project.actor_ap_id}</p>
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <span className="truncate rounded-full border border-zinc-200 px-2 py-0.5 text-xs text-zinc-500">{project.handle}</span>
+                    <Link
+                      to="/federation"
+                      className="focus-ring inline-flex h-8 items-center justify-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-800 shadow-sm transition hover:border-zinc-300 hover:bg-zinc-50"
+                    >
+                      {t("projects.viewFederation")}
+                      <ArrowUpRight size={14} />
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Panel>
       ) : null}
 
       <Modal
