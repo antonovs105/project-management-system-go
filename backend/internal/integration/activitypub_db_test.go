@@ -2992,8 +2992,7 @@ func requireC2SCreateTicket(t *testing.T, db *sqlx.DB, cfg activitypub.Config, t
 	require.Equal(t, actorAPID, activity["actor"])
 	require.Equal(t, rec.Header().Get(echo.HeaderLocation), activity["id"])
 
-	ticketAPID, ok := activity["object"].(string)
-	require.True(t, ok)
+	ticketAPID := requireActivityObjectAPID(t, activity)
 	require.NotEmpty(t, ticketAPID)
 
 	requireObjectType(t, db, ticketAPID, "Ticket")
@@ -3126,6 +3125,22 @@ func requireOrderedItems(t *testing.T, doc map[string]any) []any {
 	items, ok := doc["orderedItems"].([]any)
 	require.True(t, ok, "orderedItems should be an array")
 	return items
+}
+
+func requireActivityObjectAPID(t *testing.T, activity map[string]any) string {
+	t.Helper()
+
+	switch object := activity["object"].(type) {
+	case string:
+		return object
+	case map[string]any:
+		id, ok := object["id"].(string)
+		require.True(t, ok, "activity object should contain a string id")
+		return id
+	default:
+		require.Failf(t, "unsupported activity object", "%T", object)
+		return ""
+	}
 }
 
 func requireOrderedItemIDs(t *testing.T, doc map[string]any) []string {

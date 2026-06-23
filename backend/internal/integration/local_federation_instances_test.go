@@ -190,6 +190,23 @@ func TestLocalThreeInstanceProjectFanOut(t *testing.T) {
 	requireFollow(t, alpha.db, alice.ID, alphaRemoteProject.ID, "accepted")
 	requireFollow(t, gamma.db, gina.ID, gammaRemoteProject.ID, "accepted")
 
+	aliceInvite, err := beta.projectService.AddMemberToProject(ctx, betaProject.ID, bob.ID, alice.Username+"@"+alpha.domain, project.RoleDeveloper)
+	require.NoError(t, err)
+	acceptInviteBody := marshalLocalFederationJSON(t, map[string]any{
+		"@context": activitypub.Context(),
+		"id":       alpha.cfg.BaseURL + "/activities/fanout-accept-invite-1",
+		"type":     "Accept",
+		"actor":    alice.APID,
+		"object":   aliceInvite.APID,
+		"target":   betaProject.APID,
+	})
+	acceptInviteResp := postLocalSignedActivity(t, ctx, router, alpha, alice.ID, activitypub.Inbox(betaProject.APID), acceptInviteBody)
+	defer acceptInviteResp.Body.Close()
+	rawAcceptInviteResp, err := io.ReadAll(acceptInviteResp.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusAccepted, acceptInviteResp.StatusCode, string(rawAcceptInviteResp))
+	requireInviteStatus(t, beta.db, aliceInvite.ID, "accepted")
+
 	ticketAPID := alpha.cfg.BaseURL + "/tickets/fanout-ticket-1"
 	createActivityAPID := alpha.cfg.BaseURL + "/activities/fanout-create-ticket-1"
 	createBody := marshalLocalFederationJSON(t, map[string]any{

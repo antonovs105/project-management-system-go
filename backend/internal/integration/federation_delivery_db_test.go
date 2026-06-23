@@ -101,7 +101,7 @@ func TestFederationDiscoveryAndDeliverySmoke(t *testing.T) {
 	require.NoError(t, json.Unmarshal(client.receivedBody, &deliveredActivity))
 	assert.Equal(t, "Create", deliveredActivity["type"])
 	assert.Equal(t, owner.APID, deliveredActivity["actor"])
-	assert.Equal(t, createdTicket.APID, deliveredActivity["object"])
+	assert.Equal(t, createdTicket.APID, requireActivityObjectAPID(t, deliveredActivity))
 	assert.Equal(t, createdProject.APID, deliveredActivity["target"])
 
 	createActivityID := requireActivityIDForObject(t, db, createdTicket.APID)
