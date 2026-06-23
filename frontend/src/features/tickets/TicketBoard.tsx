@@ -99,10 +99,10 @@ function BoardColumn({
   const { setNodeRef, isOver } = useDroppable({ id: status });
 
   return (
-    <section className="flex min-h-[520px] min-w-[290px] flex-1 flex-col rounded-3xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur">
-      <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
-        <div className="font-semibold text-zinc-900">{columnTitle(status)}</div>
-        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs font-semibold text-zinc-500">
+    <section className="flex min-h-[520px] min-w-[290px] flex-1 flex-col rounded-3xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/70">
+      <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+        <div className="font-semibold text-zinc-900 dark:text-zinc-100">{columnTitle(status)}</div>
+        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
           {tickets.length}
         </span>
       </div>
@@ -110,7 +110,7 @@ function BoardColumn({
         ref={setNodeRef}
         className={[
           "flex-1 space-y-2 overflow-y-auto rounded-b-3xl p-2 transition",
-          isOver ? "bg-zinc-100" : "",
+          isOver ? "bg-zinc-100 dark:bg-zinc-800/50" : "",
         ].join(" ")}
       >
         <SortableContext items={tickets.map((ticket) => ticket.id)} strategy={verticalListSortingStrategy}>
@@ -119,7 +119,7 @@ function BoardColumn({
           ))}
         </SortableContext>
         {tickets.length === 0 ? (
-          <div className="flex h-24 items-center justify-center rounded-2xl border border-dashed border-zinc-300 text-xs text-zinc-400">
+          <div className="flex h-24 items-center justify-center rounded-2xl border border-dashed border-zinc-300 text-xs text-zinc-400 dark:border-zinc-700 dark:text-zinc-500">
             Empty
           </div>
         ) : null}
@@ -264,7 +264,7 @@ export function TicketBoard({
                 <StatusBadge value={activeTicket.type} kind="type" />
                 <StatusBadge value={activeTicket.priority} kind="priority" />
               </div>
-              <h3 className="text-sm font-semibold text-slate-950">{activeTicket.title}</h3>
+              <h3 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">{activeTicket.title}</h3>
             </Panel>
           </div>
         ) : null}
