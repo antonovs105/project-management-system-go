@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight, FolderKanban, Network, Plus, RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, errorMessage } from "../lib/api";
@@ -47,6 +47,7 @@ export function ProjectsPage() {
   const localProjects = projects.data || [];
   const remoteProjects = remoteProjectsQuery.data || [];
   const hasAnyProjects = localProjects.length > 0 || remoteProjects.length > 0;
+  const createProjectOpen = createOpen && canCreateProjects;
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -55,12 +56,6 @@ export function ProjectsPage() {
     }
     createProject.mutate({ name: name.trim(), description: description.trim() });
   }
-
-  useEffect(() => {
-    if (!canCreateProjects && createOpen) {
-      setCreateOpen(false);
-    }
-  }, [canCreateProjects, createOpen]);
 
   return (
     <div className="space-y-6">
@@ -196,7 +191,7 @@ export function ProjectsPage() {
       ) : null}
 
       <Modal
-        open={createOpen}
+        open={createProjectOpen}
         title={t("projects.createTitle")}
         onClose={() => setCreateOpen(false)}
         formId="create-project"

@@ -34,6 +34,12 @@ const (
 	maxRemoteTicketTitleLength = 120
 	// maxRemoteTicketDescriptionLength matches local ticket validation for outbound remote writes.
 	maxRemoteTicketDescriptionLength = 4000
+	// remotePermissionTicketsCreate grants remote ticket creation.
+	remotePermissionTicketsCreate = "tickets.create"
+	// remotePermissionTicketsUpdate grants remote ticket updates and status moves.
+	remotePermissionTicketsUpdate = "tickets.update"
+	// remotePermissionTicketsDelete grants remote ticket deletion.
+	remotePermissionTicketsDelete = "tickets.delete"
 )
 
 // Repository defines persistence operations for personal federation views.
@@ -251,7 +257,7 @@ func (s *Service) GetRemoteTicket(ctx context.Context, userID string, projectID 
 
 // CreateRemoteTicket queues a signed Create Ticket activity to the remote project inbox.
 func (s *Service) CreateRemoteTicket(ctx context.Context, userID string, projectID string, req RemoteTicketRequest) (*RemoteTicketWriteResult, error) {
-	project, localActor, err := s.remoteProjectWriteContext(ctx, userID, projectID)
+	project, localActor, err := s.remoteProjectWriteContext(ctx, userID, projectID, remotePermissionTicketsCreate)
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +291,7 @@ func (s *Service) CreateRemoteTicket(ctx context.Context, userID string, project
 
 // UpdateRemoteTicket queues a signed Update Ticket activity to the remote project inbox.
 func (s *Service) UpdateRemoteTicket(ctx context.Context, userID string, projectID string, ticketID string, req RemoteTicketUpdateRequest) (*RemoteTicketWriteResult, error) {
-	project, localActor, err := s.remoteProjectWriteContext(ctx, userID, projectID)
+	project, localActor, err := s.remoteProjectWriteContext(ctx, userID, projectID, remotePermissionTicketsUpdate)
 	if err != nil {
 		return nil, err
 	}
@@ -325,7 +331,7 @@ func (s *Service) MoveRemoteTicket(ctx context.Context, userID string, projectID
 
 // DeleteRemoteTicket queues a signed Delete activity to the remote project inbox.
 func (s *Service) DeleteRemoteTicket(ctx context.Context, userID string, projectID string, ticketID string) (*RemoteTicketWriteResult, error) {
-	project, localActor, err := s.remoteProjectWriteContext(ctx, userID, projectID)
+	project, localActor, err := s.remoteProjectWriteContext(ctx, userID, projectID, remotePermissionTicketsDelete)
 	if err != nil {
 		return nil, err
 	}
@@ -493,16 +499,45 @@ func (s *Service) FollowRemoteActor(ctx context.Context, userID string, target s
 }
 
 // remoteProjectWriteContext loads the remote project and local actor required for outbound work.
-func (s *Service) remoteProjectWriteContext(ctx context.Context, userID string, projectID string) (*RemoteProject, *LocalActor, error) {
+func (s *Service) remoteProjectWriteContext(ctx context.Context, userID string, projectID string, permission string) (*RemoteProject, *LocalActor, error) {
 	project, err := s.GetRemoteProject(ctx, userID, projectID)
 	if err != nil {
 		return nil, nil, err
+	}
+	if permission != "" && !remoteProjectAllows(project, permission) {
+		return nil, nil, fmt.Errorf("%w: missing %s", ErrRemoteProjectPermissionDenied, permission)
 	}
 	localActor, err := s.repo.LocalUserActor(ctx, userID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %v", ErrLocalActorNotFound, err)
 	}
 	return project, localActor, nil
+}
+
+// remoteProjectAllows reports whether an accepted remote project role permits a requested write.
+func remoteProjectAllows(project *RemoteProject, permission string) bool {
+	if project == nil || permission == "" {
+		return false
+	}
+	for _, stored := range project.RolePermissions {
+		if strings.TrimSpace(stored) == permission {
+			return true
+		}
+	}
+	if len(project.RolePermissions) > 0 {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(project.Role)) {
+	case "owner", "manager":
+		return permission == remotePermissionTicketsCreate ||
+			permission == remotePermissionTicketsUpdate ||
+			permission == remotePermissionTicketsDelete
+	case "developer":
+		return permission == remotePermissionTicketsCreate ||
+			permission == remotePermissionTicketsUpdate
+	default:
+		return false
+	}
 }
 
 // remoteTicketDocument loads a remote ticket and returns both normalized and raw map forms.

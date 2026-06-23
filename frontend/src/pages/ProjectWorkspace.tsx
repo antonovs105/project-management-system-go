@@ -6,7 +6,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ProjectDeliveriesPanel } from "../features/projects/ProjectDeliveriesPanel";
 import { ProjectSettingsPanel } from "../features/projects/ProjectSettingsPanel";
-import { projectMemberLabel } from "../features/tickets/MemberAssigneeSelect";
+import { projectMemberLabel } from "../features/tickets/memberLabels";
 import { TicketBoard } from "../features/tickets/TicketBoard";
 import { TicketDetailPanel } from "../features/tickets/TicketDetailPanel";
 import { TicketFormModal } from "../features/tickets/TicketFormModal";

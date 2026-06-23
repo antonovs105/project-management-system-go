@@ -506,6 +506,34 @@ func TestServiceCreatesRemoteTicketAndQueuesDelivery(t *testing.T) {
 	assert.Equal(t, "Remote task", storedObject["name"])
 }
 
+func TestServiceRejectsRemoteTicketCreateWithoutRemoteRolePermission(t *testing.T) {
+	repo := &serviceRepo{
+		remoteProject: &RemoteProject{
+			ID:             "remote-project-1",
+			ProjectAPID:    "https://remote.test/projects/board",
+			ProjectName:    "Remote Board",
+			Role:           "viewer",
+			TargetInboxURL: "https://remote.test/projects/board/inbox",
+		},
+	}
+	queued := &fakeDelivery{}
+	service := NewService(
+		repo,
+		WithConfig(activitypub.NewConfig("http://local.test", "local.test")),
+		WithDelivery(queued),
+	)
+
+	_, err := service.CreateRemoteTicket(context.Background(), "user-1", "remote-project-1", RemoteTicketRequest{
+		Title:    "Remote task",
+		Priority: "medium",
+		Type:     "task",
+	})
+
+	require.ErrorIs(t, err, ErrRemoteProjectPermissionDenied)
+	assert.Empty(t, repo.remoteActivityID)
+	assert.Empty(t, queued.activityID)
+}
+
 func TestServiceDoesNotQueueDeliveryForExistingFollow(t *testing.T) {
 	repo := &serviceRepo{storeCreated: false}
 	resolver := &fakeResolver{actor: testRemoteActor()}

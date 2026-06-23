@@ -274,6 +274,8 @@ func writeFederationError(c echo.Context, err error) error {
 		return c.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
 	case errors.Is(err, ErrRemoteProjectNotFound), errors.Is(err, ErrRemoteTicketNotFound):
 		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	case errors.Is(err, ErrRemoteProjectPermissionDenied):
+		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
 	case errors.Is(err, ErrInvalidRemoteTicketInput):
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	case errors.Is(err, ErrRemoteRequestFailed):

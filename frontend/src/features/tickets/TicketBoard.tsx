@@ -17,7 +17,7 @@ import { StatusBadge } from "../../components/StatusBadge";
 import { EmptyState, Panel } from "../../components/ui";
 import { ticketStatuses } from "../../lib/constants";
 import type { ID, ProjectMember, Ticket, TicketStatus } from "../../types";
-import { projectMemberLabel } from "./MemberAssigneeSelect";
+import { projectMemberLabel } from "./memberLabels";
 
 function columnTitle(status: TicketStatus): string {
   return ticketStatuses.find((item) => item.id === status)?.label || status;
@@ -27,14 +27,17 @@ function TicketCard({
   ticket,
   members,
   onOpen,
+  draggable,
 }: {
   ticket: Ticket;
   members: ProjectMember[];
   onOpen: (ticketId: ID) => void;
+  draggable: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: ticket.id,
     data: { ticket },
+    disabled: !draggable,
   });
 
   return (
@@ -46,10 +49,13 @@ function TicketCard({
         transition,
         opacity: isDragging ? 0.45 : 1,
       }}
-      className="focus-ring w-full cursor-grab touch-none rounded-2xl text-left active:cursor-grabbing"
+      className={[
+        "focus-ring w-full touch-none rounded-2xl text-left",
+        draggable ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
+      ].join(" ")}
       onClick={() => onOpen(ticket.id)}
-      {...attributes}
-      {...listeners}
+      {...(draggable ? attributes : {})}
+      {...(draggable ? listeners : {})}
     >
       <Panel className="group p-3 transition hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-md">
         <div className="flex items-start gap-2">
@@ -82,11 +88,13 @@ function BoardColumn({
   tickets,
   members,
   onOpen,
+  draggable,
 }: {
   status: TicketStatus;
   tickets: Ticket[];
   members: ProjectMember[];
   onOpen: (ticketId: ID) => void;
+  draggable: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
 
@@ -107,7 +115,7 @@ function BoardColumn({
       >
         <SortableContext items={tickets.map((ticket) => ticket.id)} strategy={verticalListSortingStrategy}>
           {tickets.map((ticket) => (
-            <TicketCard key={ticket.id} ticket={ticket} members={members} onOpen={onOpen} />
+            <TicketCard key={ticket.id} ticket={ticket} members={members} onOpen={onOpen} draggable={draggable} />
           ))}
         </SortableContext>
         {tickets.length === 0 ? (
@@ -134,12 +142,20 @@ export function TicketBoard({
   onOpenTicket,
   onMoveTicket,
   emptyAction,
+  readOnly = false,
+  showColumnsWhenEmpty = false,
+  emptyTitle = "No tickets yet",
+  emptyBody = "Create a ticket to start shaping the board.",
 }: {
   tickets: Ticket[];
   members: ProjectMember[];
   onOpenTicket: (ticketId: ID) => void;
   onMoveTicket: (ticketId: ID, status: TicketStatus, beforeTicketId: ID | null, afterTicketId: ID | null) => void;
   emptyAction?: ReactNode;
+  readOnly?: boolean;
+  showColumnsWhenEmpty?: boolean;
+  emptyTitle?: string;
+  emptyBody?: string;
 }) {
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
@@ -162,11 +178,18 @@ export function TicketBoard({
   }
 
   function handleDragStart(event: DragStartEvent) {
+    if (readOnly) {
+      return;
+    }
     const ticket = tickets.find((item) => item.id === String(event.active.id));
     setActiveTicket(ticket || null);
   }
 
   function handleDragEnd(event: DragEndEvent) {
+    if (readOnly) {
+      setActiveTicket(null);
+      return;
+    }
     const activeId = String(event.active.id);
     const overId = event.over?.id ? String(event.over.id) : "";
     const ticket = tickets.find((item) => item.id === activeId);
@@ -215,8 +238,8 @@ export function TicketBoard({
     setActiveTicket(null);
   }
 
-  if (tickets.length === 0) {
-    return <EmptyState title="No tickets yet" body="Create a ticket to start shaping the board." action={emptyAction} />;
+  if (tickets.length === 0 && !showColumnsWhenEmpty) {
+    return <EmptyState title={emptyTitle} body={emptyBody} action={emptyAction} />;
   }
 
   return (
@@ -229,6 +252,7 @@ export function TicketBoard({
             tickets={grouped.get(status.id) || []}
             members={members}
             onOpen={onOpenTicket}
+            draggable={!readOnly}
           />
         ))}
       </div>

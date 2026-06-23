@@ -24,6 +24,8 @@ var (
 	ErrRemoteProjectNotFound = errors.New("remote project not found")
 	// ErrRemoteTicketNotFound reports a missing remote ticket resource.
 	ErrRemoteTicketNotFound = errors.New("remote ticket not found")
+	// ErrRemoteProjectPermissionDenied reports that the accepted remote role cannot perform a requested write.
+	ErrRemoteProjectPermissionDenied = errors.New("remote project permission denied")
 	// ErrInvalidRemoteTicketInput reports malformed remote ticket input.
 	ErrInvalidRemoteTicketInput = errors.New("invalid remote ticket input")
 	// ErrRemoteRequestFailed reports a failed signed remote ActivityPub request.

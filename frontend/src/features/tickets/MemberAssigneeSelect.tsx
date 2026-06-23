@@ -1,12 +1,7 @@
 import { useMemo, useState } from "react";
 import type { ID, ProjectMember } from "../../types";
 import { SelectField, TextField } from "../../components/ui";
-
-function memberLabel(member: ProjectMember): string {
-  const primary = member.name || member.username || member.email || member.handle || member.user_id;
-  const secondary = member.email && member.email !== primary ? member.email : member.handle;
-  return secondary ? `${primary} / ${secondary}` : primary;
-}
+import { memberLabel } from "./memberLabels";
 
 function matchesMember(member: ProjectMember, query: string): boolean {
   if (!query) {
@@ -58,12 +53,4 @@ export function MemberAssigneeSelect({
       </SelectField>
     </div>
   );
-}
-
-export function projectMemberLabel(members: ProjectMember[], userID: ID | null | undefined): string {
-  if (!userID) {
-    return "Unassigned";
-  }
-  const member = members.find((item) => item.user_id === userID);
-  return member ? memberLabel(member) : userID;
 }

@@ -2968,6 +2968,7 @@ components:
         - inviter_name
         - invitee_actor_id
         - role
+        - role_permissions
         - target_inbox_url
         - status
         - created_at
@@ -3002,6 +3003,10 @@ components:
           format: uuid
         role:
           type: string
+        role_permissions:
+          type: array
+          items:
+            type: string
         target_inbox_url:
           type: string
           format: uri
@@ -3032,6 +3037,7 @@ components:
         - project_ap_id
         - project_name
         - role
+        - role_permissions
         - target_inbox_url
         - inviter_actor_id
         - inviter_ap_id
@@ -3050,6 +3056,10 @@ components:
           type: string
         role:
           type: string
+        role_permissions:
+          type: array
+          items:
+            type: string
         target_inbox_url:
           type: string
           format: uri

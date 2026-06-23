@@ -1,17 +1,63 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ExternalLink, Plus, RefreshCw, Save, Trash2, X } from "lucide-react";
-import { useMemo, useState, type FormEvent } from "react";
+import { ArrowLeft, CheckCircle2, Clock3, ExternalLink, Flame, ListChecks, LockKeyhole, Plus, RefreshCw, Save, Trash2, X } from "lucide-react";
+import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { StatusBadge } from "../components/StatusBadge";
-import { Badge, Button, EmptyState, ErrorState, IconButton, LoadingState, Modal, Panel, SelectField, TextAreaField, TextField } from "../components/ui";
+import { Badge, Button, ErrorState, IconButton, LoadingState, Modal, Panel, SelectField, TextAreaField, TextField } from "../components/ui";
 import { TicketBoard } from "../features/tickets/TicketBoard";
 import { api, errorMessage } from "../lib/api";
 import { ticketPriorities, ticketStatuses, ticketTypes } from "../lib/constants";
+import { relativeDate } from "../lib/format";
 import { useI18n } from "../lib/i18n-context";
 import { fieldLimits } from "../lib/limits";
 import { queryKeys } from "../lib/queryKeys";
-import type { Ticket, TicketPriority, TicketStatus, TicketType } from "../types";
+import type { ID, RemoteProject, Ticket, TicketPriority, TicketStatus, TicketType } from "../types";
+
+const ticketCreatePermission = "tickets.create";
+const ticketUpdatePermission = "tickets.update";
+const ticketDeletePermission = "tickets.delete";
+
+const builtInRolePermissions: Record<string, string[]> = {
+  owner: [
+    "project.read",
+    "project.update",
+    "project.delete",
+    "members.invite",
+    "members.remove",
+    "roles.manage",
+    ticketCreatePermission,
+    ticketUpdatePermission,
+    ticketDeletePermission,
+    "comments.create",
+    "comments.moderate",
+    "federation.delivery.retry",
+  ],
+  manager: [
+    "project.read",
+    "project.update",
+    "members.invite",
+    "members.remove",
+    ticketCreatePermission,
+    ticketUpdatePermission,
+    ticketDeletePermission,
+    "comments.create",
+    "comments.moderate",
+    "federation.delivery.retry",
+  ],
+  developer: ["project.read", ticketCreatePermission, ticketUpdatePermission, "comments.create"],
+  viewer: ["project.read"],
+};
+
+function SummaryItem({ icon, label, value }: { icon: ReactNode; label: string; value: number | string }) {
+  return (
+    <div className="inline-flex min-w-32 items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-sm">
+      <span className="text-zinc-400">{icon}</span>
+      <span className="font-semibold text-zinc-950">{value}</span>
+      <span className="text-zinc-500">{label}</span>
+    </div>
+  );
+}
 
 function updateTicketCache(tickets: Ticket[] | undefined, ticket: Ticket): Ticket[] {
   const current = tickets || [];
@@ -20,6 +66,37 @@ function updateTicketCache(tickets: Ticket[] | undefined, ticket: Ticket): Ticke
     return [ticket, ...current];
   }
   return current.map((item) => (item.id === ticket.id ? ticket : item));
+}
+
+function moveTicketsOptimistically(tickets: Ticket[], ticketId: ID, status: TicketStatus): Ticket[] {
+  return tickets.map((ticket) => (ticket.id === ticketId ? { ...ticket, status, is_resolved: status === "done" } : ticket));
+}
+
+function remoteProjectTitle(project?: RemoteProject): string {
+  if (!project) {
+    return "Remote project";
+  }
+  const name = project.project_name.trim();
+  if (name && name !== project.project_ap_id && !/^https?:\/\//i.test(name)) {
+    return name;
+  }
+  if (project.remote_handle) {
+    return project.remote_handle;
+  }
+  try {
+    const url = new URL(project.project_ap_id);
+    return url.pathname.split("/").filter(Boolean).pop() || url.host;
+  } catch {
+    return project.project_ap_id;
+  }
+}
+
+function projectPermissions(project?: RemoteProject): Set<string> {
+  const explicit = project?.role_permissions || [];
+  if (explicit.length > 0) {
+    return new Set(explicit);
+  }
+  return new Set(builtInRolePermissions[(project?.role || "").toLowerCase()] || ["project.read"]);
 }
 
 export function RemoteProjectWorkspace() {
@@ -54,13 +131,34 @@ export function RemoteProjectWorkspace() {
     enabled: Boolean(projectId),
   });
 
+  const permissions = useMemo(() => projectPermissions(project.data), [project.data]);
+  const canCreateTickets = permissions.has(ticketCreatePermission);
+  const canUpdateTickets = permissions.has(ticketUpdatePermission);
+  const canDeleteTickets = permissions.has(ticketDeletePermission);
+  const remoteTickets = useMemo(() => tickets.data || [], [tickets.data]);
   const selectedTicket = useMemo(
-    () => (tickets.data || []).find((ticket) => ticket.id === selectedTicketId) || null,
-    [selectedTicketId, tickets.data],
+    () => remoteTickets.find((ticket) => ticket.id === selectedTicketId) || null,
+    [remoteTickets, selectedTicketId],
+  );
+
+  const ticketStats = useMemo(
+    () => ({
+      total: remoteTickets.length,
+      active: remoteTickets.filter((ticket) => ticket.status === "in_progress" || ticket.status === "review").length,
+      urgent: remoteTickets.filter((ticket) => ticket.priority === "urgent").length,
+      done: remoteTickets.filter((ticket) => ticket.status === "done").length,
+    }),
+    [remoteTickets],
   );
 
   function cacheTicket(ticket: Ticket) {
     queryClient.setQueryData<Ticket[]>(queryKeys.remoteTickets(projectId), (current) => updateTicketCache(current, ticket));
+  }
+
+  function refreshRemoteTicketsSoon() {
+    window.setTimeout(() => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.remoteTickets(projectId) });
+    }, 2500);
   }
 
   const createTicket = useMutation({
@@ -71,14 +169,14 @@ export function RemoteProjectWorkspace() {
         priority: createDraft.priority,
         type: createDraft.type,
       }),
-    onSuccess: async (result) => {
+    onSuccess: (result) => {
       if (result.ticket) {
         cacheTicket(result.ticket);
       }
       setCreateOpen(false);
       setCreateDraft({ title: "", description: "", priority: "medium", type: "task" });
       toast.success(t("remoteWorkspace.ticketQueued"));
-      await queryClient.invalidateQueries({ queryKey: queryKeys.remoteTickets(projectId) });
+      refreshRemoteTicketsSoon();
     },
   });
 
@@ -94,33 +192,41 @@ export function RemoteProjectWorkspace() {
             is_resolved: draft.status === "done",
           })
         : Promise.reject(new Error("No ticket selected")),
-    onSuccess: async (result) => {
+    onSuccess: (result) => {
       if (result.ticket) {
         cacheTicket(result.ticket);
       }
       toast.success(t("remoteWorkspace.ticketQueued"));
-      await queryClient.invalidateQueries({ queryKey: queryKeys.remoteTickets(projectId) });
+      refreshRemoteTicketsSoon();
     },
   });
 
   const moveTicket = useMutation({
     mutationFn: ({ ticketId, status }: { ticketId: string; status: TicketStatus }) => api.moveRemoteTicket(projectId, ticketId, { status }),
     onMutate: ({ ticketId, status }) => {
-      queryClient.setQueryData<Ticket[]>(queryKeys.remoteTickets(projectId), (current) =>
-        (current || []).map((ticket) => (ticket.id === ticketId ? { ...ticket, status, is_resolved: status === "done" } : ticket)),
+      const previous = queryClient.getQueryData<Ticket[]>(queryKeys.remoteTickets(projectId));
+      queryClient.setQueryData<Ticket[]>(queryKeys.remoteTickets(projectId), (current = []) =>
+        moveTicketsOptimistically(current, ticketId, status),
       );
+      return { previous };
     },
-    onSuccess: async (result) => {
+    onError: (error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.remoteTickets(projectId), context.previous);
+      }
+      toast.error(errorMessage(error, t("remoteWorkspace.updateFailedBody")));
+    },
+    onSuccess: (result) => {
       if (result.ticket) {
         cacheTicket(result.ticket);
       }
-      await queryClient.invalidateQueries({ queryKey: queryKeys.remoteTickets(projectId) });
+      refreshRemoteTicketsSoon();
     },
   });
 
   const deleteTicket = useMutation({
     mutationFn: () => (selectedTicket ? api.deleteRemoteTicket(projectId, selectedTicket.id) : Promise.reject(new Error("No ticket selected"))),
-    onSuccess: async () => {
+    onSuccess: () => {
       if (selectedTicket) {
         queryClient.setQueryData<Ticket[]>(queryKeys.remoteTickets(projectId), (current) =>
           (current || []).filter((ticket) => ticket.id !== selectedTicket.id),
@@ -128,12 +234,12 @@ export function RemoteProjectWorkspace() {
       }
       setSelectedTicketId(null);
       toast.success(t("remoteWorkspace.ticketQueued"));
-      await queryClient.invalidateQueries({ queryKey: queryKeys.remoteTickets(projectId) });
+      refreshRemoteTicketsSoon();
     },
   });
 
   function openTicket(ticketId: string) {
-    const ticket = (tickets.data || []).find((item) => item.id === ticketId);
+    const ticket = remoteTickets.find((item) => item.id === ticketId);
     if (!ticket) {
       return;
     }
@@ -149,6 +255,10 @@ export function RemoteProjectWorkspace() {
 
   function submitCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!canCreateTickets) {
+      toast.error(t("remoteWorkspace.readOnlyBody"));
+      return;
+    }
     if (createDraft.title.trim()) {
       createTicket.mutate();
     }
@@ -156,18 +266,42 @@ export function RemoteProjectWorkspace() {
 
   function submitUpdate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!canUpdateTickets) {
+      toast.error(t("remoteWorkspace.readOnlyBody"));
+      return;
+    }
     if (selectedTicket && draft.title.trim()) {
       updateTicket.mutate();
     }
   }
 
+  function handleMove(ticketId: ID, status: TicketStatus) {
+    const ticket = remoteTickets.find((item) => item.id === ticketId);
+    if (!ticket) {
+      return;
+    }
+    if (!canUpdateTickets) {
+      toast.error(t("remoteWorkspace.readOnlyBody"));
+      return;
+    }
+    if (ticket.status === status) {
+      toast.error(t("remoteWorkspace.reorderUnsupported"));
+      return;
+    }
+    moveTicket.mutate({ ticketId, status });
+  }
+
   const loading = project.isLoading || tickets.isLoading;
   const remoteProject = project.data;
-  const remoteTickets = tickets.data || [];
+  const title = remoteProjectTitle(remoteProject);
+  const readOnly = Boolean(remoteProject) && !canCreateTickets && !canUpdateTickets && !canDeleteTickets;
+  const createDisabled = !remoteProject || !canCreateTickets;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm lg:flex-row lg:items-start lg:justify-between">
+    <div className="space-y-5">
+      {!projectId ? <ErrorState title={t("remoteWorkspace.missing")} body={t("remoteWorkspace.missingBody")} /> : null}
+
+      <div className="flex flex-col gap-4 rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
           <Link to="/projects" className="mb-3 inline-flex items-center gap-2 text-sm font-medium text-zinc-500 hover:text-zinc-950">
             <ArrowLeft size={16} />
@@ -176,11 +310,22 @@ export function RemoteProjectWorkspace() {
           <div className="mb-2 flex flex-wrap gap-2">
             <Badge className="border-zinc-950 bg-zinc-950 text-white">{t("projects.remoteBadge")}</Badge>
             {remoteProject?.role ? <Badge className="border-zinc-200 bg-zinc-50 text-zinc-500">{remoteProject.role}</Badge> : null}
+            {readOnly ? (
+              <Badge className="inline-flex items-center gap-1 border-zinc-200 bg-zinc-50 text-zinc-500">
+                <LockKeyhole size={12} />
+                {t("remoteWorkspace.readOnly")}
+              </Badge>
+            ) : null}
           </div>
-          <h1 className="truncate text-3xl font-semibold tracking-tight text-zinc-950">
-            {remoteProject?.project_name || t("remoteWorkspace.title")}
-          </h1>
-          <p className="mt-1 truncate text-sm text-zinc-500">{remoteProject?.project_ap_id || t("remoteWorkspace.subtitle")}</p>
+          <h1 className="truncate text-2xl font-semibold tracking-tight text-zinc-950">{title}</h1>
+          <p className="mt-1 break-all text-sm text-zinc-500">{remoteProject?.project_ap_id || t("remoteWorkspace.subtitle")}</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <SummaryItem icon={<ListChecks size={15} />} label="tickets" value={ticketStats.total} />
+            <SummaryItem icon={<Clock3 size={15} />} label="active" value={ticketStats.active} />
+            <SummaryItem icon={<Flame size={15} />} label="urgent" value={ticketStats.urgent} />
+            <SummaryItem icon={<CheckCircle2 size={15} />} label="done" value={ticketStats.done} />
+          </div>
+          {remoteProject?.updated_at ? <p className="mt-3 text-xs text-zinc-400">Updated {relativeDate(remoteProject.updated_at)}</p> : null}
         </div>
         <div className="flex flex-wrap gap-2">
           {remoteProject?.project_ap_id ? (
@@ -198,12 +343,27 @@ export function RemoteProjectWorkspace() {
             <RefreshCw size={16} />
             {t("actions.refresh")}
           </Button>
-          <Button tone="primary" onClick={() => setCreateOpen(true)}>
+          <Button
+            tone="primary"
+            onClick={() => setCreateOpen(true)}
+            disabled={createDisabled}
+            title={remoteProject && !canCreateTickets ? t("remoteWorkspace.noCreatePermission") : undefined}
+          >
             <Plus size={16} />
             {t("remoteWorkspace.createTicket")}
           </Button>
         </div>
       </div>
+
+      {readOnly ? (
+        <Panel className="flex items-start gap-3 p-4 text-sm text-zinc-600">
+          <LockKeyhole size={18} className="mt-0.5 shrink-0 text-zinc-400" />
+          <div>
+            <div className="font-semibold text-zinc-950">{t("remoteWorkspace.readOnly")}</div>
+            <p className="mt-1">{t("remoteWorkspace.readOnlyBody")}</p>
+          </div>
+        </Panel>
+      ) : null}
 
       {loading ? <LoadingState label={t("remoteWorkspace.loading")} /> : null}
 
@@ -215,27 +375,38 @@ export function RemoteProjectWorkspace() {
         <ErrorState title={t("remoteWorkspace.ticketsFailed")} body={errorMessage(tickets.error, t("remoteWorkspace.ticketsFailedBody"))} />
       ) : null}
 
+      {!loading && !project.isError && !tickets.isError && remoteTickets.length === 0 ? (
+        <Panel className="flex flex-col gap-3 p-4 text-sm text-zinc-600 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="font-semibold text-zinc-950">{t("remoteWorkspace.emptyTitle")}</div>
+            <p className="mt-1">{t("remoteWorkspace.emptyBody")}</p>
+          </div>
+          {canCreateTickets ? (
+            <Button tone="primary" onClick={() => setCreateOpen(true)}>
+              <Plus size={16} />
+              {t("remoteWorkspace.createTicket")}
+            </Button>
+          ) : null}
+        </Panel>
+      ) : null}
+
       {!loading && !project.isError && !tickets.isError ? (
-        remoteTickets.length > 0 ? (
-          <TicketBoard
-            tickets={remoteTickets}
-            members={[]}
-            onOpenTicket={openTicket}
-            onMoveTicket={(ticketId, status) => moveTicket.mutate({ ticketId, status })}
-            emptyAction={null}
-          />
-        ) : (
-          <EmptyState
-            title={t("remoteWorkspace.emptyTitle")}
-            body={t("remoteWorkspace.emptyBody")}
-            action={
+        <TicketBoard
+          tickets={remoteTickets}
+          members={[]}
+          onOpenTicket={openTicket}
+          onMoveTicket={handleMove}
+          readOnly={!remoteProject || !canUpdateTickets}
+          showColumnsWhenEmpty
+          emptyAction={
+            canCreateTickets ? (
               <Button tone="primary" onClick={() => setCreateOpen(true)}>
                 <Plus size={16} />
                 {t("remoteWorkspace.createTicket")}
               </Button>
-            }
-          />
-        )
+            ) : null
+          }
+        />
       ) : null}
 
       {selectedTicket ? (
@@ -272,6 +443,7 @@ export function RemoteProjectWorkspace() {
                 value={draft.title}
                 onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
                 maxLength={fieldLimits.ticketTitleMaxLength}
+                disabled={!canUpdateTickets}
                 required
               />
               <div className="grid gap-4 md:grid-cols-3">
@@ -279,6 +451,7 @@ export function RemoteProjectWorkspace() {
                   label={t("remoteWorkspace.status")}
                   value={draft.status}
                   onChange={(event) => setDraft((current) => ({ ...current, status: event.target.value as TicketStatus }))}
+                  disabled={!canUpdateTickets}
                 >
                   {ticketStatuses.map((status) => (
                     <option key={status.id} value={status.id}>
@@ -290,6 +463,7 @@ export function RemoteProjectWorkspace() {
                   label={t("remoteWorkspace.priority")}
                   value={draft.priority}
                   onChange={(event) => setDraft((current) => ({ ...current, priority: event.target.value as TicketPriority }))}
+                  disabled={!canUpdateTickets}
                 >
                   {ticketPriorities.map((priority) => (
                     <option key={priority.id} value={priority.id}>
@@ -301,6 +475,7 @@ export function RemoteProjectWorkspace() {
                   label={t("remoteWorkspace.type")}
                   value={draft.type}
                   onChange={(event) => setDraft((current) => ({ ...current, type: event.target.value as TicketType }))}
+                  disabled={!canUpdateTickets}
                 >
                   {ticketTypes.map((type) => (
                     <option key={type.id} value={type.id}>
@@ -314,6 +489,7 @@ export function RemoteProjectWorkspace() {
                 value={draft.description}
                 onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))}
                 maxLength={fieldLimits.ticketDescriptionMaxLength}
+                disabled={!canUpdateTickets}
               />
               <Panel className="p-4">
                 <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">ActivityPub</div>
@@ -322,11 +498,11 @@ export function RemoteProjectWorkspace() {
             </div>
           </form>
           <div className="flex items-center justify-between gap-3 border-t border-zinc-200 px-6 py-4">
-            <Button tone="danger" onClick={() => deleteTicket.mutate()} disabled={deleteTicket.isPending}>
+            <Button tone="danger" onClick={() => deleteTicket.mutate()} disabled={deleteTicket.isPending || !canDeleteTickets}>
               <Trash2 size={16} />
               {t("actions.delete")}
             </Button>
-            <Button type="submit" form="remote-ticket-edit" tone="primary" disabled={updateTicket.isPending || !draft.title.trim()}>
+            <Button type="submit" form="remote-ticket-edit" tone="primary" disabled={updateTicket.isPending || !draft.title.trim() || !canUpdateTickets}>
               <Save size={16} />
               {t("actions.save")}
             </Button>
@@ -343,7 +519,7 @@ export function RemoteProjectWorkspace() {
         footer={
           <>
             <Button onClick={() => setCreateOpen(false)}>{t("actions.cancel")}</Button>
-            <Button type="submit" form="remote-create-ticket" tone="primary" disabled={createTicket.isPending || !createDraft.title.trim()}>
+            <Button type="submit" form="remote-create-ticket" tone="primary" disabled={createTicket.isPending || !createDraft.title.trim() || createDisabled}>
               {t("actions.create")}
             </Button>
           </>
@@ -353,11 +529,13 @@ export function RemoteProjectWorkspace() {
           {createTicket.isError ? (
             <ErrorState title={t("remoteWorkspace.createFailed")} body={errorMessage(createTicket.error, t("remoteWorkspace.createFailedBody"))} />
           ) : null}
+          {remoteProject && !canCreateTickets ? <ErrorState title={t("remoteWorkspace.readOnly")} body={t("remoteWorkspace.noCreatePermission")} /> : null}
           <TextField
             label={t("remoteWorkspace.ticketTitle")}
             value={createDraft.title}
             onChange={(event) => setCreateDraft((current) => ({ ...current, title: event.target.value }))}
             maxLength={fieldLimits.ticketTitleMaxLength}
+            disabled={createDisabled}
             required
           />
           <div className="grid gap-4 md:grid-cols-2">
@@ -365,6 +543,7 @@ export function RemoteProjectWorkspace() {
               label={t("remoteWorkspace.priority")}
               value={createDraft.priority}
               onChange={(event) => setCreateDraft((current) => ({ ...current, priority: event.target.value as TicketPriority }))}
+              disabled={createDisabled}
             >
               {ticketPriorities.map((priority) => (
                 <option key={priority.id} value={priority.id}>
@@ -376,6 +555,7 @@ export function RemoteProjectWorkspace() {
               label={t("remoteWorkspace.type")}
               value={createDraft.type}
               onChange={(event) => setCreateDraft((current) => ({ ...current, type: event.target.value as TicketType }))}
+              disabled={createDisabled}
             >
               {ticketTypes.map((type) => (
                 <option key={type.id} value={type.id}>
@@ -389,6 +569,7 @@ export function RemoteProjectWorkspace() {
             value={createDraft.description}
             onChange={(event) => setCreateDraft((current) => ({ ...current, description: event.target.value }))}
             maxLength={fieldLimits.ticketDescriptionMaxLength}
+            disabled={createDisabled}
           />
         </div>
       </Modal>

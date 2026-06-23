@@ -99,6 +99,7 @@ export interface RemoteProjectInvite {
   inviter_name: string;
   invitee_actor_id: ID;
   role: string;
+  role_permissions: string[];
   target_inbox_url: string;
   status: "pending" | "accepted" | "rejected";
   created_at: string;
@@ -123,6 +124,7 @@ export interface RemoteProject {
   project_ap_id: string;
   project_name: string;
   role: string;
+  role_permissions: string[];
   target_inbox_url: string;
   inviter_actor_id: ID;
   inviter_ap_id: string;
