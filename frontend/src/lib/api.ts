@@ -35,9 +35,11 @@ import type {
   ProjectRole,
   ProjectRoleKey,
   PublicInstanceConfig,
+  RemoteProject,
   RemoteActorInspection,
   RemoteProjectInvite,
   RemoteProjectInviteResult,
+  RemoteTicketWriteResult,
   Ticket,
   TicketPriority,
   TicketStatus,
@@ -110,12 +112,17 @@ export interface UpdateTicketPayload {
   type?: TicketType;
   parent_id?: ID | null;
   assignee_id?: ID | null;
+  is_resolved?: boolean;
 }
 
 export interface MoveTicketPayload {
   status: TicketStatus;
   before_ticket_id?: ID | null;
   after_ticket_id?: ID | null;
+}
+
+export interface RemoteMoveTicketPayload {
+  status: TicketStatus;
 }
 
 export interface ChangePasswordPayload {
@@ -508,6 +515,50 @@ export const api = {
 
   async rejectRemoteProjectInvite(inviteId: ID): Promise<RemoteProjectInviteResult> {
     const { data } = await http.post<RemoteProjectInviteResult>(`${apiPrefix}/me/remote-project-invites/${inviteId}/reject`);
+    return data;
+  },
+
+  async listRemoteProjects(): Promise<RemoteProject[]> {
+    const { data } = await http.get<RemoteProject[] | null>(`${apiPrefix}/remote-projects`, {
+      params: { limit: 100, offset: 0 },
+    });
+    return asArray(data);
+  },
+
+  async getRemoteProject(projectId: ID): Promise<RemoteProject> {
+    const { data } = await http.get<RemoteProject>(`${apiPrefix}/remote-projects/${projectId}`);
+    return data;
+  },
+
+  async listRemoteProjectTickets(projectId: ID, filters: TicketFilters = {}): Promise<Ticket[]> {
+    const { data } = await http.get<Ticket[] | null>(`${apiPrefix}/remote-projects/${projectId}/tickets`, {
+      params: { limit: 500, offset: 0, ...filters },
+    });
+    return asArray(data);
+  },
+
+  async createRemoteTicket(projectId: ID, payload: CreateTicketPayload): Promise<RemoteTicketWriteResult> {
+    const { data } = await http.post<RemoteTicketWriteResult>(`${apiPrefix}/remote-projects/${projectId}/tickets`, payload);
+    return data;
+  },
+
+  async getRemoteTicket(projectId: ID, ticketId: ID): Promise<Ticket> {
+    const { data } = await http.get<Ticket>(`${apiPrefix}/remote-projects/${projectId}/tickets/${ticketId}`);
+    return data;
+  },
+
+  async updateRemoteTicket(projectId: ID, ticketId: ID, payload: UpdateTicketPayload): Promise<RemoteTicketWriteResult> {
+    const { data } = await http.patch<RemoteTicketWriteResult>(`${apiPrefix}/remote-projects/${projectId}/tickets/${ticketId}`, payload);
+    return data;
+  },
+
+  async moveRemoteTicket(projectId: ID, ticketId: ID, payload: RemoteMoveTicketPayload): Promise<RemoteTicketWriteResult> {
+    const { data } = await http.post<RemoteTicketWriteResult>(`${apiPrefix}/remote-projects/${projectId}/tickets/${ticketId}/move`, payload);
+    return data;
+  },
+
+  async deleteRemoteTicket(projectId: ID, ticketId: ID): Promise<RemoteTicketWriteResult> {
+    const { data } = await http.delete<RemoteTicketWriteResult>(`${apiPrefix}/remote-projects/${projectId}/tickets/${ticketId}`);
     return data;
   },
 

@@ -118,6 +118,35 @@ export interface RemoteProjectInviteResult {
   };
 }
 
+export interface RemoteProject {
+  id: ID;
+  project_ap_id: string;
+  project_name: string;
+  role: string;
+  target_inbox_url: string;
+  inviter_actor_id: ID;
+  inviter_ap_id: string;
+  inviter_handle: string;
+  inviter_name: string;
+  remote_actor_id?: ID;
+  remote_handle?: string;
+  created_at: string;
+  updated_at: string;
+  resolved_at?: string;
+}
+
+export interface RemoteTicketWriteResult {
+  ticket?: Ticket;
+  delivery?: {
+    id: ID;
+    activity_ap_id: string;
+    target_inbox_url: string;
+    state: DeliveryState;
+    created_at: string;
+    updated_at: string;
+  };
+}
+
 export interface ProjectMember {
   user_id: ID;
   project_id: ID;

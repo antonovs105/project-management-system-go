@@ -15,6 +15,7 @@ import { LegalPage } from "./pages/LegalPage";
 import { OAuthCallbackPage } from "./pages/OAuthCallbackPage";
 import { ProjectWorkspace } from "./pages/ProjectWorkspace";
 import { ProjectsPage } from "./pages/ProjectsPage";
+import { RemoteProjectWorkspace } from "./pages/RemoteProjectWorkspace";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -47,6 +48,7 @@ export function App() {
                 <Route path="/projects/:projectId/graph" element={<ProjectWorkspace />} />
                 <Route path="/projects/:projectId/deliveries" element={<ProjectWorkspace />} />
                 <Route path="/projects/:projectId/settings" element={<ProjectWorkspace />} />
+                <Route path="/remote-projects/:projectId" element={<RemoteProjectWorkspace />} />
                 <Route path="/account" element={<AccountPage />} />
                 <Route path="/admin/users" element={<AdminUsersPage />} />
                 <Route path="/admin/federation" element={<AdminFederationPage />} />
