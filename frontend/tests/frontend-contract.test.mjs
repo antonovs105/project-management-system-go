@@ -91,6 +91,15 @@ test("api client covers current backend feature routes", () => {
   }
 });
 
+test("remote project ticket list auto-refreshes while realtime federation is absent", () => {
+  const workspace = read("src/pages/RemoteProjectWorkspace.tsx");
+
+  assert.ok(workspace.includes("const remoteTicketPollMs = 5000"), "remote ticket polling interval must be explicit");
+  assert.ok(workspace.includes("refetchInterval: remoteTicketPollMs"), "remote tickets must poll automatically");
+  assert.ok(workspace.includes("refetchOnWindowFocus: true"), "remote tickets must refresh when the user returns to the tab");
+  assert.ok(workspace.includes("refetchOnReconnect: true"), "remote tickets must refresh after network reconnect");
+});
+
 test("frontend exposes bilingual locale dictionaries and copyright notice", () => {
   const app = read("src/App.tsx");
   const i18n = read("src/lib/i18n-messages.ts");

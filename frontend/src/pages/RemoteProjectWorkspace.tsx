@@ -17,6 +17,7 @@ import type { ID, RemoteProject, Ticket, TicketPriority, TicketStatus, TicketTyp
 const ticketCreatePermission = "tickets.create";
 const ticketUpdatePermission = "tickets.update";
 const ticketDeletePermission = "tickets.delete";
+const remoteTicketPollMs = 5000;
 
 const builtInRolePermissions: Record<string, string[]> = {
   owner: [
@@ -129,6 +130,10 @@ export function RemoteProjectWorkspace() {
     queryKey: queryKeys.remoteTickets(projectId),
     queryFn: () => api.listRemoteProjectTickets(projectId),
     enabled: Boolean(projectId),
+    refetchInterval: remoteTicketPollMs,
+    refetchIntervalInBackground: false,
+    refetchOnReconnect: true,
+    refetchOnWindowFocus: true,
   });
 
   const permissions = useMemo(() => projectPermissions(project.data), [project.data]);
