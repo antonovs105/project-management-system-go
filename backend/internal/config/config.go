@@ -306,7 +306,7 @@ func (c Config) Validate() error {
 	if strings.ContainsAny(c.Instance.LocalDomain, " \t\r\n/") {
 		return fmt.Errorf("instance.local_domain must be a host name, not a URL")
 	}
-	if err := validateCORS(c.App.Env == EnvProduction, c.Server.CORSAllowedOrigins); err != nil {
+	if err := validateCORS(c.App.Env == EnvProduction && roleServesHTTP(c.App.Role), c.Server.CORSAllowedOrigins); err != nil {
 		return err
 	}
 
@@ -335,6 +335,11 @@ func (c Config) Validate() error {
 	}
 
 	return nil
+}
+
+// roleServesHTTP reports whether an app role exposes browser-facing HTTP routes.
+func roleServesHTTP(role string) bool {
+	return role == RoleAPI || role == RoleAll
 }
 
 // FederationAllowInsecureHTTP applies the development default when unset.

@@ -133,6 +133,25 @@ func TestValidateAcceptsProductionConfig(t *testing.T) {
 	require.NoError(t, cfg.Validate())
 }
 
+func TestValidateRequiresProductionCORSForAPIRoles(t *testing.T) {
+	cfg := validProductionConfig()
+	cfg.App.Role = RoleAPI
+	cfg.Server.CORSAllowedOrigins = nil
+
+	err := cfg.Validate()
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "server.cors_allowed_origins")
+}
+
+func TestValidateDoesNotRequireProductionCORSForWorkerRole(t *testing.T) {
+	cfg := validProductionConfig()
+	cfg.App.Role = RoleWorker
+	cfg.Server.CORSAllowedOrigins = nil
+
+	require.NoError(t, cfg.Validate())
+}
+
 func TestFederationAllowInsecureHTTPCanBeExplicitlyDisabledInDevelopment(t *testing.T) {
 	disabled := false
 	cfg := validConfig()
@@ -147,6 +166,20 @@ func validConfig() Config {
 	cfg.Security.JWTSecretKey = "dev-secret"
 	cfg.Instance.PublicBaseURL = "http://localhost:8080"
 	cfg.Instance.LocalDomain = "localhost:8080"
+	return cfg
+}
+
+func validProductionConfig() Config {
+	disabled := false
+	cfg := validConfig()
+	cfg.App.Env = EnvProduction
+	cfg.Security.JWTSecretKey = strings.Repeat("j", 32)
+	cfg.Security.ActorPrivateKeyEncryptionKey = strings.Repeat("a", 32)
+	cfg.Instance.PublicBaseURL = "https://progo.example.test"
+	cfg.Instance.LocalDomain = "progo.example.test"
+	cfg.Server.CORSAllowedOrigins = []string{"https://progo.example.test"}
+	cfg.Metrics.Token = strings.Repeat("m", 32)
+	cfg.Federation.AllowInsecureHTTP = &disabled
 	return cfg
 }
 
