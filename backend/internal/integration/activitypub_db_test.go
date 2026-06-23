@@ -2959,9 +2959,9 @@ func requireProjectActivityPubCollections(t *testing.T, db *sqlx.DB, cfg activit
 	require.Equal(t, "OrderedCollectionPage", ticketsPage["type"])
 	require.Equal(t, ticketsID, ticketsPage["partOf"])
 	require.Equal(t, tickets["totalItems"], ticketsPage["totalItems"])
-	ticketItems := requireOrderedItems(t, ticketsPage)
-	require.Contains(t, ticketItems, ticketAPID)
-	require.LessOrEqual(t, len(ticketItems), 2)
+	ticketItemIDs := requireOrderedItemIDs(t, ticketsPage)
+	require.Contains(t, ticketItemIDs, ticketAPID)
+	require.LessOrEqual(t, len(ticketItemIDs), 2)
 }
 
 func requireC2SCreateTicket(t *testing.T, db *sqlx.DB, cfg activitypub.Config, ticketService *ticket.Service, commentService *comment.Service, actorID, username, actorAPID, projectAPID, remoteInbox string) string {
