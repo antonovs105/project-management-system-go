@@ -9,9 +9,19 @@ import (
 	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
-	"github.com/antonovs105/project-management-system-go/internal/project"
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
+)
+
+const (
+	// permissionTicketsCreate is the project permission required for inbound remote ticket creation.
+	permissionTicketsCreate = "tickets.create"
+	// permissionTicketsUpdate is the project permission required for inbound remote ticket mutation.
+	permissionTicketsUpdate = "tickets.update"
+	// permissionTicketsDelete is the project permission required for inbound remote ticket deletion.
+	permissionTicketsDelete = "tickets.delete"
+	// permissionCommentsCreate is the project permission required for inbound remote comments.
+	permissionCommentsCreate = "comments.create"
 )
 
 // Repository defines persistence operations for inbound ActivityPub handling.
@@ -615,7 +625,7 @@ func (r *PgRepository) insertRemoteNoteCommentTx(ctx context.Context, tx *sqlx.T
 		return err
 	}
 
-	allowed, err := actorHasProjectPermissionTx(ctx, tx, targetActorID, activity.ActorID, project.PermissionCommentsCreate)
+	allowed, err := actorHasProjectPermissionTx(ctx, tx, targetActorID, activity.ActorID, permissionCommentsCreate)
 	if err != nil {
 		return err
 	}
@@ -662,7 +672,7 @@ func (r *PgRepository) insertRemoteNoteCommentTx(ctx context.Context, tx *sqlx.T
 func (r *PgRepository) insertRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity) error {
 	ticket := activity.ObjectTicket
 
-	allowed, err := actorHasProjectPermissionTx(ctx, tx, targetActorID, activity.ActorID, project.PermissionTicketsCreate)
+	allowed, err := actorHasProjectPermissionTx(ctx, tx, targetActorID, activity.ActorID, permissionTicketsCreate)
 	if err != nil {
 		return err
 	}
@@ -738,7 +748,7 @@ func (r *PgRepository) insertRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, ta
 func (r *PgRepository) updateRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity) error {
 	ticket := activity.ObjectTicket
 
-	allowed, err := actorHasProjectPermissionTx(ctx, tx, targetActorID, activity.ActorID, project.PermissionTicketsUpdate)
+	allowed, err := actorHasProjectPermissionTx(ctx, tx, targetActorID, activity.ActorID, permissionTicketsUpdate)
 	if err != nil {
 		return err
 	}
@@ -852,7 +862,7 @@ func (r *PgRepository) insertRemoteTicketAssigneeTx(ctx context.Context, tx *sql
 	assigneeAPID := *activity.ObjectAPID
 	ticketAPID := *activity.TargetAPID
 
-	allowed, err := actorHasProjectPermissionTx(ctx, tx, targetActorID, activity.ActorID, project.PermissionTicketsUpdate)
+	allowed, err := actorHasProjectPermissionTx(ctx, tx, targetActorID, activity.ActorID, permissionTicketsUpdate)
 	if err != nil {
 		return err
 	}
@@ -935,7 +945,7 @@ func (r *PgRepository) deleteRemoteTicketAssigneeTx(ctx context.Context, tx *sql
 	assigneeAPID := *activity.ObjectAPID
 	ticketAPID := *activity.TargetAPID
 
-	allowed, err := actorHasProjectPermissionTx(ctx, tx, targetActorID, activity.ActorID, project.PermissionTicketsUpdate)
+	allowed, err := actorHasProjectPermissionTx(ctx, tx, targetActorID, activity.ActorID, permissionTicketsUpdate)
 	if err != nil {
 		return err
 	}
@@ -996,7 +1006,7 @@ func (r *PgRepository) deleteRemoteTicketAssigneeTx(ctx context.Context, tx *sql
 func (r *PgRepository) deleteRemoteTicketTx(ctx context.Context, tx *sqlx.Tx, targetActorID string, activity *InboundActivity) error {
 	ticketAPID := *activity.ObjectAPID
 
-	allowed, err := actorHasProjectPermissionTx(ctx, tx, targetActorID, activity.ActorID, project.PermissionTicketsDelete)
+	allowed, err := actorHasProjectPermissionTx(ctx, tx, targetActorID, activity.ActorID, permissionTicketsDelete)
 	if err != nil {
 		return err
 	}

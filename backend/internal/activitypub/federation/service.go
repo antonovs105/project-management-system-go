@@ -633,6 +633,7 @@ func remoteCollectionPageURL(collectionURL string, limit int, offset int) string
 	return parsed.String()
 }
 
+// remoteCollectionDocument is the minimal ActivityStreams collection page shape needed for remote tickets.
 type remoteCollectionDocument struct {
 	OrderedItems []json.RawMessage `json:"orderedItems"`
 }
@@ -719,6 +720,7 @@ func remoteTicketFromDocument(projectID string, projectAPID string, raw []byte, 
 	}, nil
 }
 
+// encodedOptionalAPID returns an encoded remote route token for non-empty HTTP ActivityPub IDs.
 func encodedOptionalAPID(apID string) *string {
 	if apID == "" || !isHTTPURL(apID) {
 		return nil
@@ -727,16 +729,19 @@ func encodedOptionalAPID(apID string) *string {
 	return &encoded
 }
 
+// stringField extracts and trims a string field from a decoded JSON object.
 func stringField(doc map[string]any, key string) string {
 	value, _ := doc[key].(string)
 	return strings.TrimSpace(value)
 }
 
+// boolField extracts a boolean field from a decoded JSON object.
 func boolField(doc map[string]any, key string) bool {
 	value, _ := doc[key].(bool)
 	return value
 }
 
+// documentTypeContains reports whether an ActivityStreams type field contains a value.
 func documentTypeContains(value any, expected string) bool {
 	switch typed := value.(type) {
 	case string:
@@ -751,6 +756,7 @@ func documentTypeContains(value any, expected string) bool {
 	return false
 }
 
+// firstAssignedTo extracts the first assigned actor AP ID from a ForgeFed assignedTo field.
 func firstAssignedTo(value any) string {
 	switch typed := value.(type) {
 	case string:
@@ -765,6 +771,7 @@ func firstAssignedTo(value any) string {
 	return ""
 }
 
+// parseRemoteTime parses an ActivityPub timestamp and falls back to the current time.
 func parseRemoteTime(raw string) time.Time {
 	if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
 		return parsed.UTC()
@@ -772,6 +779,7 @@ func parseRemoteTime(raw string) time.Time {
 	return time.Now().UTC()
 }
 
+// normalizeRemoteTicketCreate validates and normalizes outbound remote ticket creation input.
 func normalizeRemoteTicketCreate(req RemoteTicketRequest) (string, string, string, string, error) {
 	title, err := normalizeRemoteTicketText(req.Title, "title", maxRemoteTicketTitleLength, true)
 	if err != nil {
@@ -792,6 +800,7 @@ func normalizeRemoteTicketCreate(req RemoteTicketRequest) (string, string, strin
 	return title, description, priority, ticketType, nil
 }
 
+// applyRemoteTicketUpdate validates and applies outbound remote ticket update input to a ticket document.
 func applyRemoteTicketUpdate(doc map[string]any, req RemoteTicketUpdateRequest) error {
 	changed := false
 	if req.Title != nil {
@@ -845,6 +854,7 @@ func applyRemoteTicketUpdate(doc map[string]any, req RemoteTicketUpdateRequest) 
 	return nil
 }
 
+// normalizeRemoteTicketText trims and bounds one remote ticket text field.
 func normalizeRemoteTicketText(value string, field string, maxLength int, required bool) (string, error) {
 	value = strings.TrimSpace(value)
 	if required && value == "" {
@@ -856,6 +866,7 @@ func normalizeRemoteTicketText(value string, field string, maxLength int, requir
 	return value, nil
 }
 
+// normalizeRemoteTicketStatus returns a supported status with a resolved-state fallback.
 func normalizeRemoteTicketStatus(status string, resolved bool) string {
 	status = strings.TrimSpace(status)
 	if validRemoteTicketStatus(status) {
@@ -867,6 +878,7 @@ func normalizeRemoteTicketStatus(status string, resolved bool) string {
 	return "open"
 }
 
+// normalizeRemoteTicketPriority returns a supported priority with a medium fallback.
 func normalizeRemoteTicketPriority(priority string) string {
 	priority = strings.TrimSpace(priority)
 	if validRemoteTicketPriority(priority) {
@@ -875,6 +887,7 @@ func normalizeRemoteTicketPriority(priority string) string {
 	return "medium"
 }
 
+// normalizeRemoteTicketType returns a supported ticket type with a task fallback.
 func normalizeRemoteTicketType(ticketType string) string {
 	ticketType = strings.TrimSpace(ticketType)
 	if validRemoteTicketType(ticketType) {
@@ -883,6 +896,7 @@ func normalizeRemoteTicketType(ticketType string) string {
 	return "task"
 }
 
+// validRemoteTicketStatus reports whether a remote ticket status is supported locally.
 func validRemoteTicketStatus(status string) bool {
 	switch status {
 	case "open", "in_progress", "review", "done":
@@ -892,6 +906,7 @@ func validRemoteTicketStatus(status string) bool {
 	}
 }
 
+// validRemoteTicketPriority reports whether a remote ticket priority is supported locally.
 func validRemoteTicketPriority(priority string) bool {
 	switch priority {
 	case "low", "medium", "high", "urgent":
@@ -901,6 +916,7 @@ func validRemoteTicketPriority(priority string) bool {
 	}
 }
 
+// validRemoteTicketType reports whether a remote ticket type is supported locally.
 func validRemoteTicketType(ticketType string) bool {
 	switch ticketType {
 	case "epic", "task", "subtask":
@@ -910,6 +926,7 @@ func validRemoteTicketType(ticketType string) bool {
 	}
 }
 
+// remoteTicketRank returns the local hierarchy rank string for a remote ticket type.
 func remoteTicketRank(ticketType string) string {
 	switch ticketType {
 	case "epic":
@@ -921,6 +938,7 @@ func remoteTicketRank(ticketType string) string {
 	}
 }
 
+// mustMarshalDocument serializes trusted in-memory ActivityPub maps for immediate API projections.
 func mustMarshalDocument(doc map[string]any) []byte {
 	raw, _ := json.Marshal(doc)
 	return raw
