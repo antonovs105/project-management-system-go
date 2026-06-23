@@ -708,6 +708,15 @@ func startMetricsServer(metrics *observability.Metrics, addr string, token strin
 		return nil
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "ok\n")
+	})
 	mux.Handle("/metrics", metricsHTTPHandler(metrics, token))
 	server := &http.Server{
 		Addr:              addr,

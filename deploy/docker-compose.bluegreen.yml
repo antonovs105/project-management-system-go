@@ -203,6 +203,12 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9091/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
     networks:
       - default
       - federation
@@ -254,6 +260,12 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9091/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
     networks:
       - default
       - federation

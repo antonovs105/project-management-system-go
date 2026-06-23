@@ -300,6 +300,7 @@ compose run --rm --no-deps migrations
 compose up -d "backend-$inactive" "backend-worker-$inactive"
 
 wait_for_url "http://127.0.0.1:$BACKEND_PORT/ready" "backend-$inactive"
+wait_for_url "http://127.0.0.1:$WORKER_METRICS_PORT/health" "backend-worker-$inactive"
 
 compose up -d "frontend-$inactive"
 wait_for_url "http://127.0.0.1:$FRONTEND_PORT/health" "frontend-$inactive"
