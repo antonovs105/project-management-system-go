@@ -177,6 +177,16 @@ export interface FederationInboxFilters {
   offset?: number;
 }
 
+export interface OffsetPagination {
+  limit: number;
+  offset: number;
+}
+
+export interface OffsetPage<T> extends OffsetPagination {
+  items: T[];
+  hasMore: boolean;
+}
+
 export interface BlockDomainPayload {
   domain: string;
   reason?: string;
@@ -224,6 +234,19 @@ interface ErrorResponse {
 
 function asArray<T>(data: T[] | null | undefined): T[] {
   return Array.isArray(data) ? data : [];
+}
+
+async function getOffsetPage<T>(path: string, pagination: OffsetPagination, filters: object = {}): Promise<OffsetPage<T>> {
+  const response = await http.get<T[] | null>(path, { params: { ...filters, limit: pagination.limit, offset: pagination.offset } });
+  const items = asArray(response.data);
+  const responseLimit = Number(response.headers["x-pagination-limit"]);
+  const responseOffset = Number(response.headers["x-pagination-offset"]);
+  return {
+    items,
+    limit: Number.isFinite(responseLimit) && responseLimit > 0 ? responseLimit : pagination.limit,
+    offset: Number.isFinite(responseOffset) && responseOffset >= 0 ? responseOffset : pagination.offset,
+    hasMore: response.headers["x-pagination-has-more"] === "true" || (!response.headers["x-pagination-has-more"] && items.length >= pagination.limit),
+  };
 }
 
 export function errorMessage(error: unknown, fallback: string): string {
@@ -392,11 +415,19 @@ export const api = {
     return asArray(data);
   },
 
+  async listMyProjectInvitesPage(pagination: OffsetPagination, filters: ProjectInviteFilters = {}): Promise<OffsetPage<ProjectInviteInspection>> {
+    return getOffsetPage(`${apiPrefix}/me/invites`, pagination, filters);
+  },
+
   async listAdminUsers(filters: AdminUsersFilters = {}): Promise<AdminUser[]> {
     const { data } = await http.get<AdminUser[] | null>(`${apiPrefix}/admin/users`, {
       params: { limit: 100, offset: 0, ...filters },
     });
     return asArray(data);
+  },
+
+  async listAdminUsersPage(pagination: OffsetPagination, filters: AdminUsersFilters = {}): Promise<OffsetPage<AdminUser>> {
+    return getOffsetPage(`${apiPrefix}/admin/users`, pagination, filters);
   },
 
   async updateAdminUserRole(userId: ID, instanceRole: InstanceRole): Promise<AdminUser> {
@@ -413,11 +444,19 @@ export const api = {
     return asArray(data);
   },
 
+  async listAdminAuditEventsPage(pagination: OffsetPagination, filters: AdminAuditFilters = {}): Promise<OffsetPage<AdminAuditEvent>> {
+    return getOffsetPage(`${apiPrefix}/admin/audit-events`, pagination, filters);
+  },
+
   async listProjects(): Promise<Project[]> {
     const { data } = await http.get<Project[] | null>(`${apiPrefix}/projects`, {
       params: { limit: 100, offset: 0 },
     });
     return asArray(data);
+  },
+
+  async listProjectsPage(pagination: OffsetPagination): Promise<OffsetPage<Project>> {
+    return getOffsetPage(`${apiPrefix}/projects`, pagination);
   },
 
   async createProject(payload: CreateProjectPayload): Promise<Project> {
@@ -599,6 +638,10 @@ export const api = {
     return asArray(data);
   },
 
+  async listRemoteProjectInvitesPage(pagination: OffsetPagination, filters: ProjectInviteFilters = {}): Promise<OffsetPage<RemoteProjectInvite>> {
+    return getOffsetPage(`${apiPrefix}/me/remote-project-invites`, pagination, { ...filters, state: filters.status || undefined, status: undefined });
+  },
+
   async acceptRemoteProjectInvite(inviteId: ID): Promise<RemoteProjectInviteResult> {
     const { data } = await http.post<RemoteProjectInviteResult>(`${apiPrefix}/me/remote-project-invites/${inviteId}/accept`);
     return data;
@@ -614,6 +657,10 @@ export const api = {
       params: { limit: 100, offset: 0 },
     });
     return asArray(data);
+  },
+
+  async listRemoteProjectsPage(pagination: OffsetPagination): Promise<OffsetPage<RemoteProject>> {
+    return getOffsetPage(`${apiPrefix}/remote-projects`, pagination);
   },
 
   async getRemoteProject(projectId: ID): Promise<RemoteProject> {
@@ -833,11 +880,19 @@ export const api = {
     return asArray(data);
   },
 
+  async listPersonalFederationInboxPage(pagination: OffsetPagination): Promise<OffsetPage<FederationInboxActivity>> {
+    return getOffsetPage(`${apiPrefix}/me/federation/inbox`, pagination);
+  },
+
   async listPersonalFederationFollows(filters: FederationFollowFilters = {}): Promise<FederationRemoteFollow[]> {
     const { data } = await http.get<FederationRemoteFollow[] | null>(`${apiPrefix}/me/federation/follows`, {
       params: { limit: 100, offset: 0, ...filters },
     });
     return asArray(data);
+  },
+
+  async listPersonalFederationFollowsPage(pagination: OffsetPagination, filters: FederationFollowFilters = {}): Promise<OffsetPage<FederationRemoteFollow>> {
+    return getOffsetPage(`${apiPrefix}/me/federation/follows`, pagination, filters);
   },
 
   async discoverPersonalFederationActor(resource: string): Promise<FederationRemoteActor> {

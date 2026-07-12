@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Button, EmptyState, ErrorState, LoadingState, Panel } from "../components/ui";
+import { OffsetPaginationControls } from "../components/OffsetPaginationControls";
 import { api, errorMessage } from "../lib/api";
 import { initials, relativeDate } from "../lib/format";
 import { useI18n } from "../lib/i18n-context";
@@ -14,6 +15,7 @@ type InviteStatusFilter = ProjectInvite["status"] | "";
 type InviteBadgeStatus = ProjectInvite["status"] | RemoteProjectInvite["status"];
 
 const statusFilters: InviteStatusFilter[] = ["pending", "accepted", "rejected", "revoked", ""];
+const invitationPageSize = 25;
 
 function actorTitle(name: string, username: string, handle: string, fallback: string): string {
   return name || username || handle || fallback;
@@ -199,14 +201,16 @@ export function InvitationsPage() {
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const [status, setStatus] = useState<InviteStatusFilter>("pending");
+  const [localOffset, setLocalOffset] = useState(0);
+  const [remoteOffset, setRemoteOffset] = useState(0);
 
   const invites = useQuery({
-    queryKey: queryKeys.myProjectInvites(status),
-    queryFn: () => api.listMyProjectInvites({ status }),
+    queryKey: [...queryKeys.myProjectInvites(status), "page", localOffset],
+    queryFn: () => api.listMyProjectInvitesPage({ limit: invitationPageSize, offset: localOffset }, { status }),
   });
   const remoteInvites = useQuery({
-    queryKey: queryKeys.myRemoteProjectInvites(status),
-    queryFn: () => api.listRemoteProjectInvites({ status: status === "revoked" ? "" : status }),
+    queryKey: [...queryKeys.myRemoteProjectInvites(status), "page", remoteOffset],
+    queryFn: () => api.listRemoteProjectInvitesPage({ limit: invitationPageSize, offset: remoteOffset }, { status: status === "revoked" ? "" : status }),
     enabled: status !== "revoked",
   });
 
@@ -256,8 +260,8 @@ export function InvitationsPage() {
     onError: (error) => toast.error(errorMessage(error, t("invitations.rejectFailed"))),
   });
 
-  const rows = invites.data || [];
-  const remoteRows = status === "revoked" ? [] : remoteInvites.data || [];
+  const rows = invites.data?.items || [];
+  const remoteRows = status === "revoked" ? [] : remoteInvites.data?.items || [];
   const totalRows = rows.length + remoteRows.length;
   const loading = invites.isLoading || (status !== "revoked" && remoteInvites.isLoading);
   const error = invites.error || remoteInvites.error;
@@ -296,7 +300,7 @@ export function InvitationsPage() {
                 className={`focus-ring rounded-full border px-3 py-1 text-xs font-medium ${
                   status === item ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
                 }`}
-                onClick={() => setStatus(item)}
+                onClick={() => { setStatus(item); setLocalOffset(0); setRemoteOffset(0); }}
               >
                 {item ? t(`status.${item}`) : t("common.all")}
               </button>
@@ -349,6 +353,7 @@ export function InvitationsPage() {
               />
             ))}
           </div>
+          {invites.data ? <div className="border-t border-zinc-100 p-4"><OffsetPaginationControls page={invites.data} onOffsetChange={setLocalOffset} disabled={invites.isFetching} /></div> : null}
         </Panel>
       ) : null}
 
@@ -377,6 +382,7 @@ export function InvitationsPage() {
               />
             ))}
           </div>
+          {remoteInvites.data ? <div className="border-t border-zinc-100 p-4"><OffsetPaginationControls page={remoteInvites.data} onOffsetChange={setRemoteOffset} disabled={remoteInvites.isFetching} /></div> : null}
         </Panel>
       ) : null}
     </div>

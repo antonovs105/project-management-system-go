@@ -3,6 +3,7 @@ import { ArrowUpRight, CheckCircle2, Clock3, Inbox, Loader2, RadioTower, Refresh
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { Badge, Button, EmptyState, ErrorState, LoadingState, Panel, SelectField, TextField } from "../components/ui";
+import { OffsetPaginationControls } from "../components/OffsetPaginationControls";
 import { api, errorMessage } from "../lib/api";
 import { compactId, relativeDate } from "../lib/format";
 import { useI18n, type I18nContextValue } from "../lib/i18n-context";
@@ -10,6 +11,7 @@ import { queryKeys } from "../lib/queryKeys";
 import type { FederationFollowState, FederationInboxActivity, FederationRemoteActor, FederationRemoteFollow, FollowRemoteActorResult } from "../types";
 
 type Translator = I18nContextValue["t"];
+const federationPageSize = 25;
 
 function followStateOptions(t: Translator): Array<{ id: FederationFollowState | ""; label: string }> {
   return [
@@ -290,9 +292,10 @@ function FederationActionPanel() {
 
 function FederationInboxPanel() {
   const { t } = useI18n();
+  const [offset, setOffset] = useState(0);
   const inbox = useQuery({
-    queryKey: queryKeys.personalFederationInbox,
-    queryFn: () => api.listPersonalFederationInbox(),
+    queryKey: [...queryKeys.personalFederationInbox, "page", offset],
+    queryFn: () => api.listPersonalFederationInboxPage({ limit: federationPageSize, offset }),
   });
 
   return (
@@ -314,14 +317,15 @@ function FederationInboxPanel() {
           <ErrorState title={t("federation.loadInboxFailed")} body={errorMessage(inbox.error, t("federation.inboxRequestFailed"))} />
         </div>
       ) : null}
-      {inbox.data?.length === 0 ? (
+      {inbox.data?.items.length === 0 ? (
         <div className="border-t border-zinc-100 p-4">
           <EmptyState title={t("federation.emptyInboxTitle")} body={t("federation.emptyInboxBody")} />
         </div>
       ) : null}
-      {inbox.data?.map((activity) => (
+      {inbox.data?.items.map((activity) => (
         <ActivityRow key={activity.id} activity={activity} />
       ))}
+      {inbox.data ? <div className="border-t border-zinc-100 p-4"><OffsetPaginationControls page={inbox.data} onOffsetChange={setOffset} disabled={inbox.isFetching} /></div> : null}
     </Panel>
   );
 }
@@ -329,9 +333,10 @@ function FederationInboxPanel() {
 function RemoteFollowsPanel() {
   const { t } = useI18n();
   const [state, setState] = useState<FederationFollowState | "">("");
+  const [offset, setOffset] = useState(0);
   const follows = useQuery({
-    queryKey: queryKeys.personalFederationFollows(state),
-    queryFn: () => api.listPersonalFederationFollows({ state: state || undefined }),
+    queryKey: [...queryKeys.personalFederationFollows(state), "page", offset],
+    queryFn: () => api.listPersonalFederationFollowsPage({ limit: federationPageSize, offset }, { state: state || undefined }),
   });
 
   return (
@@ -342,7 +347,7 @@ function RemoteFollowsPanel() {
           {t("federation.remoteFollows")}
         </h2>
         <div className="flex gap-2">
-          <SelectField label={t("federation.state")} value={state} onChange={(event) => setState(event.target.value as FederationFollowState | "")}>
+          <SelectField label={t("federation.state")} value={state} onChange={(event) => { setState(event.target.value as FederationFollowState | ""); setOffset(0); }}>
             {followStateOptions(t).map((option) => (
               <option key={option.id || "all"} value={option.id}>
                 {option.label}
@@ -362,14 +367,15 @@ function RemoteFollowsPanel() {
           <ErrorState title={t("federation.loadFollowsFailed")} body={errorMessage(follows.error, t("federation.followRequestFailed"))} />
         </div>
       ) : null}
-      {follows.data?.length === 0 ? (
+      {follows.data?.items.length === 0 ? (
         <div className="border-t border-zinc-100 p-4">
           <EmptyState title={t("federation.emptyFollowsTitle")} body={t("federation.emptyFollowsBody")} />
         </div>
       ) : null}
-      {follows.data?.map((follow) => (
+      {follows.data?.items.map((follow) => (
         <FollowRow key={follow.actor_id} follow={follow} />
       ))}
+      {follows.data ? <div className="border-t border-zinc-100 p-4"><OffsetPaginationControls page={follows.data} onOffsetChange={setOffset} disabled={follows.isFetching} /></div> : null}
     </Panel>
   );
 }

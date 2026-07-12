@@ -4,21 +4,25 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
 import { Button, EmptyState, ErrorState, LoadingState, Panel, SelectField, TextField } from "../components/ui";
+import { OffsetPaginationControls } from "../components/OffsetPaginationControls";
 import { api, errorMessage } from "../lib/api";
 import { instanceRoles } from "../lib/constants";
 import { compactId, relativeDate } from "../lib/format";
 import { queryKeys } from "../lib/queryKeys";
 import type { ID, InstanceRole } from "../types";
 
+const adminUsersPageSize = 50;
+
 export function AdminUsersPage() {
   const queryClient = useQueryClient();
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [role, setRole] = useState<InstanceRole | "">("");
+  const [offset, setOffset] = useState(0);
 
   const users = useQuery({
-    queryKey: queryKeys.adminUsers(role, search),
-    queryFn: () => api.listAdminUsers({ role: role || undefined, q: search || undefined }),
+    queryKey: [...queryKeys.adminUsers(role, search), "page", offset],
+    queryFn: () => api.listAdminUsersPage({ limit: adminUsersPageSize, offset }, { role: role || undefined, q: search || undefined }),
   });
 
   const updateRole = useMutation({
@@ -34,6 +38,7 @@ export function AdminUsersPage() {
   function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSearch(searchInput.trim());
+    setOffset(0);
   }
 
   return (
@@ -49,7 +54,7 @@ export function AdminUsersPage() {
           </div>
           <form className="grid gap-3 md:grid-cols-[1fr_180px_auto_auto]" onSubmit={submitSearch}>
             <TextField label="Search" value={searchInput} onChange={(event) => setSearchInput(event.target.value)} />
-            <SelectField label="Role" value={role} onChange={(event) => setRole(event.target.value as InstanceRole | "")}>
+            <SelectField label="Role" value={role} onChange={(event) => { setRole(event.target.value as InstanceRole | ""); setOffset(0); }}>
               <option value="">All roles</option>
               {instanceRoles.map((item) => (
                 <option key={item.id} value={item.id}>
@@ -71,16 +76,16 @@ export function AdminUsersPage() {
 
       {users.isLoading ? <LoadingState label="Loading users" /> : null}
       {users.isError ? <ErrorState title="Could not load users" body={errorMessage(users.error, "User list request failed.")} /> : null}
-      {users.data?.length === 0 ? <EmptyState title="No users" body="No users match the current filters." /> : null}
+      {users.data?.items.length === 0 ? <EmptyState title="No users" body="No users match the current filters." /> : null}
 
-      {users.data && users.data.length > 0 ? (
+      {users.data && users.data.items.length > 0 ? (
         <Panel className="overflow-hidden">
           <div className="grid gap-3 border-b border-zinc-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-zinc-400 lg:grid-cols-[1.2fr_1fr_220px]">
             <span>User</span>
             <span>Actor</span>
             <span>Instance Role</span>
           </div>
-          {users.data.map((user) => (
+          {users.data.items.map((user) => (
             <div key={user.id} className="grid gap-3 border-b border-zinc-100 px-4 py-3 last:border-b-0 lg:grid-cols-[1.2fr_1fr_220px] lg:items-center">
               <div className="min-w-0">
                 <div className="font-medium text-zinc-950">{user.username}</div>
@@ -114,6 +119,7 @@ export function AdminUsersPage() {
               </div>
             </div>
           ))}
+          <div className="border-t border-zinc-100 p-4"><OffsetPaginationControls page={users.data} onOffsetChange={setOffset} disabled={users.isFetching} /></div>
         </Panel>
       ) : null}
     </div>

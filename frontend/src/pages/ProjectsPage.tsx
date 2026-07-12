@@ -11,6 +11,9 @@ import { fieldLimits } from "../lib/limits";
 import { queryKeys } from "../lib/queryKeys";
 import type { ProjectBundle } from "../types";
 import { Badge, Button, EmptyState, ErrorState, LoadingState, Modal, Panel, TextAreaField, TextField } from "../components/ui";
+import { OffsetPaginationControls } from "../components/OffsetPaginationControls";
+
+const projectPageSize = 24;
 
 export function ProjectsPage() {
   const queryClient = useQueryClient();
@@ -19,15 +22,17 @@ export function ProjectsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+	const [localOffset, setLocalOffset] = useState(0);
+	const [remoteOffset, setRemoteOffset] = useState(0);
 	const importInput = useRef<HTMLInputElement>(null);
 
   const projects = useQuery({
-    queryKey: queryKeys.projects,
-    queryFn: api.listProjects,
+    queryKey: [...queryKeys.projects, "page", localOffset],
+    queryFn: () => api.listProjectsPage({ limit: projectPageSize, offset: localOffset }),
   });
   const remoteProjectsQuery = useQuery({
-    queryKey: queryKeys.remoteProjects,
-    queryFn: api.listRemoteProjects,
+    queryKey: [...queryKeys.remoteProjects, "page", remoteOffset],
+    queryFn: () => api.listRemoteProjectsPage({ limit: projectPageSize, offset: remoteOffset }),
   });
 	const archivedProjects = useQuery({ queryKey: queryKeys.archivedProjects, queryFn: api.listArchivedProjects });
 	const restoreProject = useMutation({
@@ -77,8 +82,8 @@ export function ProjectsPage() {
 	}
 
   const canCreateProjects = capabilities.data?.can_create_projects ?? false;
-  const localProjects = projects.data || [];
-  const remoteProjects = remoteProjectsQuery.data || [];
+  const localProjects = projects.data?.items || [];
+  const remoteProjects = remoteProjectsQuery.data?.items || [];
   const hasAnyProjects = localProjects.length > 0 || remoteProjects.length > 0;
   const createProjectOpen = createOpen && canCreateProjects;
 
@@ -150,8 +155,8 @@ export function ProjectsPage() {
       ) : null}
 
       {localProjects.length > 0 ? (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {localProjects.map((project) => (
+        <div className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{localProjects.map((project) => (
             <Link key={project.id} to={`/projects/${project.id}`} className="group focus-ring rounded-2xl">
               <Panel className="h-full overflow-hidden p-4 transition hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-md">
                 <div className="flex items-start gap-3">
@@ -174,7 +179,8 @@ export function ProjectsPage() {
                 </div>
               </Panel>
             </Link>
-          ))}
+          ))}</div>
+          {projects.data ? <OffsetPaginationControls page={projects.data} onOffsetChange={setLocalOffset} disabled={projects.isFetching} /> : null}
         </div>
       ) : null}
 
@@ -225,6 +231,7 @@ export function ProjectsPage() {
               </div>
             ))}
           </div>
+          {remoteProjectsQuery.data ? <div className="border-t border-zinc-100 p-4"><OffsetPaginationControls page={remoteProjectsQuery.data} onOffsetChange={setRemoteOffset} disabled={remoteProjectsQuery.isFetching} /></div> : null}
         </Panel>
       ) : null}
 

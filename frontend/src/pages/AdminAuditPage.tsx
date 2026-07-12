@@ -3,11 +3,14 @@ import { RefreshCw, Search, ScrollText } from "lucide-react";
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Button, EmptyState, ErrorState, LoadingState, Panel, SelectField, TextField } from "../components/ui";
+import { OffsetPaginationControls } from "../components/OffsetPaginationControls";
 import { api, errorMessage } from "../lib/api";
 import { adminAuditActions, adminAuditTargetTypes } from "../lib/constants";
 import { compactId, relativeDate } from "../lib/format";
 import { queryKeys } from "../lib/queryKeys";
 import type { AdminAuditAction, AdminAuditTargetType } from "../types";
+
+const auditPageSize = 50;
 
 function metadataPreview(metadata: Record<string, unknown>): string {
   const text = JSON.stringify(metadata);
@@ -24,11 +27,12 @@ export function AdminAuditPage() {
   const [action, setAction] = useState<AdminAuditAction | "">("");
   const [targetType, setTargetType] = useState<AdminAuditTargetType | "">("");
   const [actorUserId, setActorUserId] = useState("");
+  const [offset, setOffset] = useState(0);
 
   const events = useQuery({
-    queryKey: queryKeys.adminAuditEvents(action, targetType, actorUserId),
+    queryKey: [...queryKeys.adminAuditEvents(action, targetType, actorUserId), "page", offset],
     queryFn: () =>
-      api.listAdminAuditEvents({
+      api.listAdminAuditEventsPage({ limit: auditPageSize, offset }, {
         action: action || undefined,
         target_type: targetType || undefined,
         actor_user_id: actorUserId || undefined,
@@ -40,6 +44,7 @@ export function AdminAuditPage() {
     setAction(actionInput);
     setTargetType(targetTypeInput);
     setActorUserId(actorInput.trim());
+    setOffset(0);
   }
 
   return (
@@ -91,11 +96,11 @@ export function AdminAuditPage() {
       {events.isError ? (
         <ErrorState title="Could not load audit events" body={errorMessage(events.error, "Audit event request failed.")} />
       ) : null}
-      {events.data?.length === 0 ? <EmptyState title="No audit events" body="No audit events match the current filters." /> : null}
+      {events.data?.items.length === 0 ? <EmptyState title="No audit events" body="No audit events match the current filters." /> : null}
 
-      {events.data && events.data.length > 0 ? (
+      {events.data && events.data.items.length > 0 ? (
         <Panel className="overflow-hidden">
-          {events.data.map((event) => (
+          {events.data.items.map((event) => (
             <div key={event.id} className="grid gap-3 border-b border-zinc-100 px-4 py-3 last:border-b-0 xl:grid-cols-[1fr_1fr_1.4fr]">
               <div className="min-w-0">
                 <div className="font-medium text-zinc-950">{event.action}</div>
@@ -113,6 +118,7 @@ export function AdminAuditPage() {
               </code>
             </div>
           ))}
+          <div className="border-t border-zinc-100 p-4"><OffsetPaginationControls page={events.data} onOffsetChange={setOffset} disabled={events.isFetching} /></div>
         </Panel>
       ) : null}
     </div>
