@@ -53,7 +53,7 @@ function TicketEditor({
   const parents = useMemo(() => parentCandidates(type, ticket.id, tickets), [ticket.id, tickets, type]);
 
   const updateTicket = useMutation({
-    mutationFn: (payload: UpdateTicketPayload) => api.updateTicket(ticket.id, payload),
+    mutationFn: (payload: UpdateTicketPayload) => api.updateTicket(ticket.id, payload, ticket.version),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.ticket(ticket.id) }),
@@ -64,14 +64,14 @@ function TicketEditor({
     },
   });
 
-  const deleteTicket = useMutation({
-    mutationFn: () => api.deleteTicket(ticket.id),
+  const archiveTicket = useMutation({
+	mutationFn: () => api.archiveTicket(ticket.id, ticket.version),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.ticketsScope(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.graphScope(projectId) }),
       ]);
-      toast.success("Ticket deleted");
+	  toast.success("Ticket archived");
       onClose();
     },
   });
@@ -96,8 +96,8 @@ function TicketEditor({
       {updateTicket.isError ? (
         <ErrorState title="Could not update ticket" body={errorMessage(updateTicket.error, "Ticket update failed.")} />
       ) : null}
-      {deleteTicket.isError ? (
-        <ErrorState title="Could not delete ticket" body={errorMessage(deleteTicket.error, "Ticket delete failed.")} />
+      {archiveTicket.isError ? (
+		<ErrorState title="Could not archive ticket" body={errorMessage(archiveTicket.error, "Ticket archive failed.")} />
       ) : null}
       <TextField
         label="Title"
@@ -169,14 +169,14 @@ function TicketEditor({
         <Button
           tone="danger"
           onClick={() => {
-            if (window.confirm("Delete this ticket?")) {
-              deleteTicket.mutate();
+			if (window.confirm("Archive this ticket?")) {
+			  archiveTicket.mutate();
             }
           }}
-          disabled={deleteTicket.isPending}
+		  disabled={archiveTicket.isPending}
         >
           <Trash2 size={16} />
-          Delete
+		  Archive
         </Button>
         <Button type="submit" tone="primary" disabled={updateTicket.isPending || !title.trim()}>
           <Save size={16} />

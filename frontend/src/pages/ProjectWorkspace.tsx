@@ -6,6 +6,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ProjectDeliveriesPanel } from "../features/projects/ProjectDeliveriesPanel";
 import { ProjectSettingsPanel } from "../features/projects/ProjectSettingsPanel";
+import { ProjectActivityPanel } from "../features/projects/ProjectActivityPanel";
 import { projectMemberLabel } from "../features/tickets/memberLabels";
 import { TicketBoard } from "../features/tickets/TicketBoard";
 import { TicketDetailPanel } from "../features/tickets/TicketDetailPanel";
@@ -23,15 +24,16 @@ const ProjectGraph = lazy(() =>
   import("../features/graph/ProjectGraph").then((module) => ({ default: module.ProjectGraph })),
 );
 
-type ProjectView = "board" | "graph" | "deliveries" | "settings";
+type ProjectView = "board" | "graph" | "deliveries" | "activity" | "settings";
 
 function viewFromPath(pathname: string): ProjectView {
   if (pathname.endsWith("/graph")) {
     return "graph";
   }
-  if (pathname.endsWith("/deliveries")) {
+	if (pathname.endsWith("/deliveries")) {
     return "deliveries";
-  }
+	}
+	if (pathname.endsWith("/activity")) return "activity";
   if (pathname.endsWith("/settings")) {
     return "settings";
   }
@@ -321,7 +323,7 @@ export function ProjectWorkspace() {
         status,
         before_ticket_id: beforeTicketId,
         after_ticket_id: afterTicketId,
-      }),
+	  }, (tickets.data || []).find((ticket) => ticket.id === ticketId)?.version || 0),
     onMutate: async ({ ticketId, status, beforeTicketId, afterTicketId }) => {
       const activeTicketsKey = queryKeys.tickets(activeProjectId, ticketFiltersKey);
       await queryClient.cancelQueries({ queryKey: activeTicketsKey });
@@ -346,7 +348,7 @@ export function ProjectWorkspace() {
   });
 
   const updateProject = useMutation({
-    mutationFn: () => api.updateProject(activeProjectId, { name: projectName.trim(), description: projectDescription.trim() }),
+    mutationFn: () => api.updateProject(activeProjectId, { name: projectName.trim(), description: projectDescription.trim() }, project.data?.version || 0),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.project(activeProjectId) }),
@@ -357,12 +359,12 @@ export function ProjectWorkspace() {
     },
   });
 
-  const deleteProject = useMutation({
-    mutationFn: () => api.deleteProject(activeProjectId),
+  const archiveProject = useMutation({
+	mutationFn: () => api.archiveProject(activeProjectId, project.data?.version || 0),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.projects });
       navigate("/projects", { replace: true });
-      toast.success("Project deleted");
+	  toast.success("Project archived");
     },
   });
 
@@ -431,6 +433,7 @@ export function ProjectWorkspace() {
                 <Truck size={16} />
                 Deliveries
               </Link>
+			  <Link to={`/projects/${activeProjectId}/activity`} className={tabClass(view === "activity")}>Activity</Link>
               <Link to={`/projects/${activeProjectId}/settings`} className={tabClass(view === "settings")}>
                 <Settings size={16} />
                 Settings
@@ -572,6 +575,7 @@ export function ProjectWorkspace() {
           ) : null}
 
           {view === "deliveries" ? <ProjectDeliveriesPanel projectId={activeProjectId} /> : null}
+		  {view === "activity" ? <ProjectActivityPanel projectId={activeProjectId} /> : null}
 
           {view === "settings" ? <ProjectSettingsPanel project={project.data} tickets={tickets.data || []} /> : null}
 
@@ -606,14 +610,14 @@ export function ProjectWorkspace() {
                 <Button
                   tone="danger"
                   onClick={() => {
-                    if (window.confirm("Delete this project?")) {
-                      deleteProject.mutate();
+					if (window.confirm("Archive this project?")) {
+					  archiveProject.mutate();
                     }
                   }}
-                  disabled={deleteProject.isPending}
+				  disabled={archiveProject.isPending}
                 >
                   <Trash2 size={16} />
-                  Delete
+				  Archive
                 </Button>
                 <div className="flex flex-1 justify-end gap-2">
                   <Button onClick={() => setEditProjectOpen(false)}>Cancel</Button>
@@ -628,8 +632,8 @@ export function ProjectWorkspace() {
               {updateProject.isError ? (
                 <ErrorState title="Could not update project" body={errorMessage(updateProject.error, "Project update failed.")} />
               ) : null}
-              {deleteProject.isError ? (
-                <ErrorState title="Could not delete project" body={errorMessage(deleteProject.error, "Project delete failed.")} />
+			  {archiveProject.isError ? (
+				<ErrorState title="Could not archive project" body={errorMessage(archiveProject.error, "Project archive failed.")} />
               ) : null}
               <TextField
                 label="Name"

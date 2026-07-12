@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight, FolderKanban, Network, Plus, RefreshCw } from "lucide-react";
+import { ArrowUpRight, FolderKanban, Network, Plus, RefreshCw, RotateCcw } from "lucide-react";
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -26,6 +26,11 @@ export function ProjectsPage() {
     queryKey: queryKeys.remoteProjects,
     queryFn: api.listRemoteProjects,
   });
+	const archivedProjects = useQuery({ queryKey: queryKeys.archivedProjects, queryFn: api.listArchivedProjects });
+	const restoreProject = useMutation({
+		mutationFn: ({ id, version }: { id: string; version: number }) => api.restoreProject(id, version),
+		onSuccess: async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.archivedProjects }), queryClient.invalidateQueries({ queryKey: queryKeys.projects })]); },
+	});
 
   const capabilities = useQuery({
     queryKey: queryKeys.instanceCapabilities,
@@ -189,6 +194,13 @@ export function ProjectsPage() {
           </div>
         </Panel>
       ) : null}
+
+	  {(archivedProjects.data || []).length > 0 ? (
+		<Panel className="overflow-hidden">
+			<div className="border-b border-zinc-100 p-4"><h2 className="font-semibold text-zinc-950">Archived projects</h2><p className="text-sm text-zinc-500">Archived projects are hidden from active work and can be restored safely.</p></div>
+			<div className="divide-y divide-zinc-100">{archivedProjects.data?.map((project) => <div key={project.id} className="flex items-center justify-between gap-3 p-4"><div><div className="font-medium text-zinc-950">{project.name}</div><div className="text-xs text-zinc-500">Archived {relativeDate(project.archived_at)}</div></div><Button onClick={() => restoreProject.mutate({ id: project.id, version: project.version })} disabled={restoreProject.isPending}><RotateCcw size={15} />Restore</Button></div>)}</div>
+		</Panel>
+	  ) : null}
 
       <Modal
         open={createProjectOpen}

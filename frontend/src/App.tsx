@@ -62,6 +62,7 @@ export function App() {
                   <Route path="/projects/:projectId" element={<ProjectWorkspace />} />
                   <Route path="/projects/:projectId/graph" element={<ProjectWorkspace />} />
                   <Route path="/projects/:projectId/deliveries" element={<ProjectWorkspace />} />
+				  <Route path="/projects/:projectId/activity" element={<ProjectWorkspace />} />
                   <Route path="/projects/:projectId/settings" element={<ProjectWorkspace />} />
                   <Route path="/remote-projects/:projectId" element={<RemoteProjectWorkspace />} />
                   <Route path="/account" element={<AccountPage />} />

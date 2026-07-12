@@ -1,6 +1,8 @@
 import axios from "axios";
 import type {
 	AccountSession,
+	ArchivedProject,
+	ArchivedTicket,
   AdminAuditAction,
   AdminAuditEvent,
   AdminAuditTargetType,
@@ -26,7 +28,8 @@ import type {
   Label,
   Notification,
   OAuthProvider,
-  Project,
+	Project,
+	ProjectActivityEvent,
   ProjectCreationPolicy,
   ProjectDelivery,
   ProjectDeliverySummary,
@@ -482,14 +485,45 @@ export const api = {
     return data;
   },
 
-  async getProject(projectId: ID): Promise<Project> {
+	async getProject(projectId: ID): Promise<Project> {
     const { data } = await http.get<Project>(`${apiPrefix}/projects/${projectId}`);
     return data;
+	},
+
+	async listProjectActivity(projectId: ID, offset = 0): Promise<ProjectActivityEvent[]> {
+		const { data } = await http.get<ProjectActivityEvent[] | null>(`${apiPrefix}/projects/${projectId}/activity`, { params: { limit: 50, offset } });
+		return asArray(data);
+	},
+
+  async updateProject(projectId: ID, payload: UpdateProjectPayload, version: number): Promise<void> {
+    await http.patch(`${apiPrefix}/projects/${projectId}`, payload, { headers: { "If-Match": `"${version}"` } });
   },
 
-  async updateProject(projectId: ID, payload: UpdateProjectPayload): Promise<void> {
-    await http.patch(`${apiPrefix}/projects/${projectId}`, payload);
-  },
+	async listArchivedProjects(): Promise<ArchivedProject[]> {
+		const { data } = await http.get<ArchivedProject[] | null>(`${apiPrefix}/projects/archived`);
+		return asArray(data);
+	},
+
+	async archiveProject(projectId: ID, version: number): Promise<void> {
+		await http.post(`${apiPrefix}/projects/${projectId}/archive`, null, { headers: { "If-Match": `"${version}"` } });
+	},
+
+	async restoreProject(projectId: ID, version: number): Promise<void> {
+		await http.post(`${apiPrefix}/projects/${projectId}/restore`, null, { headers: { "If-Match": `"${version}"` } });
+	},
+
+	async listArchivedTickets(projectId: ID): Promise<ArchivedTicket[]> {
+		const { data } = await http.get<ArchivedTicket[] | null>(`${apiPrefix}/projects/${projectId}/tickets/archived`);
+		return asArray(data);
+	},
+
+	async archiveTicket(ticketId: ID, version: number): Promise<void> {
+		await http.post(`${apiPrefix}/tickets/${ticketId}/archive`, null, { headers: { "If-Match": `"${version}"` } });
+	},
+
+	async restoreTicket(ticketId: ID, version: number): Promise<void> {
+		await http.post(`${apiPrefix}/tickets/${ticketId}/restore`, null, { headers: { "If-Match": `"${version}"` } });
+	},
 
   async deleteProject(projectId: ID): Promise<void> {
     await http.delete(`${apiPrefix}/projects/${projectId}`);
@@ -672,12 +706,12 @@ export const api = {
     return data;
   },
 
-  async updateTicket(ticketId: ID, payload: UpdateTicketPayload): Promise<void> {
-    await http.patch(`${apiPrefix}/tickets/${ticketId}`, payload);
+  async updateTicket(ticketId: ID, payload: UpdateTicketPayload, version: number): Promise<void> {
+    await http.patch(`${apiPrefix}/tickets/${ticketId}`, payload, { headers: { "If-Match": `"${version}"` } });
   },
 
-  async moveTicket(ticketId: ID, payload: MoveTicketPayload): Promise<Ticket> {
-    const { data } = await http.post<Ticket>(`${apiPrefix}/tickets/${ticketId}/move`, payload);
+  async moveTicket(ticketId: ID, payload: MoveTicketPayload, version: number): Promise<Ticket> {
+    const { data } = await http.post<Ticket>(`${apiPrefix}/tickets/${ticketId}/move`, payload, { headers: { "If-Match": `"${version}"` } });
     return data;
   },
 

@@ -58,6 +58,35 @@ export interface SecurityEvent {
 	created_at: string;
 }
 
+export interface ProjectActivityEvent {
+	id: ID;
+	project_id: ID;
+	actor_id: ID | null;
+	actor_handle: string | null;
+	entity_type: "project" | "ticket";
+	entity_id: ID;
+	action: "created" | "updated" | "archived" | "restored";
+	before_state: Record<string, unknown> | null;
+	after_state: Record<string, unknown> | null;
+	created_at: string;
+}
+
+export interface ArchivedProject {
+	id: ID;
+	name: string;
+	description: string;
+	version: number;
+	archived_at: string;
+}
+
+export interface ArchivedTicket {
+	id: ID;
+	project_id: ID;
+	title: string;
+	version: number;
+	archived_at: string;
+}
+
 export interface PublicInstanceConfig {
   name: string;
   version: string;
@@ -77,6 +106,8 @@ export interface Project {
   name: string;
   description: string;
   owner_id: ID;
+  version: number;
+  archived_at: string | null;
   handle: string;
   created_at: string;
   updated_at: string;
@@ -214,6 +245,8 @@ export interface Ticket {
   is_resolved: boolean;
   due_date: string | null;
   label_ids: ID[];
+  version: number;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
