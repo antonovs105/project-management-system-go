@@ -43,8 +43,8 @@ var ErrOwnerRequired = errors.New("owner privileges required")
 // ErrUserNotFound reports that the target user does not exist locally.
 var ErrUserNotFound = errors.New("user not found")
 
-// ErrCannotDemoteLastAdmin protects the instance from losing its final owner.
-var ErrCannotDemoteLastAdmin = errors.New("cannot demote the last instance owner")
+// ErrCannotDemoteLastOwner protects the instance from losing its final owner.
+var ErrCannotDemoteLastOwner = errors.New("cannot demote the last instance owner")
 
 // ErrInvalidCredentials reports failed authentication without revealing which credential failed.
 var ErrInvalidCredentials = errors.New("invalid credentials")

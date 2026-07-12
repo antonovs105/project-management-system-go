@@ -7,10 +7,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -95,7 +97,7 @@ func TestAdminUserManagement(t *testing.T) {
 	assert.Equal(t, user.InstanceRoleUser, demoted.InstanceRole)
 
 	_, err = userService.UpdateInstanceRole(ctx, admin.ID, admin.ID, user.InstanceRoleUser)
-	require.ErrorIs(t, err, user.ErrCannotDemoteLastAdmin)
+	require.ErrorIs(t, err, user.ErrCannotDemoteLastOwner)
 
 	auditService := adminaudit.NewService(adminaudit.NewRepository(db))
 	events, err := auditService.ListEvents(ctx, admin.ID, adminaudit.ListOptions{Action: adminaudit.ActionUserInstanceRoleUpdated, Limit: 2})
@@ -103,6 +105,60 @@ func TestAdminUserManagement(t *testing.T) {
 	require.Len(t, events, 2)
 	assert.Equal(t, adminaudit.TargetTypeUser, events[0].TargetType)
 	assert.NotNil(t, events[0].ActorUserID)
+}
+
+func TestConcurrentOwnerDemotionKeepsOneOwner(t *testing.T) {
+	db := openIntegrationDB(t)
+	resetIntegrationDB(t, db)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+	repository := user.NewRepository(db, cfg)
+	userService := user.NewService(repository, []byte("integration-secret"), cfg)
+
+	firstOwner, err := userService.BootstrapAdmin(ctx, "first-owner", "first-owner@example.test", "password123")
+	require.NoError(t, err)
+	secondOwner, err := userService.RegisterUser(ctx, "second-owner", "second-owner@example.test", "password123")
+	require.NoError(t, err)
+	_, err = userService.UpdateInstanceRole(ctx, firstOwner.ID, secondOwner.ID, user.InstanceRoleOwner)
+	require.NoError(t, err)
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var ready sync.WaitGroup
+	ready.Add(2)
+	for _, ownerID := range []string{firstOwner.ID, secondOwner.ID} {
+		ownerID := ownerID
+		go func() {
+			ready.Done()
+			<-start
+			_, updateErr := repository.UpdateInstanceRole(ctx, ownerID, ownerID, user.InstanceRoleUser)
+			results <- updateErr
+		}()
+	}
+	ready.Wait()
+	close(start)
+
+	var successes int
+	for range 2 {
+		updateErr := <-results
+		if updateErr == nil {
+			successes++
+			continue
+		}
+		assert.True(t,
+			errors.Is(updateErr, user.ErrCannotDemoteLastOwner) ||
+				errors.Is(updateErr, user.ErrOwnerRequired) ||
+				errors.Is(updateErr, user.ErrAdminRequired),
+			"unexpected concurrent demotion error: %v", updateErr,
+		)
+	}
+	assert.Equal(t, 1, successes)
+
+	var ownerCount int
+	require.NoError(t, db.GetContext(ctx, &ownerCount, `SELECT count(*) FROM users WHERE instance_role = $1`, user.InstanceRoleOwner))
+	assert.Equal(t, 1, ownerCount)
 }
 
 func TestUserPasswordChange(t *testing.T) {

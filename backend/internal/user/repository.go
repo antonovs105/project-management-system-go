@@ -419,6 +419,14 @@ func (r *PgRepository) UpdateInstanceRole(ctx context.Context, adminUserID, user
 	}
 	defer tx.Rollback()
 
+	// Instance-role changes are rare administrative operations. Serialize them so
+	// two owners cannot concurrently demote different rows after each observes the
+	// other owner. The transaction-scoped lock is released automatically.
+	const instanceRoleAdvisoryLock int64 = 0x50524f474f574e52 // "PROGOWNR"
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, instanceRoleAdvisoryLock); err != nil {
+		return nil, err
+	}
+
 	var currentRole string
 	if err := tx.GetContext(ctx, &currentRole, `SELECT instance_role FROM users WHERE id = $1 FOR UPDATE`, userID); err != nil {
 		if err == sql.ErrNoRows {
@@ -433,6 +441,9 @@ func (r *PgRepository) UpdateInstanceRole(ctx context.Context, adminUserID, user
 		}
 		return nil, err
 	}
+	if actorRole != InstanceRoleOwner && actorRole != InstanceRoleAdmin {
+		return nil, ErrAdminRequired
+	}
 
 	if actorRole != InstanceRoleOwner && (currentRole == InstanceRoleOwner || role == InstanceRoleOwner) {
 		return nil, ErrOwnerRequired
@@ -444,7 +455,7 @@ func (r *PgRepository) UpdateInstanceRole(ctx context.Context, adminUserID, user
 			return nil, err
 		}
 		if adminCount <= 1 {
-			return nil, ErrCannotDemoteLastAdmin
+			return nil, ErrCannotDemoteLastOwner
 		}
 	}
 

@@ -192,8 +192,8 @@ func writeAdminUserError(c echo.Context, err error) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	case errors.Is(err, ErrUserNotFound):
 		return c.JSON(http.StatusNotFound, map[string]string{"error": ErrUserNotFound.Error()})
-	case errors.Is(err, ErrCannotDemoteLastAdmin):
-		return c.JSON(http.StatusConflict, map[string]string{"error": ErrCannotDemoteLastAdmin.Error()})
+	case errors.Is(err, ErrCannotDemoteLastOwner):
+		return c.JSON(http.StatusConflict, map[string]string{"error": ErrCannotDemoteLastOwner.Error()})
 	default:
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "admin user operation failed"})
 	}
