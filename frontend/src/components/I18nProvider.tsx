@@ -4,6 +4,7 @@ import { I18nContext } from "../lib/i18n-context";
 import type { I18nContextValue } from "../lib/i18n-context";
 import { messages, supportedLocales } from "../lib/i18n-messages";
 import type { Locale } from "../lib/i18n-messages";
+import { dateTime, number, plural, relativeDate } from "../lib/format";
 
 function isLocale(value: string | null | undefined): value is Locale {
   return supportedLocales.includes(value as Locale);
@@ -35,6 +36,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       locale,
       setLocale,
       t: (key, values) => formatMessage(messages[locale][key] || messages.en[key], values),
+      relativeDate: (value) => relativeDate(value, locale),
+      dateTime: (value) => dateTime(value, locale),
+      number: (value) => number(value, locale),
+      plural: (count, forms) => plural(count, forms, locale),
     }),
     [locale],
   );
