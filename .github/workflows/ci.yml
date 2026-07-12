@@ -100,3 +100,46 @@ jobs:
       - name: Audit complete frontend dependency graph
         working-directory: frontend
         run: pnpm audit --audit-level high
+
+  deployment-restore:
+    name: Deployment restore drill
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Prepare local deployment configuration
+        run: cp .env.example .env
+
+      - name: Validate deploy scripts and Compose
+        run: |
+          sh -n deploy/install.sh deploy/bluegreen-deploy.sh deploy/backup.sh deploy/restore-backup.sh
+          docker compose config --quiet
+
+      - name: Start disposable database and backend
+        run: docker compose up -d --build db redis migrations backend
+
+      - name: Create restore probe and verified backup
+        run: |
+          docker compose exec -T db psql -U postgres -d pms -v ON_ERROR_STOP=1 -c \
+            "CREATE TABLE restore_probe (value text NOT NULL); INSERT INTO restore_probe VALUES ('before-backup');"
+          APP_DIR="$PWD" ENV_FILE="$PWD/.env" COMPOSE_FILE="$PWD/docker-compose.yml" \
+            BACKUP_DIR="$RUNNER_TEMP/progo-backups" BACKUP_ATTACHMENT_SERVICE=backend \
+            sh deploy/backup.sh
+
+      - name: Mutate data and restore the backup
+        run: |
+          docker compose exec -T db psql -U postgres -d pms -v ON_ERROR_STOP=1 -c \
+            "UPDATE restore_probe SET value = 'after-backup';"
+          bundle="$(find "$RUNNER_TEMP/progo-backups" -mindepth 1 -maxdepth 1 -type d -name 'Progo-*' | head -n 1)"
+          test -n "$bundle"
+          APP_DIR="$PWD" ENV_FILE="$PWD/.env" COMPOSE_FILE="$PWD/docker-compose.yml" \
+            RESTORE_CONFIRM=Progo SKIP_PRE_RESTORE_BACKUP=true BACKUP_ATTACHMENT_SERVICE=backend \
+            RESTORE_STOP_SERVICES=backend RESTORE_START_SERVICES=backend \
+            sh deploy/restore-backup.sh "$bundle"
+          value="$(docker compose exec -T db psql -U postgres -d pms -Atc 'SELECT value FROM restore_probe')"
+          test "$value" = "before-backup"
+
+      - name: Stop disposable deployment
+        if: always()
+        run: docker compose down -v
