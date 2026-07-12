@@ -71,6 +71,9 @@ services:
       SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-}
       SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Progo}
       SMTP_IMPLICIT_TLS: ${SMTP_IMPLICIT_TLS:-false}
+      ATTACHMENTS_ENABLED: ${ATTACHMENTS_ENABLED:-false}
+      ATTACHMENTS_STORAGE_PATH: /data/attachments
+      CLAMAV_ADDR: ${CLAMAV_ADDR:-}
       OAUTH_FRONTEND_CALLBACK_URL: ${OAUTH_FRONTEND_CALLBACK_URL:-}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
@@ -85,6 +88,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - attachment_data:/data/attachments
     stop_grace_period: 20s
     security_opt:
       - no-new-privileges:true
@@ -140,6 +145,9 @@ services:
       SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-}
       SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Progo}
       SMTP_IMPLICIT_TLS: ${SMTP_IMPLICIT_TLS:-false}
+      ATTACHMENTS_ENABLED: ${ATTACHMENTS_ENABLED:-false}
+      ATTACHMENTS_STORAGE_PATH: /data/attachments
+      CLAMAV_ADDR: ${CLAMAV_ADDR:-}
       OAUTH_FRONTEND_CALLBACK_URL: ${OAUTH_FRONTEND_CALLBACK_URL:-}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
@@ -154,6 +162,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - attachment_data:/data/attachments
     stop_grace_period: 20s
     security_opt:
       - no-new-privileges:true
@@ -207,6 +217,9 @@ services:
       SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-}
       SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Progo}
       SMTP_IMPLICIT_TLS: ${SMTP_IMPLICIT_TLS:-false}
+      ATTACHMENTS_ENABLED: ${ATTACHMENTS_ENABLED:-false}
+      ATTACHMENTS_STORAGE_PATH: /data/attachments
+      CLAMAV_ADDR: ${CLAMAV_ADDR:-}
       OAUTH_FRONTEND_CALLBACK_URL: ${OAUTH_FRONTEND_CALLBACK_URL:-}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
@@ -221,6 +234,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - attachment_data:/data/attachments
     stop_grace_period: 20s
     security_opt:
       - no-new-privileges:true
@@ -272,6 +287,9 @@ services:
       SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-}
       SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Progo}
       SMTP_IMPLICIT_TLS: ${SMTP_IMPLICIT_TLS:-false}
+      ATTACHMENTS_ENABLED: ${ATTACHMENTS_ENABLED:-false}
+      ATTACHMENTS_STORAGE_PATH: /data/attachments
+      CLAMAV_ADDR: ${CLAMAV_ADDR:-}
       OAUTH_FRONTEND_CALLBACK_URL: ${OAUTH_FRONTEND_CALLBACK_URL:-}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
@@ -286,6 +304,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - attachment_data:/data/attachments
     stop_grace_period: 20s
     security_opt:
       - no-new-privileges:true
@@ -361,3 +381,4 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  attachment_data:

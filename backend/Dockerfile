@@ -19,7 +19,9 @@ FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc
 
 RUN apk add --no-cache ca-certificates \
     && addgroup -S app \
-    && adduser -S -G app app
+    && adduser -S -G app app \
+    && mkdir -p /data/attachments \
+    && chown app:app /data/attachments
 
 WORKDIR /app
 
