@@ -402,7 +402,7 @@ export function ProjectWorkspace() {
                 <SummaryItem icon={<Flame size={15} />} label="urgent" value={ticketStats.urgent} />
                 <SummaryItem icon={<CheckCircle2 size={15} />} label="done" value={ticketStats.done} />
               </div>
-              <p className="mt-3 text-xs text-zinc-400">Updated {relativeDate(project.data.updated_at)}</p>
+			  <p className="mt-3 text-xs text-zinc-600 dark:text-zinc-300">Updated {relativeDate(project.data.updated_at)}</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button onClick={() => tickets.refetch()} disabled={tickets.isFetching}>

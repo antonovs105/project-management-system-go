@@ -84,7 +84,7 @@ export function AppLayout() {
 
         {canUseAdmin ? (
           <div>
-            <div className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">{t("nav.administration")}</div>
+			<div className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">{t("nav.administration")}</div>
             <div className="space-y-1">
               <NavLink to="/admin/users" className={({ isActive }) => navClass(isActive)} onClick={() => setSidebarOpen(false)}>
                 <Users size={18} />
@@ -107,10 +107,10 @@ export function AppLayout() {
         ) : null}
 
         <div>
-          <div className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">{t("nav.openProjects")}</div>
+		  <div className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">{t("nav.openProjects")}</div>
           <div className="space-y-1">
             {projects.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-zinc-200 px-3 py-4 text-sm text-zinc-400">
+			  <div className="rounded-2xl border border-dashed border-zinc-200 px-3 py-4 text-sm text-zinc-600 dark:text-zinc-300">
                 {t("nav.noProjects")}
               </div>
             ) : null}

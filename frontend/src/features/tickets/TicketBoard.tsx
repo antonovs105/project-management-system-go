@@ -148,7 +148,7 @@ function BoardColumn({
           ))}
         </SortableContext>
         {tickets.length === 0 ? (
-          <div className="flex h-24 items-center justify-center rounded-2xl border border-dashed border-zinc-300 text-xs text-zinc-400 dark:border-zinc-700 dark:text-zinc-500">
+		  <div className="flex h-24 items-center justify-center rounded-2xl border border-dashed border-zinc-300 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
             Empty
           </div>
         ) : null}

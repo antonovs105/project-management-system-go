@@ -12,6 +12,7 @@
     "test": "vitest run && node --test tests/*.test.mjs",
     "test:unit": "vitest run",
     "test:contract": "node --test tests/*.test.mjs",
+    "test:e2e": "playwright test",
     "generate:api": "openapi-typescript ../backend/docs/openapi.yaml --root-types --root-types-no-schema-prefix -o src/generated/api-schema.ts",
     "check:api": "openapi-typescript ../backend/docs/openapi.yaml --root-types --root-types-no-schema-prefix -o src/generated/api-schema.ts --check"
   },
@@ -53,7 +54,9 @@
     "zustand": "^5.0.9"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.61.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^24.10.1",
