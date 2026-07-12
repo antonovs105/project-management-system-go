@@ -407,6 +407,15 @@ func (s *Service) ListUsers(ctx context.Context, adminUserID string, options Lis
 	return s.repo.ListUsers(ctx, options)
 }
 
+// GetOwnProfile returns the current local user's non-credential profile data.
+func (s *Service) GetOwnProfile(ctx context.Context, userID string) (*User, error) {
+	userID = strings.TrimSpace(userID)
+	if _, err := uuid.Parse(userID); err != nil {
+		return nil, ErrUserNotFound
+	}
+	return s.repo.GetUserByID(ctx, userID)
+}
+
 // UpdateInstanceRole changes a local user's instance role and records an audit event.
 func (s *Service) UpdateInstanceRole(ctx context.Context, adminUserID, targetUserID, role string) (*User, error) {
 	if err := s.requireAdmin(ctx, adminUserID); err != nil {

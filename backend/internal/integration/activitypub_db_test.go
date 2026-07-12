@@ -26,7 +26,9 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteinbox"
 	"github.com/antonovs105/project-management-system-go/internal/adminaudit"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
+	"github.com/antonovs105/project-management-system-go/internal/label"
 	authmiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
+	"github.com/antonovs105/project-management-system-go/internal/portability"
 	"github.com/antonovs105/project-management-system-go/internal/project"
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
 	"github.com/antonovs105/project-management-system-go/internal/user"
@@ -105,6 +107,71 @@ func TestAdminUserManagement(t *testing.T) {
 	require.Len(t, events, 2)
 	assert.Equal(t, adminaudit.TargetTypeUser, events[0].TargetType)
 	assert.NotNil(t, events[0].ActorUserID)
+}
+
+func TestProjectPortabilityRoundTrip(t *testing.T) {
+	db := openIntegrationDB(t)
+	resetIntegrationDB(t, db)
+
+	ctx := context.Background()
+	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+	userService := user.NewService(user.NewRepository(db, cfg), []byte("integration-secret"), cfg)
+	owner, err := userService.BootstrapAdmin(ctx, "portable-owner", "portable-owner@example.test", "password123")
+	require.NoError(t, err)
+	projectService := project.NewService(project.NewRepository(db, cfg), cfg)
+	ticketService := ticket.NewService(ticket.NewRepository(db, cfg), projectService, cfg)
+	commentService := comment.NewService(comment.NewRepository(db, cfg), ticketService, cfg)
+	labelService := label.NewService(label.NewRepository(db), projectService)
+	service := portability.NewService(projectService, ticketService, labelService, commentService, userService)
+
+	sourceProject, err := projectService.CreateProject(ctx, "Portable project", "Round-trip data", owner.ID)
+	require.NoError(t, err)
+	projectLabel, err := labelService.Create(ctx, sourceProject.ID, owner.ID, "Backend", "#336699")
+	require.NoError(t, err)
+	epic, err := ticketService.CreateTicket(ctx, ticket.CreateTicketRequest{Title: "Portable epic", Type: "epic", Priority: "high", LabelIDs: []string{projectLabel.ID}}, sourceProject.ID, owner.ID)
+	require.NoError(t, err)
+	task, err := ticketService.CreateTicket(ctx, ticket.CreateTicketRequest{Title: "Portable task", Description: "Keep this content", Type: "task", Priority: "medium", ParentID: &epic.ID, LabelIDs: []string{projectLabel.ID}}, sourceProject.ID, owner.ID)
+	require.NoError(t, err)
+	done := "done"
+	require.NoError(t, ticketService.UpdateTicket(ctx, ticket.UpdateTicketRequest{Status: &done, ExpectedVersion: task.Version}, task.ID, owner.ID))
+	_, err = commentService.CreateComment(ctx, task.ID, owner.ID, "Portable comment")
+	require.NoError(t, err)
+
+	bundle, err := service.ExportProject(ctx, sourceProject.ID, owner.ID)
+	require.NoError(t, err)
+	require.Equal(t, portability.ProjectSchema, bundle.Schema)
+	require.Len(t, bundle.Labels, 1)
+	require.Len(t, bundle.Tickets, 2)
+
+	bundle.Project.Name = "Portable project import"
+	imported, err := service.ImportProject(ctx, owner.ID, *bundle)
+	require.NoError(t, err)
+	require.Equal(t, 1, imported.LabelsImported)
+	require.Equal(t, 2, imported.TicketsImported)
+	require.Equal(t, 1, imported.CommentsImported)
+	require.NotEqual(t, sourceProject.ID, imported.ProjectID)
+
+	roundTrip, err := service.ExportProject(ctx, imported.ProjectID, owner.ID)
+	require.NoError(t, err)
+	require.Equal(t, bundle.Project, roundTrip.Project)
+	require.Len(t, roundTrip.Tickets, 2)
+	var importedTask portability.ExportTicket
+	for _, value := range roundTrip.Tickets {
+		if value.Title == "Portable task" {
+			importedTask = value
+		}
+	}
+	require.Equal(t, "done", importedTask.Status)
+	require.Equal(t, "Keep this content", importedTask.Description)
+	require.Equal(t, []string{"Backend"}, importedTask.Labels)
+	require.Len(t, importedTask.Comments, 1)
+	require.Equal(t, "Portable comment", importedTask.Comments[0].Content)
+
+	userBundle, err := service.ExportUser(ctx, owner.ID)
+	require.NoError(t, err)
+	require.Equal(t, portability.UserSchema, userBundle.Schema)
+	require.Equal(t, owner.Email, userBundle.Account.Email)
+	require.Len(t, userBundle.Projects, 2)
 }
 
 func TestConcurrentOwnerDemotionKeepsOneOwner(t *testing.T) {

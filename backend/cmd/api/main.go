@@ -40,6 +40,7 @@ import (
 	authMiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
 	"github.com/antonovs105/project-management-system-go/internal/notification"
 	"github.com/antonovs105/project-management-system-go/internal/observability"
+	"github.com/antonovs105/project-management-system-go/internal/portability"
 	"github.com/antonovs105/project-management-system-go/internal/project"
 	appratelimit "github.com/antonovs105/project-management-system-go/internal/ratelimit"
 	"github.com/antonovs105/project-management-system-go/internal/secrets"
@@ -160,6 +161,7 @@ type ApiServer struct {
 	ticketHandler       *ticket.Handler
 	commentHandler      *comment.Handler
 	notificationHandler *notification.Handler
+	portabilityHandler  *portability.Handler
 	githubHandler       *githubintegration.Handler
 	apHandler           *activitypub.Handler
 	c2sHandler          *c2s.Handler
@@ -515,7 +517,8 @@ func main() {
 		project.WithInstanceRoleProvider(userService),
 		project.WithProjectCreationPolicy(cfg.Projects.CreationPolicy),
 	)
-	labelHandler := label.NewHandler(label.NewService(label.NewRepository(db), projectService))
+	labelService := label.NewService(label.NewRepository(db), projectService)
+	labelHandler := label.NewHandler(labelService)
 
 	ticketRepo := ticket.NewRepository(db, apConfig)
 	ticketService := ticket.NewService(ticketRepo, projectService, apConfig)
@@ -548,6 +551,7 @@ func main() {
 	commentService := comment.NewService(commentRepo, ticketService, apConfig)
 	commentService.SetNotificationSink(notificationService)
 	commentHandler := comment.NewHandler(commentService)
+	portabilityHandler := portability.NewHandler(portability.NewService(projectService, ticketService, labelService, commentService, userService))
 
 	githubClient := githubintegration.NewHTTPClient(githubintegration.WithToken(cfg.GitHub.APIToken))
 	githubService := githubintegration.NewService(githubintegration.NewRepository(db), projectService, githubClient)
@@ -685,6 +689,7 @@ func main() {
 		ticketHandler:       ticketHandler,
 		commentHandler:      commentHandler,
 		notificationHandler: notificationHandler,
+		portabilityHandler:  portabilityHandler,
 		githubHandler:       githubHandler,
 		apHandler:           apHandler,
 		c2sHandler:          c2sHandler,
@@ -1044,6 +1049,7 @@ func registerAuthenticatedAPIRoutes(api *echo.Group, server *ApiServer, jwtSecre
 	}
 	server.commentHandler.RegisterRoutes(api)
 	server.notificationHandler.RegisterRoutes(api)
+	server.portabilityHandler.RegisterRoutes(api)
 	server.githubHandler.RegisterRoutes(api)
 	server.deliveryHandler.RegisterRoutes(api)
 	server.moderationHandler.RegisterRoutes(api)

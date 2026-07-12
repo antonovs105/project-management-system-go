@@ -823,6 +823,26 @@ paths:
           $ref: "#/components/responses/Error"
         "502":
           $ref: "#/components/responses/Error"
+  /api/v1/me/export:
+    get:
+      tags: [Account]
+      operationId: exportCurrentUserData
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Versioned account and accessible-project portability bundle.
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserBundle"
+        "401":
+          $ref: "#/components/responses/Error"
   /api/v1/me/remote-project-invites:
     get:
       tags: [Federation]
@@ -1227,6 +1247,30 @@ paths:
                 $ref: "#/components/schemas/Project"
         "400":
           $ref: "#/components/responses/Error"
+  /api/v1/projects/import:
+    post:
+      tags: [Projects]
+      operationId: importProjectBundle
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectBundle"
+      responses:
+        "201":
+          description: Project and portable work items imported.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResult"
+        "400":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
   /api/v1/projects/{projectID}:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
@@ -1270,6 +1314,30 @@ paths:
       responses:
         "204":
           description: Project deleted.
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/projects/{projectID}/export:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [Projects]
+      operationId: exportProjectBundle
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Versioned project portability bundle.
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectBundle"
+        "403":
+          $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
   /api/v1/projects/{projectID}/members:
@@ -1692,6 +1760,34 @@ paths:
       responses:
         "204":
           description: Label deleted.
+  /api/v1/projects/{projectID}/tickets/import:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    post:
+      tags: [Tickets]
+      operationId: importProjectTickets
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectBundle"
+      responses:
+        "201":
+          description: Portable labels, tickets, and comments imported into the project.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResult"
+        "400":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
   /api/v1/projects/{projectID}/tickets:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
@@ -4067,6 +4163,175 @@ components:
           type: array
           items:
             type: string
+    ProjectBundle:
+      type: object
+      additionalProperties: false
+      required: [schema, exported_at, project, members, labels, tickets]
+      properties:
+        schema:
+          type: string
+          const: progo.project.v1
+        exported_at:
+          type: string
+          format: date-time
+        project:
+          $ref: "#/components/schemas/PortableProject"
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortableMember"
+        labels:
+          type: array
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/PortableLabel"
+        tickets:
+          type: array
+          maxItems: 5000
+          items:
+            $ref: "#/components/schemas/PortableTicket"
+    PortableProject:
+      type: object
+      additionalProperties: false
+      required: [name, description]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 4000
+    PortableMember:
+      type: object
+      additionalProperties: false
+      required: [username, handle, name, role, remote]
+      properties:
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        handle:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+        remote:
+          type: boolean
+    PortableLabel:
+      type: object
+      additionalProperties: false
+      required: [name, color]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 50
+        color:
+          type: string
+          pattern: '^#[0-9A-Fa-f]{6}$'
+    PortableTicket:
+      type: object
+      additionalProperties: false
+      required: [source_id, title, description, status, priority, type, labels, comments]
+      properties:
+        source_id:
+          type: string
+        parent_source_id:
+          type: string
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 4000
+        status:
+          $ref: "#/components/schemas/TicketStatus"
+        priority:
+          $ref: "#/components/schemas/TicketPriority"
+        type:
+          $ref: "#/components/schemas/TicketType"
+        due_date:
+          type: string
+          format: date-time
+        labels:
+          type: array
+          items:
+            type: string
+        comments:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortableComment"
+    PortableComment:
+      type: object
+      additionalProperties: false
+      required: [author_source_id, content, created_at]
+      properties:
+        author_source_id:
+          type: string
+        content:
+          type: string
+          minLength: 1
+        created_at:
+          type: string
+          format: date-time
+    ImportResult:
+      type: object
+      required: [project_id, labels_imported, tickets_imported, comments_imported]
+      properties:
+        project_id:
+          type: string
+          format: uuid
+        labels_imported:
+          type: integer
+          minimum: 0
+        tickets_imported:
+          type: integer
+          minimum: 0
+        comments_imported:
+          type: integer
+          minimum: 0
+    UserBundle:
+      type: object
+      additionalProperties: false
+      required: [schema, exported_at, account, projects]
+      properties:
+        schema:
+          type: string
+          const: progo.user.v1
+        exported_at:
+          type: string
+          format: date-time
+        account:
+          $ref: "#/components/schemas/PortableAccount"
+        projects:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectBundle"
+    PortableAccount:
+      type: object
+      additionalProperties: false
+      required: [username, email, email_verified, handle, name, summary, created_at]
+      properties:
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        email_verified:
+          type: boolean
+        handle:
+          type: string
+        name:
+          type: string
+        summary:
+          type: string
+        created_at:
+          type: string
+          format: date-time
     Label:
       type: object
       required: [id, project_id, name, color, created_at]

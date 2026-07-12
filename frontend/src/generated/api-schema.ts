@@ -682,6 +682,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/me/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["exportCurrentUserData"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me/remote-project-invites": {
         parameters: {
             query?: never;
@@ -888,6 +904,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["importProjectBundle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}": {
         parameters: {
             query?: never;
@@ -904,6 +936,24 @@ export interface paths {
         options?: never;
         head?: never;
         patch: operations["updateProject"];
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        get: operations["exportProjectBundle"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/projects/{projectID}/members": {
@@ -1158,6 +1208,24 @@ export interface paths {
         put?: never;
         post?: never;
         delete: operations["deleteProjectLabel"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/tickets/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["importProjectTickets"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2362,6 +2430,78 @@ export interface components {
             };
             missing_tables?: string[];
         };
+        ProjectBundle: {
+            /** @constant */
+            schema: "progo.project.v1";
+            /** Format: date-time */
+            exported_at: string;
+            project: components["schemas"]["PortableProject"];
+            members: components["schemas"]["PortableMember"][];
+            labels: components["schemas"]["PortableLabel"][];
+            tickets: components["schemas"]["PortableTicket"][];
+        };
+        PortableProject: {
+            name: string;
+            description: string;
+        };
+        PortableMember: {
+            username: string;
+            /** Format: email */
+            email?: string;
+            handle: string;
+            name: string;
+            role: string;
+            remote: boolean;
+        };
+        PortableLabel: {
+            name: string;
+            color: string;
+        };
+        PortableTicket: {
+            source_id: string;
+            parent_source_id?: string;
+            title: string;
+            description: string;
+            status: components["schemas"]["TicketStatus"];
+            priority: components["schemas"]["TicketPriority"];
+            type: components["schemas"]["TicketType"];
+            /** Format: date-time */
+            due_date?: string;
+            labels: string[];
+            comments: components["schemas"]["PortableComment"][];
+        };
+        PortableComment: {
+            author_source_id: string;
+            content: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        ImportResult: {
+            /** Format: uuid */
+            project_id: string;
+            labels_imported: number;
+            tickets_imported: number;
+            comments_imported: number;
+        };
+        UserBundle: {
+            /** @constant */
+            schema: "progo.user.v1";
+            /** Format: date-time */
+            exported_at: string;
+            account: components["schemas"]["PortableAccount"];
+            projects: components["schemas"]["ProjectBundle"][];
+        };
+        PortableAccount: {
+            username: string;
+            /** Format: email */
+            email: string;
+            email_verified: boolean;
+            handle: string;
+            name: string;
+            summary: string;
+            /** Format: date-time */
+            created_at: string;
+        };
         Label: {
             /** Format: uuid */
             id: string;
@@ -2856,6 +2996,15 @@ export type ProjectRole = components['schemas']['ProjectRole'];
 export type ProjectRoleKey = components['schemas']['ProjectRoleKey'];
 export type ProjectPermission = components['schemas']['ProjectPermission'];
 export type ReadinessResponse = components['schemas']['ReadinessResponse'];
+export type ProjectBundle = components['schemas']['ProjectBundle'];
+export type PortableProject = components['schemas']['PortableProject'];
+export type PortableMember = components['schemas']['PortableMember'];
+export type PortableLabel = components['schemas']['PortableLabel'];
+export type PortableTicket = components['schemas']['PortableTicket'];
+export type PortableComment = components['schemas']['PortableComment'];
+export type ImportResult = components['schemas']['ImportResult'];
+export type UserBundle = components['schemas']['UserBundle'];
+export type PortableAccount = components['schemas']['PortableAccount'];
 export type Label = components['schemas']['Label'];
 export type Ticket = components['schemas']['Ticket'];
 export type TicketEvent = components['schemas']['TicketEvent'];
@@ -3955,6 +4104,28 @@ export interface operations {
             502: components["responses"]["Error"];
         };
     };
+    exportCurrentUserData: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Versioned account and accessible-project portability bundle. */
+            200: {
+                headers: {
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserBundle"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
     listRemoteProjectInvites: {
         parameters: {
             query?: {
@@ -4361,6 +4532,32 @@ export interface operations {
             400: components["responses"]["Error"];
         };
     };
+    importProjectBundle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectBundle"];
+            };
+        };
+        responses: {
+            /** @description Project and portable work items imported. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
     getProject: {
         parameters: {
             query?: never;
@@ -4429,6 +4626,31 @@ export interface operations {
             400: components["responses"]["Error"];
             412: components["responses"]["Error"];
             428: components["responses"]["Error"];
+        };
+    };
+    exportProjectBundle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Versioned project portability bundle. */
+            200: {
+                headers: {
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectBundle"];
+                };
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     listProjectMembers: {
@@ -4914,6 +5136,35 @@ export interface operations {
                 };
                 content?: never;
             };
+        };
+    };
+    importProjectTickets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectBundle"];
+            };
+        };
+        responses: {
+            /** @description Portable labels, tickets, and comments imported into the project. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     listProjectTickets: {
