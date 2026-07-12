@@ -1,5 +1,6 @@
 import { ShieldCheck } from "lucide-react";
 import { Panel } from "../../components/ui";
+import { useI18n } from "../../lib/i18n-context";
 import type { InstanceRole } from "../../types";
 
 interface PrivilegedAccountOnboardingProps {
@@ -8,6 +9,7 @@ interface PrivilegedAccountOnboardingProps {
 }
 
 export function PrivilegedAccountOnboarding({ instanceRole, enrollmentRequired }: PrivilegedAccountOnboardingProps) {
+  const { t } = useI18n();
   if (!enrollmentRequired || (instanceRole !== "owner" && instanceRole !== "admin")) {
     return null;
   }
@@ -17,13 +19,13 @@ export function PrivilegedAccountOnboarding({ instanceRole, enrollmentRequired }
       <div className="flex items-start gap-3">
         <ShieldCheck className="mt-0.5 shrink-0 text-amber-700" size={20} aria-hidden="true" />
         <div>
-          <h2 className="font-semibold text-amber-950">Complete privileged account setup</h2>
+          <h2 className="font-semibold text-amber-950">{t("account.privilegedTitle")}</h2>
           <p className="mt-1 text-sm text-amber-900">
-            Multi-factor authentication is required before you can use instance administration. Start setup below, save the recovery codes offline, and sign in again after enrollment.
+            {t("account.privilegedBody")}
           </p>
           {instanceRole === "owner" ? (
             <p className="mt-2 text-sm text-amber-900">
-              After setup, create a second MFA-protected owner so account recovery never depends on one person or device.
+              {t("account.privilegedOwnerBody")}
             </p>
           ) : null}
         </div>

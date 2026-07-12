@@ -6,10 +6,12 @@ import { Link, useSearchParams } from "react-router-dom";
 import { Button, ErrorState, Panel, TextField } from "../components/ui";
 import { api, errorMessage } from "../lib/api";
 import { fieldLimits } from "../lib/limits";
+import { useI18n } from "../lib/i18n-context";
 
 type RecoveryMode = "forgot" | "reset" | "verify";
 
 export function AccountRecoveryPage({ mode }: { mode: RecoveryMode }) {
+  const { t } = useI18n();
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token") || "";
   const [email, setEmail] = useState("");
@@ -27,31 +29,31 @@ export function AccountRecoveryPage({ mode }: { mode: RecoveryMode }) {
         await api.verifyEmail(token);
       }
     },
-    onError: (error) => setFormError(errorMessage(error, "The account request failed.")),
+    onError: (error) => setFormError(errorMessage(error, t("recovery.requestFailed"))),
   });
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError(null);
     if (mode !== "forgot" && !token) {
-      setFormError("This link is missing its single-use token.");
+      setFormError(t("recovery.missingToken"));
       return;
     }
     if (mode === "reset") {
       const bytes = new TextEncoder().encode(password).length;
       if (Array.from(password).length < fieldLimits.passwordMinLength || bytes > fieldLimits.passwordMaxBytes) {
-        setFormError("Choose a password between 8 characters and 72 bytes.");
+        setFormError(t("recovery.passwordInvalid"));
         return;
       }
       if (password !== confirmPassword) {
-        setFormError("The password confirmation does not match.");
+        setFormError(t("recovery.passwordMismatch"));
         return;
       }
     }
     action.mutate();
   }
 
-  const title = mode === "forgot" ? "Recover your account" : mode === "reset" ? "Choose a new password" : "Verify your email";
+  const title = mode === "forgot" ? t("recovery.forgotTitle") : mode === "reset" ? t("recovery.resetTitle") : t("recovery.verifyTitle");
   const complete = action.isSuccess;
 
   return (
@@ -71,28 +73,28 @@ export function AccountRecoveryPage({ mode }: { mode: RecoveryMode }) {
           <div className="grid gap-4">
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
               {mode === "forgot"
-                ? "If that address belongs to an account, a single-use recovery link has been queued."
+                ? t("recovery.forgotComplete")
                 : mode === "reset"
-                  ? "Your password was changed and all existing sessions were revoked."
-                  : "Your email address is now verified."}
+                  ? t("recovery.resetComplete")
+                  : t("recovery.verifyComplete")}
             </div>
-            <Link className="focus-ring inline-flex h-9 items-center justify-center rounded-full bg-zinc-950 px-4 text-sm font-medium text-white hover:bg-zinc-800" to="/login">Return to sign in</Link>
+            <Link className="focus-ring inline-flex h-9 items-center justify-center rounded-full bg-zinc-950 px-4 text-sm font-medium text-white hover:bg-zinc-800" to="/login">{t("recovery.returnToSignIn")}</Link>
           </div>
         ) : (
           <form className="grid gap-4" onSubmit={submit}>
-            {formError ? <ErrorState title="Request failed" body={formError} /> : null}
+            {formError ? <ErrorState title={t("recovery.errorTitle")} body={formError} /> : null}
             {mode === "forgot" ? (
-              <TextField label="Email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+              <TextField label={t("auth.email")} type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
             ) : null}
             {mode === "reset" ? (
               <>
-                <TextField label="New password" type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
-                <TextField label="Confirm password" type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required />
+                <TextField label={t("recovery.newPassword")} type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
+                <TextField label={t("recovery.confirmPassword")} type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required />
               </>
             ) : null}
-            {mode === "verify" ? <p className="text-sm text-zinc-600">Confirm this single-use link to verify ownership of your local account email.</p> : null}
-            <Button type="submit" tone="primary" disabled={action.isPending}>{action.isPending ? "Working..." : "Continue"}</Button>
-            <Link className="text-center text-sm text-zinc-600 hover:text-zinc-950" to="/login">Back to sign in</Link>
+            {mode === "verify" ? <p className="text-sm text-zinc-600">{t("recovery.verifyPrompt")}</p> : null}
+            <Button type="submit" tone="primary" disabled={action.isPending}>{action.isPending ? t("common.working") : t("recovery.continue")}</Button>
+            <Link className="text-center text-sm text-zinc-600 hover:text-zinc-950" to="/login">{t("recovery.backToSignIn")}</Link>
           </form>
         )}
       </Panel>

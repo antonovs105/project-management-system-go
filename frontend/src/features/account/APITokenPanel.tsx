@@ -4,20 +4,13 @@ import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { Button, ErrorState, Panel, TextField } from "../../components/ui";
 import { api, errorMessage } from "../../lib/api";
-import { relativeDate } from "../../lib/format";
+import { useI18n } from "../../lib/i18n-context";
 import { queryKeys } from "../../lib/queryKeys";
 import { useAuthStore } from "../../store/auth";
 import type { APITokenScope } from "../../types";
 
-const standardScopes: Array<{ scope: APITokenScope; label: string }> = [
-  { scope: "projects:read", label: "Read projects and federation data" },
-  { scope: "projects:write", label: "Create and update project data" },
-  { scope: "account:read", label: "Read account data" },
-  { scope: "account:write", label: "Update account data" },
-  { scope: "tokens:manage", label: "Manage API tokens" },
-];
-
 export function APITokenPanel() {
+  const { t, relativeDate } = useI18n();
   const queryClient = useQueryClient();
   const role = useAuthStore((state) => state.user?.instanceRole);
   const [name, setName] = useState("");
@@ -34,15 +27,22 @@ export function APITokenPanel() {
       setScopes(["projects:read"]);
       await queryClient.invalidateQueries({ queryKey: queryKeys.apiTokens });
     },
-    onError: (error) => toast.error(errorMessage(error, "Could not create API token.")),
+    onError: (error) => toast.error(errorMessage(error, t("account.apiTokensCreateFailed"))),
   });
   const revokeToken = useMutation({
     mutationFn: api.revokeAPIToken,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.apiTokens }),
-    onError: (error) => toast.error(errorMessage(error, "Could not revoke API token.")),
+    onError: (error) => toast.error(errorMessage(error, t("account.apiTokensRevokeFailed"))),
   });
 
-  const availableScopes = role === "owner" || role === "admin" ? [...standardScopes, { scope: "admin" as const, label: "Administer this instance" }] : standardScopes;
+  const standardScopes: Array<{ scope: APITokenScope; label: string }> = [
+    { scope: "projects:read", label: t("account.scopeProjectsRead") },
+    { scope: "projects:write", label: t("account.scopeProjectsWrite") },
+    { scope: "account:read", label: t("account.scopeAccountRead") },
+    { scope: "account:write", label: t("account.scopeAccountWrite") },
+    { scope: "tokens:manage", label: t("account.scopeTokensManage") },
+  ];
+  const availableScopes = role === "owner" || role === "admin" ? [...standardScopes, { scope: "admin" as const, label: t("account.scopeAdmin") }] : standardScopes;
 
   function toggleScope(scope: APITokenScope, enabled: boolean) {
     setScopes((current) => enabled ? [...new Set([...current, scope])] : current.filter((value) => value !== scope));
@@ -61,25 +61,25 @@ export function APITokenPanel() {
     <Panel className="p-5 xl:col-span-2">
       <div className="mb-4 flex items-start gap-3">
         <KeyRound className="mt-0.5 text-zinc-500" size={18} />
-        <div><h2 className="font-semibold text-zinc-950">API tokens</h2><p className="text-sm text-zinc-500">Use scoped, expiring credentials for scripts and services. Secrets are shown once.</p></div>
+        <div><h2 className="font-semibold text-zinc-950">{t("account.apiTokensTitle")}</h2><p className="text-sm text-zinc-500">{t("account.apiTokensBody")}</p></div>
       </div>
       {createdSecret ? (
         <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-3" role="status">
-          <div className="text-sm font-semibold text-amber-950">Copy this token now</div>
+          <div className="text-sm font-semibold text-amber-950">{t("account.apiTokensCopyNow")}</div>
           <code className="mt-2 block break-all rounded-lg bg-white p-2 text-sm text-zinc-950">{createdSecret}</code>
-          <div className="mt-2 flex gap-2"><Button onClick={() => void navigator.clipboard.writeText(createdSecret)}><Clipboard size={15} />Copy</Button><Button onClick={() => setCreatedSecret("")}>I saved it</Button></div>
+          <div className="mt-2 flex gap-2"><Button onClick={() => void navigator.clipboard.writeText(createdSecret)}><Clipboard size={15} />{t("actions.copy")}</Button><Button onClick={() => setCreatedSecret("")}>{t("account.apiTokensSaved")}</Button></div>
         </div>
       ) : null}
       <form className="grid gap-4" onSubmit={submit}>
         <div className="grid gap-4 md:grid-cols-2">
-          <TextField label="Token name" value={name} onChange={(event) => setName(event.target.value)} maxLength={80} required />
-          <TextField label="Expiry (optional, maximum one year)" type="date" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} />
+          <TextField label={t("account.apiTokensName")} value={name} onChange={(event) => setName(event.target.value)} maxLength={80} required />
+          <TextField label={t("account.apiTokensExpiryHint")} type="date" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} />
         </div>
-        <fieldset><legend className="mb-2 text-sm font-medium text-zinc-700">Scopes</legend><div className="grid gap-2 sm:grid-cols-2">{availableScopes.map((item) => <label key={item.scope} className="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 text-sm"><input type="checkbox" checked={scopes.includes(item.scope)} onChange={(event) => toggleScope(item.scope, event.target.checked)} />{item.label}</label>)}</div></fieldset>
-        <div className="flex justify-end"><Button type="submit" tone="primary" disabled={!name.trim() || scopes.length === 0 || createToken.isPending}>Create token</Button></div>
+        <fieldset><legend className="mb-2 text-sm font-medium text-zinc-700">{t("account.apiTokensScopes")}</legend><div className="grid gap-2 sm:grid-cols-2">{availableScopes.map((item) => <label key={item.scope} className="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 text-sm"><input type="checkbox" checked={scopes.includes(item.scope)} onChange={(event) => toggleScope(item.scope, event.target.checked)} />{item.label}</label>)}</div></fieldset>
+        <div className="flex justify-end"><Button type="submit" tone="primary" disabled={!name.trim() || scopes.length === 0 || createToken.isPending}>{t("account.apiTokensCreate")}</Button></div>
       </form>
-      {tokens.isError ? <div className="mt-4"><ErrorState title="Could not load API tokens" body={errorMessage(tokens.error, "Token list request failed.")} /></div> : null}
-      <div className="mt-5 grid gap-2">{(tokens.data || []).map((token) => <div key={token.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-200 p-3"><div><div className="font-medium text-zinc-950">{token.name} <code className="text-xs text-zinc-500">{token.prefix}…</code></div><div className="mt-1 text-xs text-zinc-500">{token.scopes.join(", ")} · Created {relativeDate(token.created_at)}{token.last_used_at ? ` · Used ${relativeDate(token.last_used_at)}` : ""}{token.expires_at ? ` · Expires ${relativeDate(token.expires_at)}` : ""}{token.revoked_at ? " · Revoked" : ""}</div></div>{!token.revoked_at ? <Button tone="danger" onClick={() => revokeToken.mutate(token.id)} disabled={revokeToken.isPending}><Trash2 size={15} />Revoke</Button> : null}</div>)}</div>
+      {tokens.isError ? <div className="mt-4"><ErrorState title={t("account.apiTokensLoadFailed")} body={errorMessage(tokens.error, t("account.apiTokensRequestFailed"))} /></div> : null}
+      <div className="mt-5 grid gap-2">{(tokens.data || []).map((token) => <div key={token.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-200 p-3"><div><div className="font-medium text-zinc-950">{token.name} <code className="text-xs text-zinc-500">{token.prefix}…</code></div><div className="mt-1 text-xs text-zinc-500">{token.scopes.join(", ")} · {t("account.apiTokensCreated", { date: relativeDate(token.created_at) })}{token.last_used_at ? ` · ${t("account.apiTokensUsed", { date: relativeDate(token.last_used_at) })}` : ""}{token.expires_at ? ` · ${t("account.apiTokensExpires", { date: relativeDate(token.expires_at) })}` : ""}{token.revoked_at ? ` · ${t("account.apiTokensRevoked")}` : ""}</div></div>{!token.revoked_at ? <Button tone="danger" onClick={() => revokeToken.mutate(token.id)} disabled={revokeToken.isPending}><Trash2 size={15} />{t("account.sessionRevoke")}</Button> : null}</div>)}</div>
     </Panel>
   );
 }

@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { APITokenPanel } from "../src/features/account/APITokenPanel";
+import { I18nProvider } from "../src/components/I18nProvider";
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), revoke: vi.fn() }));
 
@@ -19,7 +20,7 @@ describe("APITokenPanel", () => {
 
   it("creates a scoped token and presents its secret once", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-    render(<QueryClientProvider client={client}><APITokenPanel /></QueryClientProvider>);
+    render(<I18nProvider><QueryClientProvider client={client}><APITokenPanel /></QueryClientProvider></I18nProvider>);
 
     fireEvent.change(screen.getByLabelText("Token name"), { target: { value: "Build" } });
     fireEvent.click(screen.getByRole("button", { name: "Create token" }));

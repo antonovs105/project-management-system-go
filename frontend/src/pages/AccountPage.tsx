@@ -8,7 +8,7 @@ import { NotificationPreferencesPanel } from "../features/account/NotificationPr
 import { APITokenPanel } from "../features/account/APITokenPanel";
 import { PrivilegedAccountOnboarding } from "../features/account/PrivilegedAccountOnboarding";
 import { api, errorMessage } from "../lib/api";
-import { compactId, relativeDate } from "../lib/format";
+import { compactId } from "../lib/format";
 import { downloadJSON } from "../lib/download";
 import { useI18n } from "../lib/i18n-context";
 import { fieldLimits } from "../lib/limits";
@@ -19,7 +19,7 @@ export function AccountPage() {
 	const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const setSession = useAuthStore((state) => state.setSession);
-  const { t } = useI18n();
+  const { t, relativeDate } = useI18n();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -33,7 +33,7 @@ export function AccountPage() {
 	const beginMFA = useMutation({
 		mutationFn: api.beginMFA,
 		onSuccess: (setup) => { setMFASetup(setup); setRecoveryCodes([]); },
-		onError: (error) => toast.error(errorMessage(error, "Could not start MFA setup.")),
+		onError: (error) => toast.error(errorMessage(error, t("account.mfaStartFailed"))),
 	});
 	const confirmMFA = useMutation({
 		mutationFn: api.confirmMFA,
@@ -46,27 +46,27 @@ export function AccountPage() {
 			}
 			void queryClient.invalidateQueries({ queryKey: queryKeys.mfaStatus });
 		},
-		onError: (error) => toast.error(errorMessage(error, "Could not confirm MFA.")),
+		onError: (error) => toast.error(errorMessage(error, t("account.mfaConfirmFailed"))),
 	});
 	const disableMFA = useMutation({
 		mutationFn: api.disableMFA,
 		onSuccess: () => { setMFACode(""); void queryClient.invalidateQueries({ queryKey: queryKeys.mfaStatus }); },
-		onError: (error) => toast.error(errorMessage(error, "Could not disable MFA.")),
+		onError: (error) => toast.error(errorMessage(error, t("account.mfaDisableFailed"))),
 	});
 	const revokeSession = useMutation({
 		mutationFn: api.revokeSession,
 		onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.accountSessions }),
-		onError: (error) => toast.error(errorMessage(error, "Could not revoke that session.")),
+		onError: (error) => toast.error(errorMessage(error, t("account.sessionRevokeFailed"))),
 	});
 	const resendVerification = useMutation({
 		mutationFn: api.requestEmailVerification,
-		onSuccess: () => toast.success("A new verification email has been queued."),
-		onError: (error) => toast.error(errorMessage(error, "Could not queue verification email.")),
+		onSuccess: () => toast.success(t("account.verificationQueued")),
+		onError: (error) => toast.error(errorMessage(error, t("account.verificationQueueFailed"))),
 	});
 	const exportAccount = useMutation({
 		mutationFn: api.exportCurrentUser,
 		onSuccess: (bundle) => downloadJSON("progo-account-export.json", bundle),
-		onError: (error) => toast.error(errorMessage(error, "Could not export account data.")),
+		onError: (error) => toast.error(errorMessage(error, t("account.exportFailed"))),
 	});
 
   const changePassword = useMutation({
@@ -122,7 +122,7 @@ export function AccountPage() {
             <h1 className="text-xl font-semibold text-zinc-950">{t("account.title")}</h1>
             <p className="text-sm text-zinc-500">{user?.email || t("common.signedIn")}</p>
           </div>
-		  <Button className="ml-auto" onClick={() => exportAccount.mutate()} disabled={exportAccount.isPending}><Download size={16} />Export data</Button>
+		  <Button className="ml-auto" onClick={() => exportAccount.mutate()} disabled={exportAccount.isPending}><Download size={16} />{t("account.exportData")}</Button>
         </div>
         <div className="grid gap-3 text-sm">
           <div className="rounded-xl border border-zinc-200 p-3">
@@ -196,22 +196,22 @@ export function AccountPage() {
 		{user?.emailVerified === false ? (
 			<Panel className="p-5 xl:col-span-2">
 				<div className="flex flex-wrap items-center justify-between gap-3">
-					<div><h2 className="font-semibold text-zinc-950">Verify your email</h2><p className="text-sm text-zinc-500">Local accounts must verify email ownership before signing in again.</p></div>
-					<Button onClick={() => resendVerification.mutate()} disabled={resendVerification.isPending}>Resend verification</Button>
+					<div><h2 className="font-semibold text-zinc-950">{t("account.verifyEmail")}</h2><p className="text-sm text-zinc-500">{t("account.verifyEmailBody")}</p></div>
+					<Button onClick={() => resendVerification.mutate()} disabled={resendVerification.isPending}>{t("account.resendVerification")}</Button>
 				</div>
 			</Panel>
 		) : null}
 
 		<Panel className="p-5 xl:col-span-2">
-			<div className="mb-4 flex items-center gap-2"><Shield size={18} className="text-zinc-500" /><h2 className="font-semibold text-zinc-950">Multi-factor authentication</h2></div>
-			<p className="mb-4 text-sm text-zinc-500">TOTP is required before an account can be promoted to admin or owner. Recovery codes are single-use.</p>
-			{mfaSetup ? <div className="mb-4 grid gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-sm"><div><span className="font-medium">Secret:</span> <code className="break-all">{mfaSetup.secret}</code></div><div className="break-all text-xs text-zinc-500">{mfaSetup.uri}</div></div> : null}
-			{recoveryCodes.length > 0 ? <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3"><div className="text-sm font-semibold text-amber-950">Save these recovery codes now</div><div className="mt-2 grid grid-cols-2 gap-1 font-mono text-sm">{recoveryCodes.map((code) => <span key={code}>{code}</span>)}</div></div> : null}
+			<div className="mb-4 flex items-center gap-2"><Shield size={18} className="text-zinc-500" /><h2 className="font-semibold text-zinc-950">{t("account.mfaTitle")}</h2></div>
+			<p className="mb-4 text-sm text-zinc-500">{t("account.mfaBody")}</p>
+			{mfaSetup ? <div className="mb-4 grid gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-sm"><div><span className="font-medium">{t("account.mfaSecret")}</span> <code className="break-all">{mfaSetup.secret}</code></div><div className="break-all text-xs text-zinc-500">{mfaSetup.uri}</div></div> : null}
+			{recoveryCodes.length > 0 ? <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3"><div className="text-sm font-semibold text-amber-950">{t("account.mfaSaveCodes")}</div><div className="mt-2 grid grid-cols-2 gap-1 font-mono text-sm">{recoveryCodes.map((code) => <span key={code}>{code}</span>)}</div></div> : null}
 			<div className="flex flex-wrap items-end gap-3">
-				{!mfaStatus.data?.enabled && !mfaSetup ? <Button onClick={() => beginMFA.mutate()} disabled={beginMFA.isPending}>Start setup</Button> : null}
-				{mfaSetup || mfaStatus.data?.enabled ? <div className="min-w-64 flex-1"><TextField label={mfaStatus.data?.enabled ? "Authenticator or recovery code" : "Six-digit authenticator code"} value={mfaCode} onChange={(event) => setMFACode(event.target.value)} autoComplete="one-time-code" /></div> : null}
-				{mfaSetup ? <Button tone="primary" onClick={() => confirmMFA.mutate(mfaCode)} disabled={!mfaCode || confirmMFA.isPending}>Enable MFA</Button> : null}
-				{mfaStatus.data?.enabled ? <Button tone="danger" onClick={() => disableMFA.mutate(mfaCode)} disabled={!mfaCode || disableMFA.isPending}>Disable MFA</Button> : null}
+				{!mfaStatus.data?.enabled && !mfaSetup ? <Button onClick={() => beginMFA.mutate()} disabled={beginMFA.isPending}>{t("account.mfaStart")}</Button> : null}
+				{mfaSetup || mfaStatus.data?.enabled ? <div className="min-w-64 flex-1"><TextField label={mfaStatus.data?.enabled ? t("account.mfaRecoveryCode") : t("account.mfaAuthenticatorCode")} value={mfaCode} onChange={(event) => setMFACode(event.target.value)} autoComplete="one-time-code" /></div> : null}
+				{mfaSetup ? <Button tone="primary" onClick={() => confirmMFA.mutate(mfaCode)} disabled={!mfaCode || confirmMFA.isPending}>{t("account.mfaEnable")}</Button> : null}
+				{mfaStatus.data?.enabled ? <Button tone="danger" onClick={() => disableMFA.mutate(mfaCode)} disabled={!mfaCode || disableMFA.isPending}>{t("account.mfaDisable")}</Button> : null}
 			</div>
 		</Panel>
 
@@ -219,23 +219,23 @@ export function AccountPage() {
 	<APITokenPanel />
 
 		<Panel className="p-5 xl:col-span-2">
-			<div className="mb-4 flex items-center gap-2"><MonitorSmartphone size={18} className="text-zinc-500" /><h2 className="font-semibold text-zinc-950">Sessions and devices</h2></div>
-			{sessions.isError ? <ErrorState title="Could not load sessions" body={errorMessage(sessions.error, "Session request failed.")} /> : null}
+			<div className="mb-4 flex items-center gap-2"><MonitorSmartphone size={18} className="text-zinc-500" /><h2 className="font-semibold text-zinc-950">{t("account.sessionsTitle")}</h2></div>
+			{sessions.isError ? <ErrorState title={t("account.sessionsLoadFailed")} body={errorMessage(sessions.error, t("account.sessionsRequestFailed"))} /> : null}
 			<div className="grid gap-2">
 				{(sessions.data || []).map((session) => (
 					<div key={session.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-200 p-3">
-						<div className="min-w-0"><div className="truncate text-sm font-medium text-zinc-950">{session.user_agent || "Unknown client"}{session.current ? " (current)" : ""}</div><div className="text-xs text-zinc-500">{session.ip_address || "Unknown IP"} · Last seen {relativeDate(session.last_seen_at)}</div></div>
-						<Button tone="danger" onClick={() => revokeSession.mutate(session.id)} disabled={revokeSession.isPending}><Trash2 size={15} />Revoke</Button>
+\t\t\t\t\t\t<div className="min-w-0"><div className="truncate text-sm font-medium text-zinc-950">{session.user_agent || t("account.sessionUnknownClient")}{session.current ? ` (${t("account.sessionCurrent")})` : ""}</div><div className="text-xs text-zinc-500">{session.ip_address || t("account.sessionUnknownIP")} · {t("account.sessionLastSeen", { date: relativeDate(session.last_seen_at) })}</div></div>
+						<Button tone="danger" onClick={() => revokeSession.mutate(session.id)} disabled={revokeSession.isPending}><Trash2 size={15} />{t("account.sessionRevoke")}</Button>
 					</div>
 				))}
 			</div>
 		</Panel>
 
 		<Panel className="p-5 xl:col-span-2">
-			<div className="mb-4 flex items-center gap-2"><History size={18} className="text-zinc-500" /><h2 className="font-semibold text-zinc-950">Security activity</h2></div>
-			{securityEvents.isError ? <ErrorState title="Could not load security events" body={errorMessage(securityEvents.error, "Security event request failed.")} /> : null}
+			<div className="mb-4 flex items-center gap-2"><History size={18} className="text-zinc-500" /><h2 className="font-semibold text-zinc-950">{t("account.securityTitle")}</h2></div>
+			{securityEvents.isError ? <ErrorState title={t("account.securityLoadFailed")} body={errorMessage(securityEvents.error, t("account.securityRequestFailed"))} /> : null}
 			<div className="grid gap-2">
-				{(securityEvents.data || []).map((event) => <div key={event.id} className="rounded-xl border border-zinc-200 p-3 text-sm"><div className="font-medium text-zinc-950">{event.event_type.replaceAll(".", " ")}</div><div className="text-xs text-zinc-500">{event.ip_address || "Unknown IP"} · {relativeDate(event.created_at)}</div></div>)}
+\t\t\t\t{(securityEvents.data || []).map((event) => <div key={event.id} className="rounded-xl border border-zinc-200 p-3 text-sm"><div className="font-medium text-zinc-950">{event.event_type.replaceAll(".", " ")}</div><div className="text-xs text-zinc-500">{event.ip_address || t("account.sessionUnknownIP")} · {relativeDate(event.created_at)}</div></div>)}
 			</div>
 		</Panel>
     </div>

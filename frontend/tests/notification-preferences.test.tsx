@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NotificationPreferencesPanel } from "../src/features/account/NotificationPreferencesPanel";
+import { I18nProvider } from "../src/components/I18nProvider";
 import type { NotificationPreference } from "../src/types";
 
 const mocks = vi.hoisted(() => ({
@@ -31,9 +32,9 @@ describe("NotificationPreferencesPanel", () => {
   it("renders server preferences and persists channel changes", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
     render(
-      <QueryClientProvider client={client}>
+      <I18nProvider><QueryClientProvider client={client}>
         <NotificationPreferencesPanel />
-      </QueryClientProvider>,
+      </QueryClientProvider></I18nProvider>,
     );
 
     expect(await screen.findByText("Ticket assignments")).toBeInTheDocument();
