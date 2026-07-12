@@ -45,6 +45,37 @@ func (h *Handler) RegisterRoutes(api *echo.Group) {
 	api.GET("/me/notifications/events", h.StreamEvents)
 	api.PATCH("/me/notifications/:id/read", h.MarkRead)
 	api.POST("/me/notifications/read-all", h.MarkAllRead)
+	api.GET("/me/notification-preferences", h.ListPreferences)
+	api.PUT("/me/notification-preferences/:type", h.UpdatePreference)
+}
+
+// ListPreferences returns the complete notification delivery catalog.
+func (h *Handler) ListPreferences(c echo.Context) error {
+	values, err := h.service.ListPreferences(c.Request().Context(), currentUserID(c))
+	if err != nil {
+		return writeError(c, err)
+	}
+	return c.JSON(http.StatusOK, values)
+}
+
+// UpdatePreference stores one in-app/email preference override.
+func (h *Handler) UpdatePreference(c echo.Context) error {
+	var request struct {
+		InAppEnabled bool `json:"in_app_enabled"`
+		EmailEnabled bool `json:"email_enabled"`
+	}
+	if err := c.Bind(&request); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": ErrInvalidInput.Error()})
+	}
+	value, err := h.service.UpdatePreference(c.Request().Context(), currentUserID(c), Preference{
+		Type:         strings.TrimSpace(c.Param("type")),
+		InAppEnabled: request.InAppEnabled,
+		EmailEnabled: request.EmailEnabled,
+	})
+	if err != nil {
+		return writeError(c, err)
+	}
+	return c.JSON(http.StatusOK, value)
 }
 
 // List returns recent notifications for the current user.
