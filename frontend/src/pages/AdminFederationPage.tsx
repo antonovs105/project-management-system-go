@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { Button, EmptyState, ErrorState, LoadingState, Panel, SelectField, TextAreaField, TextField } from "../components/ui";
 import { api, errorMessage } from "../lib/api";
 import { deliveryFailureKinds, deliveryStates } from "../lib/constants";
-import { compactId, relativeDate } from "../lib/format";
+import { compactId } from "../lib/format";
+import { useI18n } from "../lib/i18n-context";
 import { queryKeys } from "../lib/queryKeys";
 import type { DeliveryFailureKind, DeliveryState, FederationDelivery, ID } from "../types";
 
@@ -34,6 +35,7 @@ function FederationDeliveryRow({
   onRetry: (deliveryId: ID) => void;
   retrying: boolean;
 }) {
+  const { t } = useI18n();
   return (
     <div className="grid gap-3 border-t border-zinc-100 px-4 py-3 xl:grid-cols-[1.1fr_1.1fr_0.8fr_auto] xl:items-center">
       <div className="min-w-0">
@@ -47,11 +49,11 @@ function FederationDeliveryRow({
       </div>
       <div className="min-w-0 text-sm text-zinc-600">
         <div className="truncate">{delivery.target_inbox_url}</div>
-        {delivery.project_id ? <div className="mt-1 text-xs text-zinc-500">project {compactId(delivery.project_id)}</div> : null}
+        {delivery.project_id ? <div className="mt-1 text-xs text-zinc-500">{t("admin.deliveryProject", { id: compactId(delivery.project_id) })}</div> : null}
       </div>
       <div className="text-sm text-zinc-600">
         <div>
-          {delivery.attempts}/{delivery.max_attempts} attempts
+          {t("admin.deliveryAttempts", { attempts: delivery.attempts, max: delivery.max_attempts })}
         </div>
         {delivery.last_failure_kind ? <div className="mt-1 text-xs text-zinc-500">{delivery.last_failure_kind}</div> : null}
         {delivery.last_error ? <div className="mt-1 line-clamp-2 text-xs text-red-700">{delivery.last_error}</div> : null}
@@ -62,7 +64,7 @@ function FederationDeliveryRow({
         </span>
         <Button onClick={() => onRetry(delivery.id)} disabled={!delivery.can_retry || retrying}>
           <RotateCcw size={15} />
-          Retry
+          {t("admin.retry")}
         </Button>
       </div>
     </div>
@@ -70,6 +72,7 @@ function FederationDeliveryRow({
 }
 
 function DomainBlocksPanel() {
+  const { t, relativeDate } = useI18n();
   const queryClient = useQueryClient();
   const [domain, setDomain] = useState("");
   const [reason, setReason] = useState("");
@@ -88,9 +91,9 @@ function DomainBlocksPanel() {
       ]);
       setDomain("");
       setReason("");
-      toast.success("Domain blocked");
+      toast.success(t("admin.domainBlocked"));
     },
-    onError: (error) => toast.error(errorMessage(error, "Could not block domain.")),
+    onError: (error) => toast.error(errorMessage(error, t("admin.domainBlockFailed"))),
   });
 
   const unblockDomain = useMutation({
@@ -100,9 +103,9 @@ function DomainBlocksPanel() {
         queryClient.invalidateQueries({ queryKey: queryKeys.federationDomainBlocks }),
         queryClient.invalidateQueries({ queryKey: queryKeys.adminAuditEvents() }),
       ]);
-      toast.success("Domain unblocked");
+      toast.success(t("admin.domainUnblocked"));
     },
-    onError: (error) => toast.error(errorMessage(error, "Could not unblock domain.")),
+    onError: (error) => toast.error(errorMessage(error, t("admin.domainUnblockFailed"))),
   });
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -115,26 +118,26 @@ function DomainBlocksPanel() {
       <div className="px-4 py-4">
         <h2 className="flex items-center gap-2 text-base font-semibold text-zinc-950">
           <Ban size={17} />
-          Domain Blocks
+          {t("admin.domainBlocks")}
         </h2>
       </div>
       <form className="grid gap-3 border-t border-zinc-100 p-4 md:grid-cols-[1fr_1.5fr_auto]" onSubmit={submit}>
-        <TextField label="Domain" value={domain} onChange={(event) => setDomain(event.target.value)} required />
-        <TextAreaField label="Reason" value={reason} onChange={(event) => setReason(event.target.value)} className="md:row-span-2" />
+        <TextField label={t("admin.domain")} value={domain} onChange={(event) => setDomain(event.target.value)} required />
+        <TextAreaField label={t("admin.reason")} value={reason} onChange={(event) => setReason(event.target.value)} className="md:row-span-2" />
         <Button type="submit" tone="primary" className="self-end" disabled={blockDomain.isPending || !domain.trim()}>
-          Block
+          {t("admin.block")}
         </Button>
       </form>
 
-      {blocks.isLoading ? <LoadingState label="Loading domain blocks" /> : null}
+      {blocks.isLoading ? <LoadingState label={t("admin.loadingDomainBlocks")} /> : null}
       {blocks.isError ? (
         <div className="border-t border-zinc-100 p-4">
-          <ErrorState title="Could not load domain blocks" body={errorMessage(blocks.error, "Domain block request failed.")} />
+          <ErrorState title={t("admin.domainBlocksLoadFailed")} body={errorMessage(blocks.error, t("admin.domainBlocksRequestFailed"))} />
         </div>
       ) : null}
       {blocks.data?.length === 0 ? (
         <div className="border-t border-zinc-100 p-4">
-          <EmptyState title="No domain blocks" body="No federation domains are blocked." />
+          <EmptyState title={t("admin.noDomainBlocks")} body={t("admin.noDomainBlocksBody")} />
         </div>
       ) : null}
       {blocks.data?.map((block) => (
@@ -143,10 +146,10 @@ function DomainBlocksPanel() {
             <div className="font-medium text-zinc-950">{block.domain}</div>
             <div className="mt-1 text-xs text-zinc-500">{relativeDate(block.created_at)}</div>
           </div>
-          <div className="min-w-0 text-sm text-zinc-600">{block.reason || "No reason"}</div>
+          <div className="min-w-0 text-sm text-zinc-600">{block.reason || t("admin.noReason")}</div>
           <Button tone="danger" onClick={() => unblockDomain.mutate(block.domain)} disabled={unblockDomain.isPending}>
             <Trash2 size={15} />
-            Unblock
+            {t("admin.unblock")}
           </Button>
         </div>
       ))}
@@ -155,6 +158,7 @@ function DomainBlocksPanel() {
 }
 
 function RemoteActorsPanel() {
+  const { t, relativeDate } = useI18n();
   const [fetchErrorsOnly, setFetchErrorsOnly] = useState(false);
   const actors = useQuery({
     queryKey: queryKeys.federationRemoteActors(fetchErrorsOnly ? "errors" : "all"),
@@ -166,33 +170,33 @@ function RemoteActorsPanel() {
       <div className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-end md:justify-between">
         <h2 className="flex items-center gap-2 text-base font-semibold text-zinc-950">
           <Globe2 size={17} />
-          Remote Actors
+          {t("admin.remoteActors")}
         </h2>
         <div className="flex gap-2">
           <SelectField
-            label="Fetch state"
+            label={t("admin.fetchState")}
             value={fetchErrorsOnly ? "errors" : ""}
             onChange={(event) => setFetchErrorsOnly(event.target.value === "errors")}
           >
-            <option value="">All actors</option>
-            <option value="errors">Fetch errors</option>
+            <option value="">{t("admin.allActors")}</option>
+            <option value="errors">{t("admin.fetchErrors")}</option>
           </SelectField>
           <Button onClick={() => actors.refetch()} disabled={actors.isFetching} className="self-end">
             <RefreshCw size={16} />
-            Refresh
+            {t("actions.refresh")}
           </Button>
         </div>
       </div>
 
-      {actors.isLoading ? <LoadingState label="Loading remote actors" /> : null}
+      {actors.isLoading ? <LoadingState label={t("admin.loadingActors")} /> : null}
       {actors.isError ? (
         <div className="border-t border-zinc-100 p-4">
-          <ErrorState title="Could not load remote actors" body={errorMessage(actors.error, "Remote actor request failed.")} />
+          <ErrorState title={t("admin.actorsLoadFailed")} body={errorMessage(actors.error, t("admin.actorsRequestFailed"))} />
         </div>
       ) : null}
       {actors.data?.length === 0 ? (
         <div className="border-t border-zinc-100 p-4">
-          <EmptyState title="No remote actors" body="No cached actors match the current filter." />
+          <EmptyState title={t("admin.noActors")} body={t("admin.noActorsBody")} />
         </div>
       ) : null}
       {actors.data?.map((actor) => (
@@ -206,7 +210,7 @@ function RemoteActorsPanel() {
             <div className="mt-1 truncate text-xs text-zinc-400">{actor.inbox_url}</div>
           </div>
           <div className="min-w-0 text-sm text-zinc-600">
-            {actor.fetch_error ? <div className="line-clamp-2 text-red-700">{actor.fetch_error}</div> : <div>Fetched</div>}
+            {actor.fetch_error ? <div className="line-clamp-2 text-red-700">{actor.fetch_error}</div> : <div>{t("admin.fetched")}</div>}
             <div className="mt-1 text-xs text-zinc-400">
               {actor.last_fetched_at ? relativeDate(actor.last_fetched_at) : relativeDate(actor.created_at)}
             </div>
@@ -218,6 +222,7 @@ function RemoteActorsPanel() {
 }
 
 function FederationDeliveriesPanel() {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [stateFilter, setStateFilter] = useState<DeliveryState | "">("");
   const [failureKind, setFailureKind] = useState<DeliveryFailureKind | "">("");
@@ -244,21 +249,21 @@ function FederationDeliveriesPanel() {
         queryClient.invalidateQueries({ queryKey: queryKeys.federationDeliverySummary }),
         queryClient.invalidateQueries({ queryKey: queryKeys.adminAuditEvents() }),
       ]);
-      toast.success("Delivery queued");
+      toast.success(t("admin.deliveryQueued"));
     },
-    onError: (error) => toast.error(errorMessage(error, "Could not retry federation delivery.")),
+    onError: (error) => toast.error(errorMessage(error, t("admin.deliveryRetryFailed"))),
   });
 
   const summaryItems = summary.data
     ? [
-        ["Total", summary.data.total],
-        ["Pending", summary.data.pending],
-        ["Failed", summary.data.failed],
-        ["Dead", summary.data.dead],
-        ["Retryable", summary.data.retryable],
-        ["Due retry", summary.data.due_retry],
-        ["HTTP", summary.data.http_failures],
-        ["Network", summary.data.network_failures],
+        [t("admin.total"), summary.data.total],
+        [t("admin.pending"), summary.data.pending],
+        [t("admin.failed"), summary.data.failed],
+        [t("admin.dead"), summary.data.dead],
+        [t("admin.retryable"), summary.data.retryable],
+        [t("admin.dueRetry"), summary.data.due_retry],
+        [t("admin.http"), summary.data.http_failures],
+        [t("admin.network"), summary.data.network_failures],
       ]
     : [];
 
@@ -267,18 +272,18 @@ function FederationDeliveriesPanel() {
       <div className="px-4 py-4">
         <h2 className="flex items-center gap-2 text-base font-semibold text-zinc-950">
           <RadioTower size={17} />
-          Deliveries
+          {t("admin.deliveries")}
         </h2>
       </div>
 
       {summary.isError ? (
         <div className="border-t border-zinc-100 p-4">
-          <ErrorState title="Could not load delivery summary" body={errorMessage(summary.error, "Summary request failed.")} />
+          <ErrorState title={t("admin.deliverySummaryFailed")} body={errorMessage(summary.error, t("admin.summaryRequestFailed"))} />
         </div>
       ) : null}
 
       <div className="grid gap-3 border-t border-zinc-100 p-4 sm:grid-cols-2 xl:grid-cols-4">
-        {summary.isLoading ? <LoadingState label="Loading delivery summary" /> : null}
+        {summary.isLoading ? <LoadingState label={t("admin.loadingDeliverySummary")} /> : null}
         {summaryItems.map(([label, value]) => (
           <div key={label} className="rounded-xl border border-zinc-200 p-3">
             <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">{label}</div>
@@ -289,8 +294,8 @@ function FederationDeliveriesPanel() {
 
       <div className="flex flex-col gap-3 border-t border-zinc-100 p-4 md:flex-row md:items-end md:justify-between">
         <div className="grid gap-3 sm:grid-cols-2">
-          <SelectField label="State" value={stateFilter} onChange={(event) => setStateFilter(event.target.value as DeliveryState | "")}>
-            <option value="">All states</option>
+          <SelectField label={t("admin.state")} value={stateFilter} onChange={(event) => setStateFilter(event.target.value as DeliveryState | "")}>
+            <option value="">{t("admin.allStates")}</option>
             {deliveryStates.map((state) => (
               <option key={state.id} value={state.id}>
                 {state.label}
@@ -298,11 +303,11 @@ function FederationDeliveriesPanel() {
             ))}
           </SelectField>
           <SelectField
-            label="Failure"
+            label={t("admin.failure")}
             value={failureKind}
             onChange={(event) => setFailureKind(event.target.value as DeliveryFailureKind | "")}
           >
-            <option value="">All failures</option>
+            <option value="">{t("admin.allFailures")}</option>
             {deliveryFailureKinds.map((kind) => (
               <option key={kind.id} value={kind.id}>
                 {kind.label}
@@ -312,19 +317,19 @@ function FederationDeliveriesPanel() {
         </div>
         <Button onClick={() => deliveries.refetch()} disabled={deliveries.isFetching}>
           <RefreshCw size={16} />
-          Refresh
+          {t("actions.refresh")}
         </Button>
       </div>
 
-      {deliveries.isLoading ? <LoadingState label="Loading deliveries" /> : null}
+      {deliveries.isLoading ? <LoadingState label={t("admin.loadingDeliveries")} /> : null}
       {deliveries.isError ? (
         <div className="border-t border-zinc-100 p-4">
-          <ErrorState title="Could not load deliveries" body={errorMessage(deliveries.error, "Delivery request failed.")} />
+          <ErrorState title={t("admin.deliveriesLoadFailed")} body={errorMessage(deliveries.error, t("admin.deliveryRequestFailed"))} />
         </div>
       ) : null}
       {deliveries.data?.length === 0 ? (
         <div className="border-t border-zinc-100 p-4">
-          <EmptyState title="No deliveries" body="No deliveries match the current filters." />
+          <EmptyState title={t("admin.noDeliveries")} body={t("admin.noDeliveriesBody")} />
         </div>
       ) : null}
       {deliveries.data?.map((delivery) => (
@@ -340,14 +345,15 @@ function FederationDeliveriesPanel() {
 }
 
 export function AdminFederationPage() {
+  const { t } = useI18n();
   return (
     <div className="space-y-5">
       <Panel className="p-5">
         <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-medium text-zinc-500">
           <RadioTower size={14} />
-          Federation
+          {t("admin.federationBadge")}
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">Federation Operations</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">{t("admin.federationTitle")}</h1>
       </Panel>
 
       <div className="grid gap-5 2xl:grid-cols-[0.9fr_1.1fr]">

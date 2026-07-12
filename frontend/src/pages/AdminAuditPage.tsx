@@ -6,7 +6,8 @@ import { Button, EmptyState, ErrorState, LoadingState, Panel, SelectField, TextF
 import { OffsetPaginationControls } from "../components/OffsetPaginationControls";
 import { api, errorMessage } from "../lib/api";
 import { adminAuditActions, adminAuditTargetTypes } from "../lib/constants";
-import { compactId, relativeDate } from "../lib/format";
+import { compactId } from "../lib/format";
+import { useI18n } from "../lib/i18n-context";
 import { queryKeys } from "../lib/queryKeys";
 import type { AdminAuditAction, AdminAuditTargetType } from "../types";
 
@@ -21,6 +22,7 @@ function metadataPreview(metadata: Record<string, unknown>): string {
 }
 
 export function AdminAuditPage() {
+  const { t, relativeDate } = useI18n();
   const [actionInput, setActionInput] = useState<AdminAuditAction | "">("");
   const [targetTypeInput, setTargetTypeInput] = useState<AdminAuditTargetType | "">("");
   const [actorInput, setActorInput] = useState("");
@@ -54,13 +56,13 @@ export function AdminAuditPage() {
           <div>
             <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-medium text-zinc-500">
               <ScrollText size={14} />
-              Instance audit
+              {t("admin.auditBadge")}
             </div>
-            <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">Audit Events</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">{t("admin.auditTitle")}</h1>
           </div>
           <form className="grid gap-3 md:grid-cols-[190px_190px_1fr_auto_auto]" onSubmit={submitFilters}>
-            <SelectField label="Action" value={actionInput} onChange={(event) => setActionInput(event.target.value as AdminAuditAction | "")}>
-              <option value="">All actions</option>
+            <SelectField label={t("admin.action")} value={actionInput} onChange={(event) => setActionInput(event.target.value as AdminAuditAction | "")}>
+              <option value="">{t("admin.allActions")}</option>
               {adminAuditActions.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.label}
@@ -68,35 +70,35 @@ export function AdminAuditPage() {
               ))}
             </SelectField>
             <SelectField
-              label="Target"
+              label={t("admin.target")}
               value={targetTypeInput}
               onChange={(event) => setTargetTypeInput(event.target.value as AdminAuditTargetType | "")}
             >
-              <option value="">All targets</option>
+              <option value="">{t("admin.allTargets")}</option>
               {adminAuditTargetTypes.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.label}
                 </option>
               ))}
             </SelectField>
-            <TextField label="Actor user ID" value={actorInput} onChange={(event) => setActorInput(event.target.value)} />
+            <TextField label={t("admin.actorUserId")} value={actorInput} onChange={(event) => setActorInput(event.target.value)} />
             <Button type="submit" tone="primary" className="self-end">
               <Search size={16} />
-              Filter
+              {t("admin.applyFilter")}
             </Button>
             <Button onClick={() => events.refetch()} disabled={events.isFetching} className="self-end">
               <RefreshCw size={16} />
-              Refresh
+              {t("actions.refresh")}
             </Button>
           </form>
         </div>
       </Panel>
 
-      {events.isLoading ? <LoadingState label="Loading audit events" /> : null}
+      {events.isLoading ? <LoadingState label={t("admin.loadingAudit")} /> : null}
       {events.isError ? (
-        <ErrorState title="Could not load audit events" body={errorMessage(events.error, "Audit event request failed.")} />
+        <ErrorState title={t("admin.auditLoadFailed")} body={errorMessage(events.error, t("admin.auditRequestFailed"))} />
       ) : null}
-      {events.data?.items.length === 0 ? <EmptyState title="No audit events" body="No audit events match the current filters." /> : null}
+      {events.data?.items.length === 0 ? <EmptyState title={t("admin.noAudit")} body={t("admin.noAuditBody")} /> : null}
 
       {events.data && events.data.items.length > 0 ? (
         <Panel className="overflow-hidden">
@@ -111,7 +113,7 @@ export function AdminAuditPage() {
               <div className="min-w-0 text-sm text-zinc-600">
                 <div>{event.target_type}</div>
                 <div className="mt-1 truncate text-xs text-zinc-500">{event.target_id}</div>
-                {event.actor_user_id ? <div className="mt-1 truncate text-xs text-zinc-400">actor {event.actor_user_id}</div> : null}
+                {event.actor_user_id ? <div className="mt-1 truncate text-xs text-zinc-400">{t("admin.actor")} {event.actor_user_id}</div> : null}
               </div>
               <code className="block min-w-0 whitespace-pre-wrap rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700">
                 {metadataPreview(event.metadata)}
