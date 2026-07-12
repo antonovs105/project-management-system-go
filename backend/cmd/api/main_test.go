@@ -2,7 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -28,10 +32,17 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/project"
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
 	"github.com/antonovs105/project-management-system-go/internal/user"
+	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
+
+type failingReadinessDriver struct{}
+
+func (failingReadinessDriver) Open(string) (driver.Conn, error) {
+	return nil, errors.New("database unavailable")
+}
 
 func TestValidateRuntimeConfigAllowsDevelopmentLocalhost(t *testing.T) {
 	err := validateRuntimeConfig(false, "your_secret_key_here", "http://localhost:8080", "localhost:8080", "", "")
@@ -50,6 +61,34 @@ func TestHealthCheckIsIndependentOfExternalDependencies(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.JSONEq(t, `{"status":"ok","system":"alive"}`, rec.Body.String())
+}
+
+func TestReadinessCheckFailsClosedWhenDatabaseIsUnavailable(t *testing.T) {
+	const driverName = "progo-readiness-failure"
+	sql.Register(driverName, failingReadinessDriver{})
+	db := sqlx.NewDb(sql.OpenDB(failingReadinessDriverConnector{}), driverName)
+	defer db.Close()
+
+	server := &ApiServer{db: db}
+	e := echo.New()
+	e.GET("/ready", server.readinessCheck)
+
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.JSONEq(t, `{"status":"not_ready","checks":{"database":"error","redis":"disabled"}}`, rec.Body.String())
+}
+
+type failingReadinessDriverConnector struct{}
+
+func (failingReadinessDriverConnector) Connect(context.Context) (driver.Conn, error) {
+	return nil, errors.New("database unavailable")
+}
+
+func (failingReadinessDriverConnector) Driver() driver.Driver {
+	return failingReadinessDriver{}
 }
 
 func TestAuthAccountRateLimitIdentifierHashesNormalizedEmailAndPreservesBody(t *testing.T) {

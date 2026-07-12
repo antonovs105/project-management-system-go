@@ -60,7 +60,52 @@ jobs:
         working-directory: backend
         env:
           TEST_DB_SOURCE: postgres://postgres:postgres@localhost:5432/pms_test?sslmode=disable
-        run: go test -tags=integration -count=1 ./internal/integration
+        run: go test -tags=integration -count=1 -covermode=atomic -coverpkg ./... -coverprofile=integration-coverage.out ./internal/integration
+
+      - name: Enforce risk-based merged coverage floors
+        working-directory: backend
+        env:
+          COVERAGE_PROFILES: coverage.out,integration-coverage.out
+        run: go test -count=1 ./internal/coveragegate
+
+      - name: Upload backend coverage evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: backend-coverage
+          path: |
+            backend/coverage.out
+            backend/integration-coverage.out
+          if-no-files-found: error
+
+  fuzz-smoke:
+    name: Fuzz smoke (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: ./internal/activitypub/httpsig
+            target: FuzzSignatureHeaderParsers
+          - package: ./internal/activitypub/remoteinbox
+            target: FuzzParseActivity
+          - package: ./internal/activitypub/netguard
+            target: FuzzValidateRemoteURL
+          - package: ./internal/githubintegration
+            target: FuzzNormalizeRepositoryInput
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: 1.26.5
+          cache-dependency-path: backend/go.sum
+
+      - name: Fuzz untrusted input boundary
+        working-directory: backend
+        run: go test ${{ matrix.package }} -run '^$' -fuzz '^${{ matrix.target }}$' -fuzztime 15s
 
   frontend:
     name: Frontend

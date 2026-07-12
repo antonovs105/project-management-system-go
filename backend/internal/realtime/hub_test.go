@@ -1,8 +1,11 @@
 package realtime
 
 import (
+	"context"
 	"fmt"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -48,5 +51,46 @@ func TestRedisHubSuppressesLocalEchoesWithoutClient(t *testing.T) {
 	case duplicate := <-values:
 		require.Failf(t, "unexpected duplicate", "%#v", duplicate)
 	default:
+	}
+}
+
+func TestLocalHubSustainsBoundedConcurrentFanout(t *testing.T) {
+	const subscriberCount = 64
+	const publisherCount = 16
+	const valuesPerPublisher = 500
+
+	hub := NewLocalHub(testConfig())
+	unsubscribes := make([]func(), 0, subscriberCount)
+	for index := 0; index < subscriberCount; index++ {
+		_, unsubscribe := hub.Subscribe("project-1")
+		unsubscribes = append(unsubscribes, unsubscribe)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		var publishers sync.WaitGroup
+		publishers.Add(publisherCount)
+		for publisher := 0; publisher < publisherCount; publisher++ {
+			go func(publisher int) {
+				defer publishers.Done()
+				for index := 0; index < valuesPerPublisher; index++ {
+					hub.Publish(testEvent{ID: fmt.Sprintf("%d-%d", publisher, index), Key: "project-1"})
+				}
+			}(publisher)
+		}
+		publishers.Wait()
+		close(done)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("bounded fanout blocked under concurrent publication")
+	}
+	for _, unsubscribe := range unsubscribes {
+		unsubscribe()
+		unsubscribe()
 	}
 }
