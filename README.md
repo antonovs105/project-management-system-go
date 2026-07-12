@@ -89,6 +89,30 @@ printf 'change-this-password\n' | ./deploy/pmsctl.sh owner create --username own
 
 This can be run only while no owner account exists.
 
+### Backup and restore
+
+Every blue-green deployment now calls `deploy/backup.sh` before migrations. A backup is committed atomically only after PostgreSQL `pg_restore --list` and attachment archive validation succeed. Each bundle contains a custom-format database dump, the attachment volume, metadata, and SHA-256 checksums. Local bundles default to 14-day retention.
+
+For production, set `BACKUP_AGE_RECIPIENT` to an age recipient and `BACKUP_OFFSITE_DIR` to a separately mounted remote filesystem. The backup is encrypted before it is copied off-host. Install the `age` command when encryption is enabled.
+
+Create an on-demand backup:
+
+```bash
+cd /opt/progo/app
+./deploy/backup.sh
+```
+
+Restore requires explicit instance-name confirmation, verifies checksums and archive readability, creates a pre-restore safety backup by default, stops both application slots, restores PostgreSQL and attachments, reapplies migrations, and starts the previously active slot:
+
+```bash
+cd /opt/progo/app
+RESTORE_CONFIRM="$(awk -F= '$1 == "INSTANCE_NAME" {print $2}' .env)" \
+BACKUP_AGE_IDENTITY=/secure/path/age-key.txt \
+./deploy/restore-backup.sh /opt/progo/app/backups/<bundle>
+```
+
+Keep the age identity outside the application directory and backup destination. A copied backup is not considered operationally proven until a scheduled restore drill has completed in isolated infrastructure.
+
 Optional installer overrides:
 
 ```bash

@@ -197,23 +197,17 @@ backup_database() {
     return
   fi
 
-  mkdir -p "$BACKUP_DIR"
-  chmod 700 "$BACKUP_DIR" >/dev/null 2>&1 || true
-  timestamp=$(date -u +%Y%m%dT%H%M%SZ)
-  target="$BACKUP_DIR/$INSTANCE_NAME-$timestamp.sql"
-  tmp="$target.tmp"
-
-  echo "creating database backup: $target"
-  umask 077
-  if compose exec -T db pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" > "$tmp"; then
-    mv "$tmp" "$target"
-    echo "database backup complete: $target"
-    return
+  attachment_service="backend-$inactive"
+  if [ "$active" = "blue" ] || [ "$active" = "green" ]; then
+    attachment_service="backend-$active"
   fi
-
-  rm -f "$tmp"
-  echo "database backup failed; aborting before migrations" >&2
-  exit 1
+  echo "creating verified database and attachment backup"
+  APP_DIR="$APP_DIR" \
+  ENV_FILE="$ENV_FILE" \
+  COMPOSE_FILE="$COMPOSE_FILE" \
+  BACKUP_DIR="$BACKUP_DIR" \
+  BACKUP_ATTACHMENT_SERVICE="$attachment_service" \
+  "$APP_DIR/deploy/backup.sh"
 }
 
 write_caddyfile() {
