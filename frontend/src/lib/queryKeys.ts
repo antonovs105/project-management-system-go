@@ -30,6 +30,7 @@ export const queryKeys = {
   remoteTickets: (projectId: ID) => ["remoteTickets", projectId] as const,
   remoteTicket: (projectId: ID, ticketId: ID) => ["remoteTicket", projectId, ticketId] as const,
   notifications: ["notifications"] as const,
+  notificationPreferences: ["notificationPreferences"] as const,
   projectDeliveries: (projectId: ID, state?: string) => ["projectDeliveries", projectId, state || "all"] as const,
   projectDeliverySummary: (projectId: ID) => ["projectDeliverySummary", projectId] as const,
   personalFederationInbox: ["personalFederationInbox"] as const,

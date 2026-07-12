@@ -281,7 +281,17 @@ export interface TicketEvent {
   occurred_at: string;
 }
 
-export type NotificationType = "ticket.assigned";
+export type NotificationType =
+  | "ticket.assigned"
+  | "ticket.status_changed"
+  | "ticket.due_soon"
+  | "ticket.overdue"
+  | "comment.created"
+  | "comment.mentioned"
+  | "project.invited"
+  | "project.role_changed"
+  | "federation.delivery_failed"
+  | "security.event";
 
 export interface Notification {
   id: ID;
@@ -294,6 +304,13 @@ export interface Notification {
   body: string;
   read_at?: string;
   created_at: string;
+}
+
+export interface NotificationPreference {
+  type: NotificationType;
+  in_app_enabled: boolean;
+  email_enabled: boolean;
+  updated_at?: string;
 }
 
 export interface Comment {

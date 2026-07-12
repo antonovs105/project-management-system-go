@@ -27,6 +27,7 @@ import type {
   InstanceRole,
   Label,
   Notification,
+  NotificationPreference,
   OAuthProvider,
 	Project,
 	ProjectActivityEvent,
@@ -756,6 +757,19 @@ export const api = {
 
   async markAllNotificationsRead(): Promise<void> {
     await http.post(`${apiPrefix}/me/notifications/read-all`);
+  },
+
+  async listNotificationPreferences(): Promise<NotificationPreference[]> {
+    const { data } = await http.get<NotificationPreference[] | null>(`${apiPrefix}/me/notification-preferences`);
+    return asArray(data);
+  },
+
+  async updateNotificationPreference(preference: NotificationPreference): Promise<NotificationPreference> {
+    const { data } = await http.put<NotificationPreference>(
+      `${apiPrefix}/me/notification-preferences/${preference.type}`,
+      { in_app_enabled: preference.in_app_enabled, email_enabled: preference.email_enabled },
+    );
+    return data;
   },
 
   async addTicketLink(ticketId: ID, payload: AddTicketLinkPayload): Promise<void> {
