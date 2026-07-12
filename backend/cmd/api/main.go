@@ -31,6 +31,7 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteinbox"
 	"github.com/antonovs105/project-management-system-go/internal/adminaudit"
 	"github.com/antonovs105/project-management-system-go/internal/apiresponse"
+	"github.com/antonovs105/project-management-system-go/internal/attachment"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
 	appconfig "github.com/antonovs105/project-management-system-go/internal/config"
 	"github.com/antonovs105/project-management-system-go/internal/githubintegration"
@@ -61,9 +62,9 @@ const (
 	// gracefulShutdownTimeout bounds HTTP and worker shutdown on container stop.
 	gracefulShutdownTimeout = 10 * time.Second
 	// defaultRequestBodyLimit is the maximum HTTP body size accepted by generic routes.
-	defaultRequestBodyLimit = "2M"
+	defaultRequestBodyLimit = "12M"
 	// defaultRequestBodyLimitBytes mirrors defaultRequestBodyLimit for tests and comments.
-	defaultRequestBodyLimitBytes = 2 << 20
+	defaultRequestBodyLimitBytes = 12 << 20
 	// authRateLimitPerSecond limits public credential and registration attempts per IP.
 	authRateLimitPerSecond = 2
 	// authRateLimitBurst allows small legitimate login or setup bursts.
@@ -123,6 +124,7 @@ var requiredDatabaseTables = []string{
 	"project_labels",
 	"ticket_labels",
 	"project_activity_events",
+	"ticket_attachments",
 	"ticket_assignees",
 	"comments",
 	"ap_objects",
@@ -150,6 +152,7 @@ type ApiServer struct {
 	userHandler         *user.Handler
 	accountHandler      *account.Handler
 	activityHandler     *activityhistory.Handler
+	attachmentHandler   *attachment.Handler
 	instanceHandler     *instance.Handler
 	projectHandler      *project.Handler
 	labelHandler        *label.Handler
@@ -490,6 +493,22 @@ func main() {
 	projectRepo := project.NewRepository(db, apConfig, privateKeyCodec)
 	projectService := project.NewService(projectRepo, apConfig)
 	activityHandler := activityhistory.NewHandler(activityhistory.NewService(activityhistory.NewRepository(db), projectRepo))
+	var attachmentHandler *attachment.Handler
+	var attachmentService *attachment.Service
+	if cfg.Attachments.Enabled {
+		attachmentStore, err := attachment.NewLocalStore(cfg.Attachments.StoragePath)
+		if err != nil {
+			log.Fatal(err)
+		}
+		var attachmentScanner attachment.MalwareScanner
+		if cfg.Attachments.ClamAVAddr != "" {
+			attachmentScanner = attachment.NewClamAVScanner(cfg.Attachments.ClamAVAddr)
+		}
+		attachmentService = attachment.NewService(attachment.NewRepository(db), attachmentStore, projectRepo, attachmentScanner)
+		if role.runsAPI() {
+			attachmentHandler = attachment.NewHandler(attachmentService)
+		}
+	}
 	projectHandler := project.NewHandler(
 		projectService,
 		project.WithInstanceRoleProvider(userService),
@@ -625,6 +644,16 @@ func main() {
 	if role.runsWorker() {
 		stopEmailDispatcher := accountService.StartEmailDispatcher(context.Background(), 5*time.Second)
 		defer stopEmailDispatcher()
+		if attachmentService != nil {
+			stopAttachmentCleanup := attachmentService.StartOrphanCleanupLoop(context.Background(), time.Hour, time.Hour, func(deleted int, err error) {
+				if err != nil {
+					log.Printf("Attachment orphan cleanup failed: %v", err)
+				} else if deleted > 0 {
+					log.Printf("Attachment orphan cleanup removed %d objects", deleted)
+				}
+			})
+			defer stopAttachmentCleanup()
+		}
 	}
 
 	server := &ApiServer{
@@ -635,6 +664,7 @@ func main() {
 		userHandler:         userHandler,
 		accountHandler:      accountHandler,
 		activityHandler:     activityHandler,
+		attachmentHandler:   attachmentHandler,
 		instanceHandler:     instanceHandler,
 		projectHandler:      projectHandler,
 		labelHandler:        labelHandler,
@@ -995,6 +1025,9 @@ func registerAuthenticatedAPIRoutes(api *echo.Group, server *ApiServer, jwtSecre
 	}
 	server.labelHandler.RegisterRoutes(api)
 	server.ticketHandler.RegisterRoutes(api)
+	if server.attachmentHandler != nil {
+		server.attachmentHandler.RegisterRoutes(api)
+	}
 	server.commentHandler.RegisterRoutes(api)
 	server.notificationHandler.RegisterRoutes(api)
 	server.githubHandler.RegisterRoutes(api)

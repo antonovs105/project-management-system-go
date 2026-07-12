@@ -52,6 +52,7 @@ type Config struct {
 	Federation   FederationConfig   `yaml:"federation"`
 	OAuth        OAuthConfig        `yaml:"oauth"`
 	Email        EmailConfig        `yaml:"email"`
+	Attachments  AttachmentsConfig  `yaml:"attachments"`
 	GitHub       GitHubConfig       `yaml:"github"`
 }
 
@@ -158,6 +159,13 @@ type EmailConfig struct {
 	ImplicitTLS bool   `yaml:"implicit_tls"`
 }
 
+// AttachmentsConfig controls external object storage and malware scanning.
+type AttachmentsConfig struct {
+	Enabled     bool   `yaml:"enabled"`
+	StoragePath string `yaml:"storage_path"`
+	ClamAVAddr  string `yaml:"clamav_addr"`
+}
+
 // GitHubConfig controls optional GitHub repository integration.
 type GitHubConfig struct {
 	APIToken      string `yaml:"api_token"`
@@ -173,7 +181,7 @@ func Default() Config {
 		},
 		Server: ServerConfig{
 			HTTPAddr:         ":8080",
-			RequestBodyLimit: "2M",
+			RequestBodyLimit: "12M",
 		},
 		Database: DatabaseConfig{
 			MaxOpenConnections:     25,
@@ -198,7 +206,8 @@ func Default() Config {
 		OAuth: OAuthConfig{
 			FrontendCallbackURL: "http://localhost:5173/oauth/callback",
 		},
-		Email: EmailConfig{Port: 587, FromName: "Progo"},
+		Email:       EmailConfig{Port: 587, FromName: "Progo"},
+		Attachments: AttachmentsConfig{StoragePath: ".data/attachments"},
 	}
 }
 
@@ -287,6 +296,8 @@ func Normalize(cfg *Config) {
 	cfg.Email.Password = strings.TrimSpace(cfg.Email.Password)
 	cfg.Email.FromAddress = strings.TrimSpace(cfg.Email.FromAddress)
 	cfg.Email.FromName = strings.TrimSpace(cfg.Email.FromName)
+	cfg.Attachments.StoragePath = strings.TrimSpace(cfg.Attachments.StoragePath)
+	cfg.Attachments.ClamAVAddr = strings.TrimSpace(cfg.Attachments.ClamAVAddr)
 	cfg.GitHub.APIToken = strings.TrimSpace(cfg.GitHub.APIToken)
 	cfg.GitHub.WebhookSecret = strings.TrimSpace(cfg.GitHub.WebhookSecret)
 	cfg.Server.CORSAllowedOrigins = trimList(cfg.Server.CORSAllowedOrigins)
@@ -316,6 +327,9 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.Security.JWTSecretKey) == "" {
 		return fmt.Errorf("security.jwt_secret_key is required")
+	}
+	if c.Attachments.Enabled && c.Attachments.StoragePath == "" {
+		return fmt.Errorf("attachments.storage_path is required when attachments are enabled")
 	}
 	if strings.TrimSpace(c.Instance.PublicBaseURL) == "" {
 		return fmt.Errorf("instance.public_base_url is required")
@@ -373,6 +387,9 @@ func (c Config) Validate() error {
 		}
 		if c.Registration.Enabled && (c.Email.Host == "" || c.Email.Port < 1 || c.Email.FromAddress == "") {
 			return fmt.Errorf("transactional email SMTP configuration is required when registration is enabled in production")
+		}
+		if c.Attachments.Enabled && c.Attachments.ClamAVAddr == "" {
+			return fmt.Errorf("attachments.clamav_addr is required when attachments are enabled in production")
 		}
 	}
 
@@ -441,6 +458,11 @@ func applyEnv(cfg *Config) error {
 	if err := applyBoolValueEnv(&cfg.Email.ImplicitTLS, "SMTP_IMPLICIT_TLS"); err != nil {
 		return err
 	}
+	if err := applyBoolValueEnv(&cfg.Attachments.Enabled, "ATTACHMENTS_ENABLED"); err != nil {
+		return err
+	}
+	applyStringEnv(&cfg.Attachments.StoragePath, "ATTACHMENTS_STORAGE_PATH")
+	applyStringEnv(&cfg.Attachments.ClamAVAddr, "CLAMAV_ADDR")
 	applyStringEnv(&cfg.GitHub.APIToken, "GITHUB_API_TOKEN")
 	applyStringEnv(&cfg.GitHub.WebhookSecret, "GITHUB_WEBHOOK_SECRET")
 	applyStringEnv(&cfg.Projects.CreationPolicy, "PROJECT_CREATION_POLICY")

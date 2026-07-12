@@ -35,6 +35,7 @@ type PublicResponse struct {
 	RegistrationEnabled   bool     `json:"registration_enabled"`
 	ProjectCreationPolicy string   `json:"project_creation_policy"`
 	OAuthProviders        []string `json:"oauth_providers"`
+	AttachmentsEnabled    bool     `json:"attachments_enabled"`
 }
 
 // CapabilitiesResponse contains safe metadata plus current-user capabilities.
@@ -104,5 +105,6 @@ func (h *Handler) publicResponse() PublicResponse {
 		RegistrationEnabled:   h.cfg.Registration.Enabled,
 		ProjectCreationPolicy: h.cfg.Projects.CreationPolicy,
 		OAuthProviders:        h.oauth.EnabledOAuthProviders(),
+		AttachmentsEnabled:    h.cfg.Attachments.Enabled,
 	}
 }
