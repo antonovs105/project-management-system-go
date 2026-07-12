@@ -6,13 +6,18 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/antonovs105/project-management-system-go/internal/account"
+	"github.com/antonovs105/project-management-system-go/internal/activityhistory"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
 	apfederation "github.com/antonovs105/project-management-system-go/internal/activitypub/federation"
 	apmoderation "github.com/antonovs105/project-management-system-go/internal/activitypub/moderation"
 	"github.com/antonovs105/project-management-system-go/internal/adminaudit"
+	"github.com/antonovs105/project-management-system-go/internal/attachment"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
 	appconfig "github.com/antonovs105/project-management-system-go/internal/config"
 	"github.com/antonovs105/project-management-system-go/internal/githubintegration"
@@ -25,6 +30,7 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/user"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func TestValidateRuntimeConfigAllowsDevelopmentLocalhost(t *testing.T) {
@@ -231,6 +237,9 @@ func TestAuthenticatedAPIRoutesUseVersionedPrefixOnly(t *testing.T) {
 	e := echo.New()
 	server := &ApiServer{
 		userHandler:         user.NewHandler(nil),
+		accountHandler:      account.NewHandler(nil),
+		activityHandler:     activityhistory.NewHandler(nil),
+		attachmentHandler:   attachment.NewHandler(nil),
 		instanceHandler:     instance.NewHandler(appconfig.Config{}, nil, nil),
 		projectHandler:      project.NewHandler(nil),
 		labelHandler:        label.NewHandler(nil),
@@ -256,6 +265,69 @@ func TestAuthenticatedAPIRoutesUseVersionedPrefixOnly(t *testing.T) {
 	require.Contains(t, paths, "/api/v1/projects")
 	require.Contains(t, paths, "/api/v1/me/password")
 	require.NotContains(t, paths, "/api/projects")
+}
+
+func TestAuthenticatedRuntimeRoutesExistInOpenAPI(t *testing.T) {
+	e := echo.New()
+	server := &ApiServer{
+		userHandler:         user.NewHandler(nil),
+		accountHandler:      account.NewHandler(nil),
+		activityHandler:     activityhistory.NewHandler(nil),
+		attachmentHandler:   attachment.NewHandler(nil),
+		instanceHandler:     instance.NewHandler(appconfig.Config{}, nil, nil),
+		projectHandler:      project.NewHandler(nil),
+		labelHandler:        label.NewHandler(nil),
+		ticketHandler:       ticket.NewHandler(nil),
+		commentHandler:      comment.NewHandler(nil),
+		notificationHandler: notification.NewHandler(nil),
+		githubHandler:       githubintegration.NewHandler(nil),
+		federationHandler:   apfederation.NewHandler(nil),
+		moderationHandler:   apmoderation.NewHandler(nil),
+		deliveryHandler:     delivery.NewHandler(nil),
+		auditHandler:        adminaudit.NewHandler(nil),
+	}
+	registerAuthenticatedAPIRoutes(e.Group("/api/v1"), server, []byte("test-secret"), nil)
+
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "openapi.yaml"))
+	require.NoError(t, err)
+	var document struct {
+		Paths map[string]map[string]any `yaml:"paths"`
+	}
+	require.NoError(t, yaml.Unmarshal(raw, &document))
+	documented := make(map[string]struct{})
+	for path, operations := range document.Paths {
+		for method := range operations {
+			if isHTTPMethod(method) {
+				documented[strings.ToUpper(method)+" "+normalizedRoutePath(path)] = struct{}{}
+			}
+		}
+	}
+	for _, route := range e.Routes() {
+		if route.Path == "/api/v1" || !isHTTPMethod(route.Method) {
+			continue
+		}
+		key := route.Method + " " + normalizedRoutePath(route.Path)
+		require.Contains(t, documented, key, "runtime route is missing from OpenAPI: %s", key)
+	}
+}
+
+func normalizedRoutePath(path string) string {
+	segments := strings.Split(path, "/")
+	for index, segment := range segments {
+		if strings.HasPrefix(segment, ":") || (strings.HasPrefix(segment, "{") && strings.HasSuffix(segment, "}")) {
+			segments[index] = "{}"
+		}
+	}
+	return strings.Join(segments, "/")
+}
+
+func isHTTPMethod(value string) bool {
+	switch strings.ToUpper(value) {
+	case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodHead, http.MethodOptions:
+		return true
+	default:
+		return false
+	}
 }
 
 func TestGlobalMiddlewareAddsRequestIDAndStructuredLog(t *testing.T) {

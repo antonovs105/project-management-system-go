@@ -81,6 +81,10 @@ jobs:
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
+      - name: Verify generated API types
+        working-directory: frontend
+        run: pnpm check:api
+
       - name: Test frontend
         working-directory: frontend
         run: pnpm test
