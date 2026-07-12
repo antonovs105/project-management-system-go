@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
 import { Button, EmptyState, ErrorState, LoadingState, Panel, SelectField, TextAreaField, TextField } from "../components/ui";
+import { OffsetPaginationControls } from "../components/OffsetPaginationControls";
 import { api, errorMessage } from "../lib/api";
 import { deliveryFailureKinds, deliveryStates } from "../lib/constants";
 import { compactId } from "../lib/format";
@@ -160,9 +161,10 @@ function DomainBlocksPanel() {
 function RemoteActorsPanel() {
   const { t, relativeDate } = useI18n();
   const [fetchErrorsOnly, setFetchErrorsOnly] = useState(false);
+  const [offset, setOffset] = useState(0);
   const actors = useQuery({
-    queryKey: queryKeys.federationRemoteActors(fetchErrorsOnly ? "errors" : "all"),
-    queryFn: () => api.listFederationRemoteActors({ fetch_error: fetchErrorsOnly || undefined }),
+    queryKey: queryKeys.federationRemoteActors(fetchErrorsOnly ? "errors" : "all", offset),
+    queryFn: () => api.listFederationRemoteActorsPage({ limit: 50, offset }, { fetch_error: fetchErrorsOnly || undefined }),
   });
 
   return (
@@ -176,7 +178,10 @@ function RemoteActorsPanel() {
           <SelectField
             label={t("admin.fetchState")}
             value={fetchErrorsOnly ? "errors" : ""}
-            onChange={(event) => setFetchErrorsOnly(event.target.value === "errors")}
+            onChange={(event) => {
+              setFetchErrorsOnly(event.target.value === "errors");
+              setOffset(0);
+            }}
           >
             <option value="">{t("admin.allActors")}</option>
             <option value="errors">{t("admin.fetchErrors")}</option>
@@ -194,12 +199,12 @@ function RemoteActorsPanel() {
           <ErrorState title={t("admin.actorsLoadFailed")} body={errorMessage(actors.error, t("admin.actorsRequestFailed"))} />
         </div>
       ) : null}
-      {actors.data?.length === 0 ? (
+      {actors.data?.items.length === 0 ? (
         <div className="border-t border-zinc-100 p-4">
           <EmptyState title={t("admin.noActors")} body={t("admin.noActorsBody")} />
         </div>
       ) : null}
-      {actors.data?.map((actor) => (
+      {actors.data?.items.map((actor) => (
         <div key={actor.id} className="grid gap-3 border-t border-zinc-100 px-4 py-3 lg:grid-cols-[1fr_1.3fr_1fr]">
           <div className="min-w-0">
             <div className="font-medium text-zinc-950">{actor.handle || actor.preferred_username}</div>
@@ -217,6 +222,11 @@ function RemoteActorsPanel() {
           </div>
         </div>
       ))}
+      {actors.data ? (
+        <div className="border-t border-zinc-100 p-4">
+          <OffsetPaginationControls page={actors.data} onOffsetChange={setOffset} disabled={actors.isFetching} />
+        </div>
+      ) : null}
     </Panel>
   );
 }
@@ -226,6 +236,7 @@ function FederationDeliveriesPanel() {
   const queryClient = useQueryClient();
   const [stateFilter, setStateFilter] = useState<DeliveryState | "">("");
   const [failureKind, setFailureKind] = useState<DeliveryFailureKind | "">("");
+  const [offset, setOffset] = useState(0);
 
   const summary = useQuery({
     queryKey: queryKeys.federationDeliverySummary,
@@ -233,9 +244,9 @@ function FederationDeliveriesPanel() {
   });
 
   const deliveries = useQuery({
-    queryKey: queryKeys.federationDeliveries(stateFilter, failureKind),
+    queryKey: queryKeys.federationDeliveries(stateFilter, failureKind, offset),
     queryFn: () =>
-      api.listFederationDeliveries({
+      api.listFederationDeliveriesPage({ limit: 50, offset }, {
         state: stateFilter || undefined,
         failure_kind: failureKind || undefined,
       }),
@@ -294,7 +305,10 @@ function FederationDeliveriesPanel() {
 
       <div className="flex flex-col gap-3 border-t border-zinc-100 p-4 md:flex-row md:items-end md:justify-between">
         <div className="grid gap-3 sm:grid-cols-2">
-          <SelectField label={t("admin.state")} value={stateFilter} onChange={(event) => setStateFilter(event.target.value as DeliveryState | "")}>
+          <SelectField label={t("admin.state")} value={stateFilter} onChange={(event) => {
+            setStateFilter(event.target.value as DeliveryState | "");
+            setOffset(0);
+          }}>
             <option value="">{t("admin.allStates")}</option>
             {deliveryStates.map((state) => (
               <option key={state.id} value={state.id}>
@@ -305,7 +319,10 @@ function FederationDeliveriesPanel() {
           <SelectField
             label={t("admin.failure")}
             value={failureKind}
-            onChange={(event) => setFailureKind(event.target.value as DeliveryFailureKind | "")}
+            onChange={(event) => {
+              setFailureKind(event.target.value as DeliveryFailureKind | "");
+              setOffset(0);
+            }}
           >
             <option value="">{t("admin.allFailures")}</option>
             {deliveryFailureKinds.map((kind) => (
@@ -327,12 +344,12 @@ function FederationDeliveriesPanel() {
           <ErrorState title={t("admin.deliveriesLoadFailed")} body={errorMessage(deliveries.error, t("admin.deliveryRequestFailed"))} />
         </div>
       ) : null}
-      {deliveries.data?.length === 0 ? (
+      {deliveries.data?.items.length === 0 ? (
         <div className="border-t border-zinc-100 p-4">
           <EmptyState title={t("admin.noDeliveries")} body={t("admin.noDeliveriesBody")} />
         </div>
       ) : null}
-      {deliveries.data?.map((delivery) => (
+      {deliveries.data?.items.map((delivery) => (
         <FederationDeliveryRow
           key={delivery.id}
           delivery={delivery}
@@ -340,6 +357,11 @@ function FederationDeliveriesPanel() {
           retrying={retryDelivery.isPending}
         />
       ))}
+      {deliveries.data ? (
+        <div className="border-t border-zinc-100 p-4">
+          <OffsetPaginationControls page={deliveries.data} onOffsetChange={setOffset} disabled={deliveries.isFetching} />
+        </div>
+      ) : null}
     </Panel>
   );
 }

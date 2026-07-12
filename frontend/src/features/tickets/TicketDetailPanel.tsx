@@ -13,6 +13,7 @@ import { queryKeys } from "../../lib/queryKeys";
 import type { GitHubCommit, ID, Label, ProjectMember, Ticket, TicketPriority, TicketStatus, TicketType } from "../../types";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Button, ErrorState, IconButton, LoadingState, SelectField, TextAreaField, TextField } from "../../components/ui";
+import { OffsetPaginationControls } from "../../components/OffsetPaginationControls";
 import { MemberAssigneeSelect } from "./MemberAssigneeSelect";
 
 function parentCandidates(type: TicketType, ticketId: ID, tickets: Ticket[]): Ticket[] {
@@ -493,6 +494,7 @@ export function TicketDetailPanel({
   const { t, relativeDate } = useI18n();
   const queryClient = useQueryClient();
   const [comment, setComment] = useState("");
+  const [commentOffset, setCommentOffset] = useState(0);
 
   const ticket = useQuery({
     queryKey: queryKeys.ticket(ticketId),
@@ -500,8 +502,8 @@ export function TicketDetailPanel({
   });
 
   const comments = useQuery({
-    queryKey: queryKeys.comments(ticketId),
-    queryFn: () => api.listComments(ticketId),
+    queryKey: queryKeys.comments(ticketId, commentOffset),
+    queryFn: () => api.listCommentsPage(ticketId, { limit: 25, offset: commentOffset }),
   });
 
   const createComment = useMutation({
@@ -597,7 +599,7 @@ export function TicketDetailPanel({
                   <ErrorState title={t("ticket.commentsLoadFailed")} body={errorMessage(comments.error, t("ticket.commentRequestFailed"))} />
                 ) : null}
                 <div className="space-y-2">
-                  {comments.data?.map((item) => (
+                  {comments.data?.items.map((item) => (
                     <div key={item.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                       <div className="mb-1 flex items-center justify-between gap-3 text-xs text-slate-500">
                         <span>{compactId(item.author_id)}</span>
@@ -616,8 +618,13 @@ export function TicketDetailPanel({
                       <p className="whitespace-pre-wrap text-sm text-slate-800">{item.content}</p>
                     </div>
                   ))}
-                  {comments.data?.length === 0 ? <p className="text-sm text-slate-500">{t("ticket.noComments")}</p> : null}
+                  {comments.data?.items.length === 0 ? <p className="text-sm text-slate-500">{t("ticket.noComments")}</p> : null}
                 </div>
+                {comments.data ? (
+                  <div className="mt-3">
+                    <OffsetPaginationControls page={comments.data} onOffsetChange={setCommentOffset} disabled={comments.isFetching} />
+                  </div>
+                ) : null}
               </section>
             </div>
           ) : null}

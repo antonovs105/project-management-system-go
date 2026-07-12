@@ -4,11 +4,12 @@ import { useMemo, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { StatusBadge } from "../components/StatusBadge";
+import { OffsetPaginationControls } from "../components/OffsetPaginationControls";
 import { Badge, Button, ErrorState, IconButton, LoadingState, Modal, Panel, TextAreaField, TextField } from "../components/ui";
 import { TicketBoard } from "../features/tickets/TicketBoard";
 import { TicketClassificationFields } from "../features/tickets/TicketClassificationFields";
 import { ProjectTicketSummary } from "../features/projects/ProjectTicketSummary";
-import { api, errorMessage } from "../lib/api";
+import { api, errorMessage, type OffsetPage } from "../lib/api";
 import { useI18n } from "../lib/i18n-context";
 import { fieldLimits } from "../lib/limits";
 import { queryKeys } from "../lib/queryKeys";
@@ -96,6 +97,7 @@ export function RemoteProjectWorkspace() {
   const { t, relativeDate } = useI18n();
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
+  const [ticketOffset, setTicketOffset] = useState(0);
   const [draft, setDraft] = useState({
     title: "",
     description: "",
@@ -117,8 +119,8 @@ export function RemoteProjectWorkspace() {
   });
 
   const tickets = useQuery({
-    queryKey: queryKeys.remoteTickets(projectId),
-    queryFn: () => api.listRemoteProjectTickets(projectId),
+    queryKey: queryKeys.remoteTickets(projectId, ticketOffset),
+    queryFn: () => api.listRemoteProjectTicketsPage(projectId, { limit: 50, offset: ticketOffset }),
     enabled: Boolean(projectId),
     refetchInterval: remoteTicketPollMs,
     refetchIntervalInBackground: false,
@@ -130,14 +132,16 @@ export function RemoteProjectWorkspace() {
   const canCreateTickets = permissions.has(ticketCreatePermission);
   const canUpdateTickets = permissions.has(ticketUpdatePermission);
   const canDeleteTickets = permissions.has(ticketDeletePermission);
-  const remoteTickets = useMemo(() => tickets.data || [], [tickets.data]);
+  const remoteTickets = useMemo(() => tickets.data?.items || [], [tickets.data]);
   const selectedTicket = useMemo(
     () => remoteTickets.find((ticket) => ticket.id === selectedTicketId) || null,
     [remoteTickets, selectedTicketId],
   );
 
   function cacheTicket(ticket: RemoteTicket) {
-    queryClient.setQueryData<RemoteTicket[]>(queryKeys.remoteTickets(projectId), (current) => updateTicketCache(current, ticket));
+    queryClient.setQueryData<OffsetPage<RemoteTicket>>(queryKeys.remoteTickets(projectId, ticketOffset), (current) =>
+      current ? { ...current, items: updateTicketCache(current.items, ticket) } : current,
+    );
   }
 
   function refreshRemoteTicketsSoon() {
@@ -189,15 +193,16 @@ export function RemoteProjectWorkspace() {
   const moveTicket = useMutation({
     mutationFn: ({ ticketId, status }: { ticketId: string; status: TicketStatus }) => api.moveRemoteTicket(projectId, ticketId, { status }),
     onMutate: ({ ticketId, status }) => {
-      const previous = queryClient.getQueryData<RemoteTicket[]>(queryKeys.remoteTickets(projectId));
-      queryClient.setQueryData<RemoteTicket[]>(queryKeys.remoteTickets(projectId), (current = []) =>
-        moveTicketsOptimistically(current, ticketId, status),
+      const key = queryKeys.remoteTickets(projectId, ticketOffset);
+      const previous = queryClient.getQueryData<OffsetPage<RemoteTicket>>(key);
+      queryClient.setQueryData<OffsetPage<RemoteTicket>>(key, (current) =>
+        current ? { ...current, items: moveTicketsOptimistically(current.items, ticketId, status) } : current,
       );
       return { previous };
     },
     onError: (error, _variables, context) => {
       if (context?.previous) {
-        queryClient.setQueryData(queryKeys.remoteTickets(projectId), context.previous);
+        queryClient.setQueryData(queryKeys.remoteTickets(projectId, ticketOffset), context.previous);
       }
       toast.error(errorMessage(error, t("remoteWorkspace.updateFailedBody")));
     },
@@ -213,8 +218,8 @@ export function RemoteProjectWorkspace() {
     mutationFn: () => (selectedTicket ? api.deleteRemoteTicket(projectId, selectedTicket.id) : Promise.reject(new Error("No ticket selected"))),
     onSuccess: () => {
       if (selectedTicket) {
-        queryClient.setQueryData<RemoteTicket[]>(queryKeys.remoteTickets(projectId), (current) =>
-          (current || []).filter((ticket) => ticket.id !== selectedTicket.id),
+        queryClient.setQueryData<OffsetPage<RemoteTicket>>(queryKeys.remoteTickets(projectId, ticketOffset), (current) =>
+          current ? { ...current, items: current.items.filter((ticket) => ticket.id !== selectedTicket.id) } : current,
         );
       }
       setSelectedTicketId(null);
@@ -373,22 +378,27 @@ export function RemoteProjectWorkspace() {
       ) : null}
 
       {!loading && !project.isError && !tickets.isError ? (
-        <TicketBoard
-          tickets={remoteTickets}
-          members={[]}
-          onOpenTicket={openTicket}
-          onMoveTicket={handleMove}
-          readOnly={!remoteProject || !canUpdateTickets}
-          showColumnsWhenEmpty
-          emptyAction={
-            canCreateTickets ? (
-              <Button tone="primary" onClick={() => setCreateOpen(true)}>
-                <Plus size={16} />
-                {t("remoteWorkspace.createTicket")}
-              </Button>
-            ) : null
-          }
-        />
+        <div className="space-y-4">
+          <TicketBoard
+            tickets={remoteTickets}
+            members={[]}
+            onOpenTicket={openTicket}
+            onMoveTicket={handleMove}
+            readOnly={!remoteProject || !canUpdateTickets}
+            showColumnsWhenEmpty
+            emptyAction={
+              canCreateTickets ? (
+                <Button tone="primary" onClick={() => setCreateOpen(true)}>
+                  <Plus size={16} />
+                  {t("remoteWorkspace.createTicket")}
+                </Button>
+              ) : null
+            }
+          />
+          {tickets.data ? (
+            <OffsetPaginationControls page={tickets.data} onOffsetChange={setTicketOffset} disabled={tickets.isFetching} />
+          ) : null}
+        </div>
       ) : null}
 
       {selectedTicket ? (

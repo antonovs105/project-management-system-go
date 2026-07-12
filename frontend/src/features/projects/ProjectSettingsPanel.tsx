@@ -4,6 +4,7 @@ import { lazy, Suspense, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
 import { Button, ErrorState, LoadingState, Modal, Panel, SelectField, TextAreaField, TextField } from "../../components/ui";
+import { OffsetPaginationControls } from "../../components/OffsetPaginationControls";
 import { api, errorMessage } from "../../lib/api";
 import { projectPermissionGroups } from "../../lib/constants";
 import { compactId, initials } from "../../lib/format";
@@ -301,23 +302,26 @@ function ProjectMemberActions({ project }: { project: Project }) {
   const [inviteRef, setInviteRef] = useState("");
   const [inviteRoleId, setInviteRoleId] = useState("");
   const [inviteStatus, setInviteStatus] = useState<ProjectInvite["status"] | "">("pending");
+  const [memberOffset, setMemberOffset] = useState(0);
+  const [inviteOffset, setInviteOffset] = useState(0);
 
   const roles = useQuery({
     queryKey: queryKeys.projectRoles(projectId),
     queryFn: () => api.listProjectRoles(projectId),
   });
   const members = useQuery({
-    queryKey: queryKeys.projectMembers(projectId),
-    queryFn: () => api.listProjectMembers(projectId),
+    queryKey: queryKeys.projectMembersPage(projectId, memberOffset),
+    queryFn: () => api.listProjectMembersPage(projectId, { limit: 25, offset: memberOffset }),
   });
   const invites = useQuery({
-    queryKey: queryKeys.projectInvites(projectId, inviteStatus),
-    queryFn: () => api.listProjectInvites(projectId, { status: inviteStatus }),
+    queryKey: queryKeys.projectInvitesPage(projectId, inviteStatus, inviteOffset),
+    queryFn: () => api.listProjectInvitesPage(projectId, { limit: 25, offset: inviteOffset }, { status: inviteStatus }),
   });
 
   async function refreshMembership() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.projectMembers(projectId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectMembersPageScope(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.projectInvitesScope(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.myProjectInvitesScope }),
       queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
@@ -365,8 +369,8 @@ function ProjectMemberActions({ project }: { project: Project }) {
     onError: (error) => toast.error(errorMessage(error, t("settings.inviteRevokeFailed"))),
   });
 
-  const memberRows = members.data || [];
-  const inviteRows = invites.data || [];
+  const memberRows = members.data?.items || [];
+  const inviteRows = invites.data?.items || [];
   const availableRoles = roles.data || [];
 
   function copyID(id: ID) {
@@ -536,6 +540,11 @@ function ProjectMemberActions({ project }: { project: Project }) {
               );
             })}
           </div>
+          {members.data ? (
+            <div className="border-t border-zinc-100 p-3">
+              <OffsetPaginationControls page={members.data} onOffsetChange={setMemberOffset} disabled={members.isFetching} />
+            </div>
+          ) : null}
         </section>
 
         <section className="min-w-0 rounded-2xl border border-zinc-200">
@@ -569,7 +578,10 @@ function ProjectMemberActions({ project }: { project: Project }) {
                       ? "border-zinc-950 bg-zinc-950 text-white"
                       : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
                   }`}
-                  onClick={() => setInviteStatus(status)}
+                  onClick={() => {
+                    setInviteStatus(status);
+                    setInviteOffset(0);
+                  }}
                 >
                   {status ? t(`status.${status}`) : t("common.all")}
                 </button>
@@ -623,6 +635,11 @@ function ProjectMemberActions({ project }: { project: Project }) {
               );
             })}
           </div>
+          {invites.data ? (
+            <div className="border-t border-zinc-100 p-3">
+              <OffsetPaginationControls page={invites.data} onOffsetChange={setInviteOffset} disabled={invites.isFetching} />
+            </div>
+          ) : null}
         </section>
       </div>
     </Panel>

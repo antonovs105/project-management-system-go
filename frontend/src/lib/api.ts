@@ -144,6 +144,7 @@ export interface AdminAuditFilters {
 export interface DeliveryFilters {
   state?: DeliveryState | "";
   limit?: number;
+  offset?: number;
 }
 
 export interface NotificationFilters {
@@ -195,6 +196,7 @@ export interface BlockDomainPayload {
 export interface RemoteActorFilters {
   fetch_error?: boolean | "";
   limit?: number;
+  offset?: number;
 }
 
 export interface LoginResponse {
@@ -247,6 +249,19 @@ async function getOffsetPage<T>(path: string, pagination: OffsetPagination, filt
     offset: Number.isFinite(responseOffset) && responseOffset >= 0 ? responseOffset : pagination.offset,
     hasMore: response.headers["x-pagination-has-more"] === "true" || (!response.headers["x-pagination-has-more"] && items.length >= pagination.limit),
   };
+}
+
+async function getAllOffsetItems<T>(path: string, filters: object = {}, limit = 200): Promise<T[]> {
+  const items: T[] = [];
+  let offset = 0;
+  for (;;) {
+    const page = await getOffsetPage<T>(path, { limit, offset }, filters);
+    items.push(...page.items);
+    if (!page.hasMore) {
+      return items;
+    }
+    offset = page.offset + page.limit;
+  }
 }
 
 export function errorMessage(error: unknown, fallback: string): string {
@@ -601,10 +616,11 @@ export const api = {
   },
 
   async listProjectMembers(projectId: ID): Promise<ProjectMember[]> {
-    const { data } = await http.get<ProjectMember[] | null>(`${apiPrefix}/projects/${projectId}/members`, {
-      params: { limit: 200, offset: 0 },
-    });
-    return asArray(data);
+    return getAllOffsetItems<ProjectMember>(`${apiPrefix}/projects/${projectId}/members`);
+  },
+
+  async listProjectMembersPage(projectId: ID, pagination: OffsetPagination): Promise<OffsetPage<ProjectMember>> {
+    return getOffsetPage(`${apiPrefix}/projects/${projectId}/members`, pagination);
   },
 
   async removeProjectMember(projectId: ID, userId: ID): Promise<void> {
@@ -621,6 +637,10 @@ export const api = {
       params: { limit: 100, offset: 0, ...filters },
     });
     return asArray(data);
+  },
+
+  async listProjectInvitesPage(projectId: ID, pagination: OffsetPagination, filters: ProjectInviteFilters = {}): Promise<OffsetPage<ProjectInviteInspection>> {
+    return getOffsetPage(`${apiPrefix}/projects/${projectId}/invites`, pagination, filters);
   },
 
   async acceptInvite(inviteId: ID): Promise<void> {
@@ -677,6 +697,10 @@ export const api = {
       params: { limit: 500, offset: 0, ...filters },
     });
     return asArray(data);
+  },
+
+  async listRemoteProjectTicketsPage(projectId: ID, pagination: OffsetPagination, filters: TicketFilters = {}): Promise<OffsetPage<RemoteTicket>> {
+    return getOffsetPage(`${apiPrefix}/remote-projects/${projectId}/tickets`, pagination, filters);
   },
 
   async createRemoteTicket(projectId: ID, payload: CreateTicketPayload): Promise<RemoteTicketWriteResult> {
@@ -844,6 +868,10 @@ export const api = {
     return asArray(data);
   },
 
+  async listCommentsPage(ticketId: ID, pagination: OffsetPagination): Promise<OffsetPage<Comment>> {
+    return getOffsetPage(`${apiPrefix}/tickets/${ticketId}/comments`, pagination);
+  },
+
   async createComment(ticketId: ID, content: string): Promise<Comment> {
     const { data } = await http.post<Comment>(`${apiPrefix}/tickets/${ticketId}/comments`, { content });
     return data;
@@ -865,6 +893,10 @@ export const api = {
       params: { limit: 100, ...filters },
     });
     return asArray(data);
+  },
+
+  async listProjectDeliveriesPage(projectId: ID, pagination: OffsetPagination, filters: DeliveryFilters = {}): Promise<OffsetPage<ProjectDelivery>> {
+    return getOffsetPage(`${apiPrefix}/projects/${projectId}/deliveries`, pagination, filters);
   },
 
   async getProjectDeliverySummary(projectId: ID): Promise<ProjectDeliverySummary> {
@@ -932,11 +964,19 @@ export const api = {
     return asArray(data);
   },
 
+  async listFederationRemoteActorsPage(pagination: OffsetPagination, filters: RemoteActorFilters = {}): Promise<OffsetPage<RemoteActorInspection>> {
+    return getOffsetPage(`${apiPrefix}/admin/federation/remote-actors`, pagination, filters);
+  },
+
   async listFederationDeliveries(filters: FederationDeliveryFilters = {}): Promise<FederationDelivery[]> {
     const { data } = await http.get<FederationDelivery[] | null>(`${apiPrefix}/admin/federation/deliveries`, {
       params: { limit: 100, ...filters },
     });
     return asArray(data);
+  },
+
+  async listFederationDeliveriesPage(pagination: OffsetPagination, filters: FederationDeliveryFilters = {}): Promise<OffsetPage<FederationDelivery>> {
+    return getOffsetPage(`${apiPrefix}/admin/federation/deliveries`, pagination, filters);
   },
 
   async getFederationDeliverySummary(): Promise<FederationDeliverySummary> {

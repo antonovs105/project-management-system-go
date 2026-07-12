@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Button, EmptyState, ErrorState, LoadingState, Panel, SelectField } from "../../components/ui";
+import { OffsetPaginationControls } from "../../components/OffsetPaginationControls";
 import { api, errorMessage } from "../../lib/api";
 import { deliveryStates } from "../../lib/constants";
 import { compactId } from "../../lib/format";
@@ -76,6 +77,7 @@ export function ProjectDeliveriesPanel({ projectId }: { projectId: ID }) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const [stateFilter, setStateFilter] = useState<DeliveryState | "">("");
+  const [offset, setOffset] = useState(0);
 
   const summary = useQuery({
     queryKey: queryKeys.projectDeliverySummary(projectId),
@@ -83,8 +85,8 @@ export function ProjectDeliveriesPanel({ projectId }: { projectId: ID }) {
   });
 
   const deliveries = useQuery({
-    queryKey: queryKeys.projectDeliveries(projectId, stateFilter),
-    queryFn: () => api.listProjectDeliveries(projectId, { state: stateFilter || undefined }),
+    queryKey: queryKeys.projectDeliveries(projectId, stateFilter, offset),
+    queryFn: () => api.listProjectDeliveriesPage(projectId, { limit: 50, offset }, { state: stateFilter || undefined }),
   });
 
   const retryDelivery = useMutation({
@@ -136,7 +138,10 @@ export function ProjectDeliveriesPanel({ projectId }: { projectId: ID }) {
             label={t("deliveries.state")}
             className="w-full md:w-56"
             value={stateFilter}
-            onChange={(event) => setStateFilter(event.target.value as DeliveryState | "")}
+            onChange={(event) => {
+              setStateFilter(event.target.value as DeliveryState | "");
+              setOffset(0);
+            }}
           >
             <option value="">{t("deliveries.allStates")}</option>
             {deliveryStates.map((state) => (
@@ -152,12 +157,12 @@ export function ProjectDeliveriesPanel({ projectId }: { projectId: ID }) {
         </div>
 
         {deliveries.isLoading ? <LoadingState label={t("deliveries.loading")} /> : null}
-        {deliveries.data?.length === 0 ? (
+        {deliveries.data?.items.length === 0 ? (
           <div className="border-t border-zinc-100 px-4 py-4">
             <EmptyState title={t("deliveries.empty")} body={t("deliveries.emptyBody")} />
           </div>
         ) : null}
-        {deliveries.data?.map((delivery) => (
+        {deliveries.data?.items.map((delivery) => (
           <DeliveryRow
             key={delivery.id}
             delivery={delivery}
@@ -165,6 +170,11 @@ export function ProjectDeliveriesPanel({ projectId }: { projectId: ID }) {
             retrying={retryDelivery.isPending}
           />
         ))}
+        {deliveries.data ? (
+          <div className="border-t border-zinc-100 p-4">
+            <OffsetPaginationControls page={deliveries.data} onOffsetChange={setOffset} disabled={deliveries.isFetching} />
+          </div>
+        ) : null}
       </Panel>
     </div>
   );
