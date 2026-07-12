@@ -405,7 +405,7 @@ func main() {
 	if err := validateRuntimeConfig(production, jwtSecret, publicBaseURL, localDomain, metricsToken, actorPrivateKeyEncryptionKey); err != nil {
 		log.Fatal(err)
 	}
-	privateKeyCodec, err := secrets.NewPrivateKeyCodec(actorPrivateKeyEncryptionKey)
+	privateKeyCodec, err := secrets.NewPrivateKeyCodec(actorPrivateKeyEncryptionKey, cfg.Security.ActorPrivateKeyPreviousKeys...)
 	if err != nil {
 		log.Fatal(err)
 	}

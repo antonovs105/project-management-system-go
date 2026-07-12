@@ -79,8 +79,9 @@ type DatabaseConfig struct {
 
 // SecurityConfig contains local application secrets.
 type SecurityConfig struct {
-	JWTSecretKey                 string `yaml:"jwt_secret_key"`
-	ActorPrivateKeyEncryptionKey string `yaml:"actor_private_key_encryption_key"`
+	JWTSecretKey                 string   `yaml:"jwt_secret_key"`
+	ActorPrivateKeyEncryptionKey string   `yaml:"actor_private_key_encryption_key"`
+	ActorPrivateKeyPreviousKeys  []string `yaml:"actor_private_key_previous_keys"`
 }
 
 // InstanceConfig describes the local federated instance identity.
@@ -251,6 +252,7 @@ func Normalize(cfg *Config) {
 	cfg.Database.Source = strings.TrimSpace(cfg.Database.Source)
 	cfg.Security.JWTSecretKey = strings.TrimSpace(cfg.Security.JWTSecretKey)
 	cfg.Security.ActorPrivateKeyEncryptionKey = strings.TrimSpace(cfg.Security.ActorPrivateKeyEncryptionKey)
+	cfg.Security.ActorPrivateKeyPreviousKeys = trimList(cfg.Security.ActorPrivateKeyPreviousKeys)
 	cfg.Instance.Name = strings.TrimSpace(cfg.Instance.Name)
 	if cfg.Instance.Name == "" {
 		cfg.Instance.Name = "Progo"
@@ -399,6 +401,7 @@ func applyEnv(cfg *Config) error {
 	applyStringEnv(&cfg.Metrics.Addr, "METRICS_ADDR")
 	applyStringEnv(&cfg.Metrics.Token, "METRICS_TOKEN")
 	applyStringEnv(&cfg.Security.ActorPrivateKeyEncryptionKey, "ACTOR_PRIVATE_KEY_ENCRYPTION_KEY")
+	applyCSVEnv(&cfg.Security.ActorPrivateKeyPreviousKeys, "ACTOR_PRIVATE_KEY_PREVIOUS_ENCRYPTION_KEYS")
 	applyStringEnv(&cfg.OAuth.FrontendCallbackURL, "OAUTH_FRONTEND_CALLBACK_URL")
 	applyStringEnv(&cfg.OAuth.Google.ClientID, "GOOGLE_OAUTH_CLIENT_ID")
 	applyStringEnv(&cfg.OAuth.Google.ClientSecret, "GOOGLE_OAUTH_CLIENT_SECRET")

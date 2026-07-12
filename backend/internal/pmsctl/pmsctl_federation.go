@@ -244,7 +244,7 @@ func followRemoteActor(ctx context.Context, options FederationFollowOptions) (*F
 	}
 	defer cleanup()
 
-	privateKeyCodec, err := secrets.NewPrivateKeyCodec(cfg.ActorPrivateKeyEncryptionKey)
+	privateKeyCodec, err := secrets.NewPrivateKeyCodec(cfg.ActorPrivateKeyEncryptionKey, cfg.ActorPrivateKeyPreviousKeys...)
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +353,7 @@ func acceptProjectFollow(ctx context.Context, options FederationAcceptFollowOpti
 	}
 	defer cleanup()
 
-	privateKeyCodec, err := secrets.NewPrivateKeyCodec(cfg.ActorPrivateKeyEncryptionKey)
+	privateKeyCodec, err := secrets.NewPrivateKeyCodec(cfg.ActorPrivateKeyEncryptionKey, cfg.ActorPrivateKeyPreviousKeys...)
 	if err != nil {
 		return nil, err
 	}

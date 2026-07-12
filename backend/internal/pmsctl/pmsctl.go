@@ -51,6 +51,7 @@ type RuntimeConfig struct {
 	PublicBaseURL                  string
 	LocalDomain                    string
 	ActorPrivateKeyEncryptionKey   string
+	ActorPrivateKeyPreviousKeys    []string
 	FederationAllowInsecureHTTP    bool
 	FederationAllowPrivateNetworks bool
 }
@@ -337,7 +338,7 @@ func createOwner(ctx context.Context, options OwnerCreateOptions) (*user.User, e
 		return nil, err
 	}
 	apConfig := activitypub.NewConfig(cfg.PublicBaseURL, cfg.LocalDomain)
-	privateKeyCodec, err := secrets.NewPrivateKeyCodec(cfg.ActorPrivateKeyEncryptionKey)
+	privateKeyCodec, err := secrets.NewPrivateKeyCodec(cfg.ActorPrivateKeyEncryptionKey, cfg.ActorPrivateKeyPreviousKeys...)
 	if err != nil {
 		return nil, err
 	}
@@ -367,6 +368,7 @@ func LoadRuntimeConfig() (RuntimeConfig, error) {
 		PublicBaseURL:                  cfg.Instance.PublicBaseURL,
 		LocalDomain:                    cfg.Instance.LocalDomain,
 		ActorPrivateKeyEncryptionKey:   cfg.Security.ActorPrivateKeyEncryptionKey,
+		ActorPrivateKeyPreviousKeys:    cfg.Security.ActorPrivateKeyPreviousKeys,
 		FederationAllowInsecureHTTP:    cfg.FederationAllowInsecureHTTP(),
 		FederationAllowPrivateNetworks: cfg.FederationAllowPrivateNetworks(),
 	}, nil

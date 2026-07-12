@@ -117,6 +117,7 @@ PROGO_REF=<full-commit-sha> PROGO_ARCHIVE_SHA256=<published-sha256> IMAGE_TAG=<c
    JWT_SECRET_KEY
    METRICS_TOKEN
    ACTOR_PRIVATE_KEY_ENCRYPTION_KEY
+   ACTOR_PRIVATE_KEY_PREVIOUS_ENCRYPTION_KEYS
    ```
 
 4. Start the stack:
@@ -155,6 +156,8 @@ go run cmd/api/main.go
 ```
 
 The backend reads `.env` from the current working directory when present. For native runs, make sure `DB_SOURCE`, `REDIS_ADDR`, `PUBLIC_BASE_URL`, `LOCAL_DOMAIN`, `JWT_SECRET_KEY`, `METRICS_TOKEN`, and `ACTOR_PRIVATE_KEY_ENCRYPTION_KEY` are set.
+
+To rotate ActivityPub private-key encryption without downtime, replace `ACTOR_PRIVATE_KEY_ENCRYPTION_KEY` with the new primary secret and place the old secret in the comma-separated `ACTOR_PRIVATE_KEY_PREVIOUS_ENCRYPTION_KEYS` value. New actor keys use a key-ID-aware ciphertext format; existing rows remain decryptable while the previous key is configured. Keep previous keys available until all legacy rows have been rewritten and a verified database backup has passed a restore test.
 
 ### Frontend
 

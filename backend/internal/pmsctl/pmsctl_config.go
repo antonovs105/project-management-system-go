@@ -374,6 +374,7 @@ func renderComposeEnv(cfg appconfig.Config, options configExportEnvOptions) ([]b
 		{Key: "JWT_SECRET_KEY", Value: cfg.Security.JWTSecretKey},
 		{Key: "METRICS_TOKEN", Value: cfg.Metrics.Token},
 		{Key: "ACTOR_PRIVATE_KEY_ENCRYPTION_KEY", Value: cfg.Security.ActorPrivateKeyEncryptionKey},
+		{Key: "ACTOR_PRIVATE_KEY_PREVIOUS_ENCRYPTION_KEYS", Value: strings.Join(cfg.Security.ActorPrivateKeyPreviousKeys, ",")},
 		{Key: "FEDERATION_BLOCKED_DOMAINS", Value: strings.Join(cfg.Federation.BlockedDomains, ",")},
 		{Key: "FEDERATION_ALLOW_INSECURE_HTTP", Value: strconv.FormatBool(cfg.FederationAllowInsecureHTTP())},
 		{Key: "FEDERATION_ALLOW_PRIVATE_NETWORKS", Value: strconv.FormatBool(cfg.FederationAllowPrivateNetworks())},
