@@ -26,13 +26,11 @@ paths:
       operationId: getHealth
       responses:
         "200":
-          description: Database is reachable.
+          description: API process is alive; dependency readiness is reported by /ready.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
-        "500":
-          $ref: "#/components/responses/Error"
   /ready:
     get:
       tags: [Health]
@@ -142,15 +140,27 @@ paths:
         $ref: "#/components/requestBodies/LoginUser"
       responses:
         "200":
-          description: JWT issued.
+          description: HttpOnly session cookie established.
+          headers:
+            Set-Cookie:
+              description: Hardened Progo browser session cookie.
+              schema:
+                type: string
           content:
             application/json:
               schema:
                 type: object
-                required: [token]
+                required: [user_id, instance_role]
                 properties:
-                  token:
+                  user_id:
                     type: string
+                    format: uuid
+                  instance_role:
+                    type: string
+                    enum: [owner, admin, user]
+                  email:
+                    type: string
+                    format: email
         "401":
           $ref: "#/components/responses/Error"
   /auth/oauth/providers:
@@ -222,15 +232,22 @@ paths:
         $ref: "#/components/requestBodies/ExchangeOAuthCode"
       responses:
         "200":
-          description: JWT issued after consuming a one-time OAuth code.
+          description: HttpOnly session cookie established after consuming a one-time OAuth code.
           content:
             application/json:
               schema:
                 type: object
-                required: [token]
+                required: [user_id, instance_role]
                 properties:
-                  token:
+                  user_id:
                     type: string
+                    format: uuid
+                  instance_role:
+                    type: string
+                    enum: [owner, admin, user]
+                  email:
+                    type: string
+                    format: email
         "401":
           $ref: "#/components/responses/Error"
   /api/v1/instance:
@@ -456,6 +473,18 @@ paths:
                 $ref: "#/components/schemas/FollowRemoteActorResult"
         "400":
           $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/me/logout:
+    post:
+      tags: [Auth]
+      operationId: logoutCurrentUser
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "204":
+          description: All issued sessions revoked and browser cookie expired.
         "401":
           $ref: "#/components/responses/Error"
         "502":
@@ -1260,6 +1289,69 @@ paths:
                   $ref: "#/components/schemas/GitHubCommit"
         "403":
           $ref: "#/components/responses/Error"
+  /api/v1/projects/{projectID}/labels:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      tags: [Tickets]
+      operationId: listProjectLabels
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Project labels.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Label"
+    post:
+      tags: [Tickets]
+      operationId: createProjectLabel
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, color]
+              properties:
+                name:
+                  type: string
+                  maxLength: 50
+                color:
+                  type: string
+                  pattern: '^#[0-9A-Fa-f]{6}$'
+      responses:
+        "201":
+          description: Label created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Label"
+  /api/v1/projects/{projectID}/labels/{labelID}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+      - name: labelID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      tags: [Tickets]
+      operationId: deleteProjectLabel
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Label deleted.
   /api/v1/projects/{projectID}/tickets:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
@@ -1269,6 +1361,12 @@ paths:
       security:
         - bearerAuth: []
       parameters:
+        - name: q
+          in: query
+          description: Full-text search across ticket title and description.
+          schema:
+            type: string
+            maxLength: 200
         - name: limit
           in: query
           schema:
@@ -1955,6 +2053,11 @@ paths:
           $ref: "#/components/responses/ActivityPubDocument"
 components:
   securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: progo.session
+      description: HttpOnly SameSite=Strict browser session cookie.
     bearerAuth:
       type: http
       scheme: bearer
@@ -2202,6 +2305,16 @@ components:
                   - string
                   - "null"
                 format: uuid
+              due_date:
+                type: string
+                format: date
+              label_ids:
+                type: array
+                maxItems: 20
+                uniqueItems: true
+                items:
+                  type: string
+                  format: uuid
     LoginUser:
       required: true
       content:
@@ -2352,6 +2465,16 @@ components:
                 format: uuid
               is_resolved:
                 type: boolean
+              due_date:
+                type: string
+                description: RFC 3339 timestamp or YYYY-MM-DD; an empty string clears the due date.
+              label_ids:
+                type: array
+                maxItems: 20
+                uniqueItems: true
+                items:
+                  type: string
+                  format: uuid
   responses:
     ActivityPubDocument:
       description: ActivityStreams JSON-LD document.
@@ -3477,6 +3600,24 @@ components:
           type: array
           items:
             type: string
+    Label:
+      type: object
+      required: [id, project_id, name, color, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        color:
+          type: string
+          pattern: '^#[0-9A-Fa-f]{6}$'
+        created_at:
+          type: string
+          format: date-time
     Ticket:
       type: object
       required: [id, ap_id, title, description, status, priority, type, project_id, reporter_id, is_resolved, created_at, updated_at]
@@ -3515,6 +3656,16 @@ components:
           format: uuid
         is_resolved:
           type: boolean
+        due_date:
+          type:
+            - string
+            - "null"
+          format: date-time
+        label_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
         created_at:
           type: string
           format: date-time

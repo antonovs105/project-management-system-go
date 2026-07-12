@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AppLayout } from "./components/layout/AppLayout";
@@ -6,18 +7,19 @@ import { ProtectedRoute } from "./components/layout/ProtectedRoute";
 import { I18nProvider } from "./components/I18nProvider";
 import { ThemeProvider } from "./components/ThemeProvider";
 import { useTheme } from "./lib/theme-context";
-import { AccountPage } from "./pages/AccountPage";
-import { AdminAuditPage } from "./pages/AdminAuditPage";
-import { AdminFederationPage } from "./pages/AdminFederationPage";
-import { AdminUsersPage } from "./pages/AdminUsersPage";
-import { AuthPage } from "./pages/AuthPage";
-import { FederationPage } from "./pages/FederationPage";
-import { InvitationsPage } from "./pages/InvitationsPage";
-import { LegalPage } from "./pages/LegalPage";
-import { OAuthCallbackPage } from "./pages/OAuthCallbackPage";
-import { ProjectWorkspace } from "./pages/ProjectWorkspace";
-import { ProjectsPage } from "./pages/ProjectsPage";
-import { RemoteProjectWorkspace } from "./pages/RemoteProjectWorkspace";
+
+const AccountPage = lazy(() => import("./pages/AccountPage").then((module) => ({ default: module.AccountPage })));
+const AdminAuditPage = lazy(() => import("./pages/AdminAuditPage").then((module) => ({ default: module.AdminAuditPage })));
+const AdminFederationPage = lazy(() => import("./pages/AdminFederationPage").then((module) => ({ default: module.AdminFederationPage })));
+const AdminUsersPage = lazy(() => import("./pages/AdminUsersPage").then((module) => ({ default: module.AdminUsersPage })));
+const AuthPage = lazy(() => import("./pages/AuthPage").then((module) => ({ default: module.AuthPage })));
+const FederationPage = lazy(() => import("./pages/FederationPage").then((module) => ({ default: module.FederationPage })));
+const InvitationsPage = lazy(() => import("./pages/InvitationsPage").then((module) => ({ default: module.InvitationsPage })));
+const LegalPage = lazy(() => import("./pages/LegalPage").then((module) => ({ default: module.LegalPage })));
+const OAuthCallbackPage = lazy(() => import("./pages/OAuthCallbackPage").then((module) => ({ default: module.OAuthCallbackPage })));
+const ProjectWorkspace = lazy(() => import("./pages/ProjectWorkspace").then((module) => ({ default: module.ProjectWorkspace })));
+const ProjectsPage = lazy(() => import("./pages/ProjectsPage").then((module) => ({ default: module.ProjectsPage })));
+const RemoteProjectWorkspace = lazy(() => import("./pages/RemoteProjectWorkspace").then((module) => ({ default: module.RemoteProjectWorkspace })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -40,6 +42,7 @@ export function App() {
       <ThemeProvider>
         <I18nProvider>
           <BrowserRouter>
+            <Suspense fallback={<div className="p-6" role="status">Loading…</div>}>
             <Routes>
               <Route path="/login" element={<AuthPage mode="login" />} />
               <Route path="/register" element={<AuthPage mode="register" />} />
@@ -66,6 +69,7 @@ export function App() {
 
               <Route path="*" element={<Navigate to="/projects" replace />} />
             </Routes>
+            </Suspense>
             <AppToaster />
           </BrowserRouter>
         </I18nProvider>

@@ -20,6 +20,7 @@ func TestOpenAPIContractDocumentsRegisteredRoutes(t *testing.T) {
 	doc := loadOpenAPI(t)
 	require.Equal(t, "3.1.0", doc.OpenAPI)
 	require.NotEmpty(t, doc.Components["securitySchemes"]["bearerAuth"])
+	require.NotEmpty(t, doc.Components["securitySchemes"]["cookieAuth"])
 	require.NotEmpty(t, doc.Components["securitySchemes"]["metricsBearerAuth"])
 
 	for _, route := range []struct {
@@ -40,6 +41,7 @@ func TestOpenAPIContractDocumentsRegisteredRoutes(t *testing.T) {
 		{method: "get", path: "/api/v1/instance"},
 		{method: "get", path: "/api/v1/me"},
 		{method: "patch", path: "/api/v1/me/password"},
+		{method: "post", path: "/api/v1/me/logout"},
 		{method: "get", path: "/api/v1/me/invites"},
 		{method: "get", path: "/api/v1/me/federation/inbox"},
 		{method: "post", path: "/api/v1/me/federation/discover"},
@@ -73,6 +75,9 @@ func TestOpenAPIContractDocumentsRegisteredRoutes(t *testing.T) {
 		{method: "delete", path: "/api/v1/projects/{projectID}/github/repositories/{repositoryID}"},
 		{method: "post", path: "/api/v1/projects/{projectID}/github/repositories/{repositoryID}/sync"},
 		{method: "get", path: "/api/v1/projects/{projectID}/github/commits"},
+		{method: "get", path: "/api/v1/projects/{projectID}/labels"},
+		{method: "post", path: "/api/v1/projects/{projectID}/labels"},
+		{method: "delete", path: "/api/v1/projects/{projectID}/labels/{labelID}"},
 		{method: "get", path: "/api/v1/projects/{projectID}/tickets"},
 		{method: "post", path: "/api/v1/projects/{projectID}/tickets"},
 		{method: "get", path: "/api/v1/projects/{projectID}/tickets/events"},

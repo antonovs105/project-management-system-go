@@ -585,3 +585,54 @@ func TestService_GetTicketGraph(t *testing.T) {
 }
 
 func stringPtr(s string) *string { return &s }
+
+func TestService_ListTicketsNormalizesSearchAndPagination(t *testing.T) {
+	ctx := context.Background()
+	projectID := "11111111-1111-4111-8111-111111111111"
+	userID := "22222222-2222-4222-8222-222222222222"
+	mockRepo := new(MockRepository)
+	mockProject := new(MockProjectChecker)
+	service := NewService(mockRepo, mockProject, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+	mockProject.On("GetProjectByID", ctx, projectID, userID).Return(&project.Project{}, nil).Once()
+	expected := TicketListOptions{Query: "release plan", Limit: defaultTicketListLimit, Offset: 20}
+	mockRepo.On("ListByProjectID", ctx, projectID, expected).Return([]Ticket{}, nil).Once()
+
+	tickets, err := service.ListTicketsInProject(ctx, projectID, userID, TicketListOptions{Query: "  release plan  ", Offset: 20})
+
+	require.NoError(t, err)
+	require.Empty(t, tickets)
+	mockRepo.AssertExpectations(t)
+	mockProject.AssertExpectations(t)
+}
+
+func TestService_ListTicketsRejectsOversizedSearch(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockProject := new(MockProjectChecker)
+	service := NewService(mockRepo, mockProject, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+	mockProject.On("GetProjectByID", ctx, "project", "user").Return(&project.Project{}, nil).Once()
+
+	_, err := service.ListTicketsInProject(ctx, "project", "user", TicketListOptions{Query: strings.Repeat("x", maxTicketSearchLength+1)})
+
+	require.ErrorIs(t, err, ErrInvalidTicketInput)
+	mockRepo.AssertNotCalled(t, "ListByProjectID", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestParseDueDate(t *testing.T) {
+	t.Run("date only", func(t *testing.T) {
+		dueDate, err := parseDueDate("2026-08-15")
+		require.NoError(t, err)
+		require.Equal(t, "2026-08-15T00:00:00Z", dueDate.Format(time.RFC3339))
+	})
+
+	t.Run("empty clears", func(t *testing.T) {
+		dueDate, err := parseDueDate("  ")
+		require.NoError(t, err)
+		require.Nil(t, dueDate)
+	})
+
+	t.Run("invalid", func(t *testing.T) {
+		_, err := parseDueDate("next friday")
+		require.ErrorIs(t, err, ErrInvalidTicketInput)
+	})
+}

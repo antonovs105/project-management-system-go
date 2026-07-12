@@ -9,7 +9,7 @@ import { ticketLinkTypes, ticketPriorities, ticketStatuses, ticketTypes } from "
 import { compactId, relativeDate } from "../../lib/format";
 import { fieldLimits } from "../../lib/limits";
 import { queryKeys } from "../../lib/queryKeys";
-import type { GitHubCommit, ID, ProjectMember, Ticket, TicketPriority, TicketStatus, TicketType } from "../../types";
+import type { GitHubCommit, ID, Label, ProjectMember, Ticket, TicketPriority, TicketStatus, TicketType } from "../../types";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Button, ErrorState, IconButton, LoadingState, SelectField, TextAreaField, TextField } from "../../components/ui";
 import { MemberAssigneeSelect } from "./MemberAssigneeSelect";
@@ -29,12 +29,14 @@ function TicketEditor({
   ticket,
   tickets,
   members,
+  labels,
   onClose,
 }: {
   projectId: ID;
   ticket: Ticket;
   tickets: Ticket[];
   members: ProjectMember[];
+  labels: Label[];
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -45,6 +47,8 @@ function TicketEditor({
   const [type, setType] = useState<TicketType>(ticket.type);
   const [parentId, setParentId] = useState(ticket.parent_id || "");
   const [assigneeId, setAssigneeId] = useState(ticket.assignee_id || "");
+  const [dueDate, setDueDate] = useState(ticket.due_date?.slice(0, 10) || "");
+  const [labelIds, setLabelIds] = useState<ID[]>(ticket.label_ids || []);
 
   const parents = useMemo(() => parentCandidates(type, ticket.id, tickets), [ticket.id, tickets, type]);
 
@@ -53,7 +57,7 @@ function TicketEditor({
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.ticket(ticket.id) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.tickets(projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.ticketsScope(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.graphScope(projectId) }),
       ]);
       toast.success("Ticket updated");
@@ -64,7 +68,7 @@ function TicketEditor({
     mutationFn: () => api.deleteTicket(ticket.id),
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.tickets(projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.ticketsScope(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.graphScope(projectId) }),
       ]);
       toast.success("Ticket deleted");
@@ -82,6 +86,8 @@ function TicketEditor({
       type,
       parent_id: type === "epic" ? null : parentId || null,
       assignee_id: assigneeId.trim() || null,
+      due_date: dueDate,
+      label_ids: labelIds,
     });
   }
 
@@ -134,6 +140,25 @@ function TicketEditor({
         </SelectField>
       ) : null}
       <MemberAssigneeSelect members={members} value={assigneeId} onChange={setAssigneeId} />
+      <TextField label="Due date" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
+      {labels.length > 0 ? (
+        <fieldset className="grid gap-2">
+          <legend className="text-sm font-medium text-zinc-700">Labels</legend>
+          <div className="flex flex-wrap gap-2">
+            {labels.map((label) => (
+              <label key={label.id} className="flex cursor-pointer items-center gap-2 rounded-full border border-zinc-200 px-3 py-1.5 text-sm">
+                <input
+                  type="checkbox"
+                  checked={labelIds.includes(label.id)}
+                  onChange={(event) => setLabelIds((current) => event.target.checked ? [...current, label.id] : current.filter((id) => id !== label.id))}
+                />
+                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: label.color }} />
+                {label.name}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      ) : null}
       <TextAreaField
         label="Description"
         value={description}
@@ -174,7 +199,7 @@ function TicketLinksPanel({ projectId, ticketId, tickets }: { projectId: ID; tic
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.ticket(ticketId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.tickets(projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.ticketsScope(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.graphScope(projectId) }),
       ]);
       setTargetTicketId("");
@@ -380,12 +405,14 @@ export function TicketDetailPanel({
   ticketId,
   tickets,
   members,
+  labels,
   onClose,
 }: {
   projectId: ID;
   ticketId: ID;
   tickets: Ticket[];
   members: ProjectMember[];
+  labels: Label[];
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -462,6 +489,7 @@ export function TicketDetailPanel({
                 ticket={ticket.data}
                 tickets={tickets}
                 members={members}
+                labels={labels}
                 onClose={onClose}
               />
 

@@ -1,6 +1,7 @@
 import {
   DndContext,
   DragOverlay,
+  KeyboardSensor,
   PointerSensor,
   useDroppable,
   useSensor,
@@ -8,15 +9,21 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import {
+  arrayMove,
+  sortableKeyboardCoordinates,
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, UserRound } from "lucide-react";
+import { CalendarClock, GripVertical, UserRound } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EmptyState, Panel } from "../../components/ui";
 import { ticketStatuses } from "../../lib/constants";
-import type { ID, ProjectMember, Ticket, TicketStatus } from "../../types";
+import type { ID, Label, ProjectMember, Ticket, TicketStatus } from "../../types";
 import { projectMemberLabel } from "./memberLabels";
 
 function columnTitle(status: TicketStatus): string {
@@ -26,11 +33,13 @@ function columnTitle(status: TicketStatus): string {
 function TicketCard({
   ticket,
   members,
+  labels,
   onOpen,
   draggable,
 }: {
   ticket: Ticket;
   members: ProjectMember[];
+  labels: Label[];
   onOpen: (ticketId: ID) => void;
   draggable: boolean;
 }) {
@@ -64,12 +73,27 @@ function TicketCard({
               <StatusBadge value={ticket.type} kind="type" />
               <StatusBadge value={ticket.priority} kind="priority" />
             </div>
+            {ticket.label_ids?.length ? (
+              <div className="mb-2 flex flex-wrap gap-1">
+                {labels.filter((label) => ticket.label_ids.includes(label.id)).map((label) => (
+                  <span key={label.id} className="rounded-full px-2 py-0.5 text-[11px] font-medium text-white" style={{ backgroundColor: label.color }}>
+                    {label.name}
+                  </span>
+                ))}
+              </div>
+            ) : null}
             <h3 className="line-clamp-2 text-sm font-semibold leading-5 text-zinc-950">{ticket.title}</h3>
             {ticket.description ? <p className="mt-2 line-clamp-2 text-xs text-zinc-500">{ticket.description}</p> : null}
             <div className="mt-3 flex items-center gap-1.5 text-xs text-zinc-500">
               <UserRound size={13} />
               <span className="truncate">{projectMemberLabel(members, ticket.assignee_id)}</span>
             </div>
+            {ticket.due_date ? (
+              <div className="mt-1 flex items-center gap-1.5 text-xs text-zinc-500">
+                <CalendarClock size={13} />
+                <span>Due {new Date(ticket.due_date).toLocaleDateString()}</span>
+              </div>
+            ) : null}
           </div>
           <span
             className="pointer-events-none flex h-7 w-7 shrink-0 items-center justify-center rounded-xl text-zinc-300 transition group-hover:text-zinc-500"
@@ -87,12 +111,14 @@ function BoardColumn({
   status,
   tickets,
   members,
+  labels,
   onOpen,
   draggable,
 }: {
   status: TicketStatus;
   tickets: Ticket[];
   members: ProjectMember[];
+  labels: Label[];
   onOpen: (ticketId: ID) => void;
   draggable: boolean;
 }) {
@@ -115,7 +141,7 @@ function BoardColumn({
       >
         <SortableContext items={tickets.map((ticket) => ticket.id)} strategy={verticalListSortingStrategy}>
           {tickets.map((ticket) => (
-            <TicketCard key={ticket.id} ticket={ticket} members={members} onOpen={onOpen} draggable={draggable} />
+            <TicketCard key={ticket.id} ticket={ticket} members={members} labels={labels} onOpen={onOpen} draggable={draggable} />
           ))}
         </SortableContext>
         {tickets.length === 0 ? (
@@ -139,6 +165,7 @@ function neighbors(items: Ticket[], ticketId: ID) {
 export function TicketBoard({
   tickets,
   members,
+  labels = [],
   onOpenTicket,
   onMoveTicket,
   emptyAction,
@@ -149,6 +176,7 @@ export function TicketBoard({
 }: {
   tickets: Ticket[];
   members: ProjectMember[];
+  labels?: Label[];
   onOpenTicket: (ticketId: ID) => void;
   onMoveTicket: (ticketId: ID, status: TicketStatus, beforeTicketId: ID | null, afterTicketId: ID | null) => void;
   emptyAction?: ReactNode;
@@ -158,7 +186,10 @@ export function TicketBoard({
   emptyBody?: string;
 }) {
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   const grouped = useMemo(() => {
     const columns = new Map<TicketStatus, Ticket[]>();
@@ -251,6 +282,7 @@ export function TicketBoard({
             status={status.id}
             tickets={grouped.get(status.id) || []}
             members={members}
+            labels={labels}
             onOpen={onOpenTicket}
             draggable={!readOnly}
           />

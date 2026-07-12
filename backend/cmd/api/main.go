@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -31,6 +32,7 @@ import (
 	appconfig "github.com/antonovs105/project-management-system-go/internal/config"
 	"github.com/antonovs105/project-management-system-go/internal/githubintegration"
 	"github.com/antonovs105/project-management-system-go/internal/instance"
+	"github.com/antonovs105/project-management-system-go/internal/label"
 	authMiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
 	"github.com/antonovs105/project-management-system-go/internal/notification"
 	"github.com/antonovs105/project-management-system-go/internal/observability"
@@ -110,6 +112,8 @@ var requiredDatabaseTables = []string{
 	"project_role_permissions",
 	"actor_follows",
 	"tickets",
+	"project_labels",
+	"ticket_labels",
 	"ticket_assignees",
 	"comments",
 	"ap_objects",
@@ -131,12 +135,13 @@ type appRole string
 // ApiServer wires database-backed services into the HTTP server.
 type ApiServer struct {
 	db                  *sqlx.DB
-	redisAddr           string
+	redisClient         *redis.Client
 	metrics             *observability.Metrics
 	metricsToken        string
 	userHandler         *user.Handler
 	instanceHandler     *instance.Handler
 	projectHandler      *project.Handler
+	labelHandler        *label.Handler
 	ticketHandler       *ticket.Handler
 	commentHandler      *comment.Handler
 	notificationHandler *notification.Handler
@@ -415,6 +420,11 @@ func main() {
 		log.Fatalf("Can't connect to DB: %v", err)
 	}
 	defer db.Close()
+	db.SetMaxOpenConns(cfg.Database.MaxOpenConnections)
+	db.SetMaxIdleConns(cfg.Database.MaxIdleConnections)
+	db.SetConnMaxLifetime(time.Duration(cfg.Database.ConnMaxLifetimeSeconds) * time.Second)
+	db.SetConnMaxIdleTime(time.Duration(cfg.Database.ConnMaxIdleTimeSeconds) * time.Second)
+	metrics.RegisterDBStats(db.DB, "primary")
 
 	log.Println("DB connection successful")
 
@@ -454,6 +464,7 @@ func main() {
 		project.WithInstanceRoleProvider(userService),
 		project.WithProjectCreationPolicy(cfg.Projects.CreationPolicy),
 	)
+	labelHandler := label.NewHandler(label.NewService(label.NewRepository(db), projectService))
 
 	ticketRepo := ticket.NewRepository(db, apConfig)
 	ticketService := ticket.NewService(ticketRepo, projectService, apConfig)
@@ -583,12 +594,13 @@ func main() {
 
 	server := &ApiServer{
 		db:                  db,
-		redisAddr:           redisAddr,
+		redisClient:         redisClient,
 		metrics:             metrics,
 		metricsToken:        metricsToken,
 		userHandler:         userHandler,
 		instanceHandler:     instanceHandler,
 		projectHandler:      projectHandler,
+		labelHandler:        labelHandler,
 		ticketHandler:       ticketHandler,
 		commentHandler:      commentHandler,
 		notificationHandler: notificationHandler,
@@ -625,8 +637,9 @@ func main() {
 		corsOrigins = []string{"http://localhost:5173"}
 	}
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins: corsOrigins,
-		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+		AllowOrigins:     corsOrigins,
+		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+		AllowCredentials: true,
 	}))
 
 	e.GET("/health", server.healthCheck)
@@ -634,7 +647,11 @@ func main() {
 	e.GET("/metrics", server.metricsHandler)
 	server.instanceHandler.RegisterPublicRoutes(e)
 
-	server.userHandler.RegisterRoutes(e, newConfiguredRateLimiter("auth", cfg.RateLimits.Auth, redisClient))
+	server.userHandler.RegisterRoutes(
+		e,
+		newConfiguredRateLimiter("auth-ip", cfg.RateLimits.Auth, redisClient),
+		newConfiguredRateLimiterWithIdentifier("auth-account", cfg.RateLimits.Auth, redisClient, authAccountRateLimitIdentifier),
+	)
 	server.wfHandler.RegisterRoutes(e, newConfiguredRateLimiter("discovery", cfg.RateLimits.Discovery, redisClient))
 	server.githubHandler.RegisterWebhookRoutes(e, newConfiguredRateLimiter("github-webhook", cfg.RateLimits.Auth, redisClient))
 
@@ -643,7 +660,9 @@ func main() {
 	server.c2sHandler.RegisterRoutes(e, authMiddleware.JWTMiddleware([]byte(jwtSecret), userService))
 	server.inboxHandler.RegisterRoutes(e, newConfiguredRateLimiter("inbox", cfg.RateLimits.Inbox, redisClient))
 
-	registerAuthenticatedAPIRoutes(e.Group("/api/v1"), server, []byte(jwtSecret), userService)
+	authenticatedAPI := e.Group("/api/v1")
+	authenticatedAPI.Use(authMiddleware.TrustedOriginMiddleware(append(corsOrigins, publicBaseURL)))
+	registerAuthenticatedAPIRoutes(authenticatedAPI, server, []byte(jwtSecret), userService)
 
 	if err := runHTTPServer(e, cfg.Server.HTTPAddr, gracefulShutdownTimeout); err != nil {
 		log.Fatal(err)
@@ -849,22 +868,35 @@ func newRateLimiter(requestsPerSecond rate.Limit, burst int) echo.MiddlewareFunc
 
 // newConfiguredRateLimiter returns a Redis-backed limiter when Redis is configured.
 func newConfiguredRateLimiter(scope string, cfg appconfig.RateLimitConfig, redisClient *redis.Client) echo.MiddlewareFunc {
+	return newConfiguredRateLimiterWithIdentifier(scope, cfg, redisClient, rateLimitIdentifier)
+}
+
+// newConfiguredRateLimiterWithIdentifier creates a limiter with a custom identity policy.
+func newConfiguredRateLimiterWithIdentifier(scope string, cfg appconfig.RateLimitConfig, redisClient *redis.Client, extractor middleware.Extractor) echo.MiddlewareFunc {
+	var store middleware.RateLimiterStore
 	if redisClient != nil {
-		return newRateLimiterWithStore(appratelimit.NewRedisStore(redisClient, appratelimit.RedisStoreConfig{
+		store = appratelimit.NewRedisStore(redisClient, appratelimit.RedisStoreConfig{
 			Prefix:            "progo:ratelimit:" + strings.TrimSpace(scope),
 			RequestsPerSecond: cfg.RequestsPerSecond,
 			Burst:             cfg.Burst,
 			ExpiresIn:         5 * time.Minute,
-		}))
+		})
+	} else {
+		store = newMemoryRateLimiterStore(rate.Limit(cfg.RequestsPerSecond), cfg.Burst)
 	}
-	return newRateLimiter(rate.Limit(cfg.RequestsPerSecond), cfg.Burst)
+	return newRateLimiterWithStoreAndIdentifier(store, extractor)
 }
 
 // newRateLimiterWithStore wraps a concrete limiter store with the shared identifier policy.
 func newRateLimiterWithStore(store middleware.RateLimiterStore) echo.MiddlewareFunc {
+	return newRateLimiterWithStoreAndIdentifier(store, rateLimitIdentifier)
+}
+
+// newRateLimiterWithStoreAndIdentifier binds a limiter store to an identifier extractor.
+func newRateLimiterWithStoreAndIdentifier(store middleware.RateLimiterStore, extractor middleware.Extractor) echo.MiddlewareFunc {
 	return middleware.RateLimiterWithConfig(middleware.RateLimiterConfig{
 		Store:               store,
-		IdentifierExtractor: rateLimitIdentifier,
+		IdentifierExtractor: extractor,
 	})
 }
 
@@ -882,6 +914,26 @@ func rateLimitIdentifier(c echo.Context) (string, error) {
 	return c.RealIP(), nil
 }
 
+// authAccountRateLimitIdentifier applies a second, account-scoped throttle without storing email addresses.
+func authAccountRateLimitIdentifier(c echo.Context) (string, error) {
+	if c.Request().Method != http.MethodPost || (c.Path() != "/login" && c.Path() != "/register") {
+		return "request:" + c.Path() + ":" + c.RealIP(), nil
+	}
+	body, err := io.ReadAll(c.Request().Body)
+	if err != nil {
+		return "request:" + c.Path() + ":" + c.RealIP(), nil
+	}
+	c.Request().Body = io.NopCloser(strings.NewReader(string(body)))
+	var payload struct {
+		Email string `json:"email"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil || strings.TrimSpace(payload.Email) == "" {
+		return "request:" + c.Path() + ":" + c.RealIP(), nil
+	}
+	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(payload.Email))))
+	return fmt.Sprintf("account:%x", sum[:]), nil
+}
+
 // registerAuthenticatedAPIRoutes mounts stable REST API routes under one prefix.
 func registerAuthenticatedAPIRoutes(api *echo.Group, server *ApiServer, jwtSecret []byte, userService *user.Service) {
 	api.Use(authMiddleware.JWTMiddleware(jwtSecret, userService))
@@ -892,6 +944,7 @@ func registerAuthenticatedAPIRoutes(api *echo.Group, server *ApiServer, jwtSecre
 	server.userHandler.RegisterAdminRoutes(api)
 	server.federationHandler.RegisterRoutes(api)
 	server.projectHandler.RegisterRoutes(api)
+	server.labelHandler.RegisterRoutes(api)
 	server.ticketHandler.RegisterRoutes(api)
 	server.commentHandler.RegisterRoutes(api)
 	server.notificationHandler.RegisterRoutes(api)
@@ -901,19 +954,11 @@ func registerAuthenticatedAPIRoutes(api *echo.Group, server *ApiServer, jwtSecre
 	server.auditHandler.RegisterRoutes(api)
 }
 
-// healthCheck reports whether the API process can still reach PostgreSQL.
+// healthCheck is a cheap liveness probe. Dependency health belongs to /ready.
 func (s *ApiServer) healthCheck(c echo.Context) error {
-	if err := s.db.Ping(); err != nil {
-		log.Printf("Health check failed: database ping error: %v", err)
-
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"status": "error",
-			"system": "database unreachable",
-		})
-	}
 	return c.JSON(http.StatusOK, map[string]string{
 		"status": "ok",
-		"system": "working",
+		"system": "alive",
 	})
 }
 
@@ -951,12 +996,10 @@ func (s *ApiServer) readinessCheck(c echo.Context) error {
 		}
 	}
 
-	if strings.TrimSpace(s.redisAddr) == "" {
+	if s.redisClient == nil {
 		checks["redis"] = "disabled"
 	} else {
-		client := redis.NewClient(&redis.Options{Addr: s.redisAddr})
-		defer client.Close()
-		if err := client.Ping(ctx).Err(); err != nil {
+		if err := s.redisClient.Ping(ctx).Err(); err != nil {
 			log.Printf("Readiness check failed: redis ping error: %v", err)
 			statusCode = http.StatusServiceUnavailable
 			status = "not_ready"

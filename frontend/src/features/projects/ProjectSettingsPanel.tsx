@@ -47,6 +47,7 @@ import type {
   ProjectRole,
   Ticket,
 } from "../../types";
+import { ProjectLabelsPanel } from "./ProjectLabelsPanel";
 
 function allProjectPermissions(): ProjectPermission[] {
   return projectPermissionGroups.flatMap((group) => group.permissions.map((permission) => permission.id));
@@ -724,7 +725,7 @@ function ProjectMemberActions({ project }: { project: Project }) {
     onSuccess: async () => {
       await Promise.all([
         refreshMembership(),
-        queryClient.invalidateQueries({ queryKey: queryKeys.tickets(projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.ticketsScope(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.graphScope(projectId) }),
       ]);
       toast.success("Member removed");
@@ -1305,6 +1306,7 @@ export function ProjectSettingsPanel({ project, tickets }: { project: Project; t
       </Panel>
 
       <GitHubRepositoryManager projectId={project.id} />
+      <ProjectLabelsPanel projectId={project.id} />
       <ProjectRoleManager projectId={project.id} />
       <ProjectMemberActions project={project} />
     </div>

@@ -4,25 +4,28 @@ import (
 	"time"
 
 	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
+	"github.com/lib/pq"
 )
 
 // Ticket is a ForgeFed-style issue object owned by a project.
 type Ticket struct {
-	ID          string    `db:"id" json:"id"`
-	APID        string    `db:"ap_id" json:"ap_id"`
-	Title       string    `db:"title" json:"title"`
-	Description string    `db:"description" json:"description"`
-	Status      string    `db:"status" json:"status"`
-	Priority    string    `db:"priority" json:"priority"`
-	Type        string    `db:"type" json:"type"`
-	Rank        string    `db:"rank" json:"rank"`
-	ParentID    *string   `db:"parent_id" json:"parent_id"`
-	ProjectID   string    `db:"project_id" json:"project_id"`
-	ReporterID  string    `db:"reporter_id" json:"reporter_id"`
-	AssigneeID  *string   `db:"assignee_id" json:"assignee_id"`
-	IsResolved  bool      `db:"is_resolved" json:"is_resolved"`
-	CreatedAt   time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
+	ID          string         `db:"id" json:"id"`
+	APID        string         `db:"ap_id" json:"ap_id"`
+	Title       string         `db:"title" json:"title"`
+	Description string         `db:"description" json:"description"`
+	Status      string         `db:"status" json:"status"`
+	Priority    string         `db:"priority" json:"priority"`
+	Type        string         `db:"type" json:"type"`
+	Rank        string         `db:"rank" json:"rank"`
+	ParentID    *string        `db:"parent_id" json:"parent_id"`
+	ProjectID   string         `db:"project_id" json:"project_id"`
+	ReporterID  string         `db:"reporter_id" json:"reporter_id"`
+	AssigneeID  *string        `db:"assignee_id" json:"assignee_id"`
+	IsResolved  bool           `db:"is_resolved" json:"is_resolved"`
+	DueDate     *time.Time     `db:"due_date" json:"due_date"`
+	LabelIDs    pq.StringArray `db:"label_ids" json:"label_ids"`
+	CreatedAt   time.Time      `db:"created_at" json:"created_at"`
+	UpdatedAt   time.Time      `db:"updated_at" json:"updated_at"`
 }
 
 // TicketLink is a directed relationship between two tickets.
@@ -38,6 +41,7 @@ type TicketLink struct {
 type TicketListOptions struct {
 	Limit      int
 	Offset     int
+	Query      string
 	Status     string
 	Priority   string
 	Type       string

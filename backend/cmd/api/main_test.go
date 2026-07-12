@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	appconfig "github.com/antonovs105/project-management-system-go/internal/config"
 	"github.com/antonovs105/project-management-system-go/internal/githubintegration"
 	"github.com/antonovs105/project-management-system-go/internal/instance"
+	"github.com/antonovs105/project-management-system-go/internal/label"
 	"github.com/antonovs105/project-management-system-go/internal/notification"
 	"github.com/antonovs105/project-management-system-go/internal/observability"
 	"github.com/antonovs105/project-management-system-go/internal/project"
@@ -29,6 +31,43 @@ func TestValidateRuntimeConfigAllowsDevelopmentLocalhost(t *testing.T) {
 	err := validateRuntimeConfig(false, "your_secret_key_here", "http://localhost:8080", "localhost:8080", "", "")
 
 	require.NoError(t, err)
+}
+
+func TestHealthCheckIsIndependentOfExternalDependencies(t *testing.T) {
+	server := &ApiServer{}
+	e := echo.New()
+	e.GET("/health", server.healthCheck)
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.JSONEq(t, `{"status":"ok","system":"alive"}`, rec.Body.String())
+}
+
+func TestAuthAccountRateLimitIdentifierHashesNormalizedEmailAndPreservesBody(t *testing.T) {
+	e := echo.New()
+	identifierFor := func(email, ip string) (string, string) {
+		body := `{"email":"` + email + `","password":"secret"}`
+		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(body))
+		req.RemoteAddr = ip + ":1234"
+		ctx := e.NewContext(req, httptest.NewRecorder())
+		ctx.SetPath("/login")
+
+		identifier, err := authAccountRateLimitIdentifier(ctx)
+		require.NoError(t, err)
+		preserved, err := io.ReadAll(req.Body)
+		require.NoError(t, err)
+		return identifier, string(preserved)
+	}
+
+	first, body := identifierFor(" User@Example.Test ", "192.0.2.10")
+	second, _ := identifierFor("user@example.test", "198.51.100.20")
+
+	require.Equal(t, first, second)
+	require.NotContains(t, first, "example.test")
+	require.JSONEq(t, `{"email":" User@Example.Test ","password":"secret"}`, body)
 }
 
 func TestParseAppEnvDefaultsToDevelopment(t *testing.T) {
@@ -194,6 +233,7 @@ func TestAuthenticatedAPIRoutesUseVersionedPrefixOnly(t *testing.T) {
 		userHandler:         user.NewHandler(nil),
 		instanceHandler:     instance.NewHandler(appconfig.Config{}, nil, nil),
 		projectHandler:      project.NewHandler(nil),
+		labelHandler:        label.NewHandler(nil),
 		ticketHandler:       ticket.NewHandler(nil),
 		commentHandler:      comment.NewHandler(nil),
 		notificationHandler: notification.NewHandler(nil),

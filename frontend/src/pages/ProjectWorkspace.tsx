@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Clock3, Flame, GitFork, ListChecks, Pencil, Plus, RefreshCw, Settings, Trash2, Truck } from "lucide-react";
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -111,7 +111,7 @@ export function ProjectWorkspace() {
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const token = useAuthStore((state) => state.token);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const user = useAuthStore((state) => state.user);
   const [createTicketOpen, setCreateTicketOpen] = useState(false);
   const [selectedTicketId, setSelectedTicketId] = useState<ID | null>(null);
@@ -119,12 +119,17 @@ export function ProjectWorkspace() {
   const [projectName, setProjectName] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
   const [assigneeFilter, setAssigneeFilter] = useState("all");
+  const [ticketSearch, setTicketSearch] = useState("");
+  const [ticketPage, setTicketPage] = useState(0);
   const [graphLimit, setGraphLimit] = useState("250");
   const [graphStatus, setGraphStatus] = useState("");
   const [graphPriority, setGraphPriority] = useState("");
   const [graphType, setGraphType] = useState("");
   const [graphAssignee, setGraphAssignee] = useState("all");
   const activeProjectId = projectId || "";
+  const deferredTicketSearch = useDeferredValue(ticketSearch.trim());
+  const ticketPageSize = 50;
+  const ticketFiltersKey = JSON.stringify({ q: deferredTicketSearch, page: ticketPage });
 
   const view = viewFromPath(location.pathname);
 
@@ -135,10 +140,16 @@ export function ProjectWorkspace() {
   });
 
   const tickets = useQuery({
-    queryKey: queryKeys.tickets(activeProjectId),
-    queryFn: () => api.listTickets(activeProjectId),
+    queryKey: queryKeys.tickets(activeProjectId, ticketFiltersKey),
+    queryFn: () => api.listTickets(activeProjectId, {
+      q: deferredTicketSearch || undefined,
+      limit: ticketPageSize + 1,
+      offset: ticketPage * ticketPageSize,
+    }),
     enabled: Boolean(projectId),
   });
+  const pageTickets = useMemo(() => (tickets.data || []).slice(0, ticketPageSize), [tickets.data]);
+  const hasNextTicketPage = (tickets.data?.length || 0) > ticketPageSize;
 
   const members = useQuery({
     queryKey: queryKeys.projectMembers(activeProjectId),
@@ -146,18 +157,24 @@ export function ProjectWorkspace() {
     enabled: Boolean(projectId),
   });
 
+  const labels = useQuery({
+    queryKey: queryKeys.projectLabels(activeProjectId),
+    queryFn: () => api.listProjectLabels(activeProjectId),
+    enabled: Boolean(projectId),
+  });
+
   const ticketStats = useMemo(() => {
-    const currentTickets = tickets.data || [];
+    const currentTickets = pageTickets;
     return {
       total: currentTickets.length,
       active: currentTickets.filter((ticket) => ticket.status === "in_progress" || ticket.status === "review").length,
       urgent: currentTickets.filter((ticket) => ticket.priority === "urgent").length,
       done: currentTickets.filter((ticket) => ticket.status === "done").length,
     };
-  }, [tickets.data]);
+  }, [pageTickets]);
 
   const visibleTickets = useMemo(() => {
-    const currentTickets = tickets.data || [];
+    const currentTickets = pageTickets;
     if (assigneeFilter === "all") {
       return currentTickets;
     }
@@ -168,7 +185,7 @@ export function ProjectWorkspace() {
       return currentTickets.filter((ticket) => !ticket.assignee_id);
     }
     return currentTickets.filter((ticket) => ticket.assignee_id === assigneeFilter);
-  }, [assigneeFilter, tickets.data, user?.userId]);
+  }, [assigneeFilter, pageTickets, user?.userId]);
 
   const graphFilters = useMemo<GraphFilters>(() => {
     const filters: GraphFilters = {};
@@ -201,7 +218,7 @@ export function ProjectWorkspace() {
   });
 
   useEffect(() => {
-    if (!activeProjectId || !token) {
+    if (!activeProjectId || !isAuthenticated) {
       return;
     }
 
@@ -213,7 +230,7 @@ export function ProjectWorkspace() {
       if (event.project_id !== activeProjectId) {
         return;
       }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.tickets(activeProjectId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.ticketsScope(activeProjectId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.graphScope(activeProjectId) });
       if (event.ticket_id) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.ticket(event.ticket_id) });
@@ -244,9 +261,9 @@ export function ProjectWorkspace() {
     async function connect() {
       try {
         const response = await fetch(projectTicketEventsURL(activeProjectId), {
+          credentials: "include",
           headers: {
             Accept: "text/event-stream",
-            Authorization: `Bearer ${token}`,
           },
           signal: controller.signal,
         });
@@ -286,7 +303,7 @@ export function ProjectWorkspace() {
         window.clearTimeout(reconnectTimer);
       }
     };
-  }, [activeProjectId, queryClient, token]);
+  }, [activeProjectId, isAuthenticated, queryClient]);
 
   const moveTicket = useMutation({
     mutationFn: ({
@@ -306,22 +323,23 @@ export function ProjectWorkspace() {
         after_ticket_id: afterTicketId,
       }),
     onMutate: async ({ ticketId, status, beforeTicketId, afterTicketId }) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.tickets(activeProjectId) });
-      const previous = queryClient.getQueryData<Ticket[]>(queryKeys.tickets(activeProjectId));
-      queryClient.setQueryData<Ticket[]>(queryKeys.tickets(activeProjectId), (current = []) =>
+      const activeTicketsKey = queryKeys.tickets(activeProjectId, ticketFiltersKey);
+      await queryClient.cancelQueries({ queryKey: activeTicketsKey });
+      const previous = queryClient.getQueryData<Ticket[]>(activeTicketsKey);
+      queryClient.setQueryData<Ticket[]>(activeTicketsKey, (current = []) =>
         moveTicketsOptimistically(current, ticketId, status, beforeTicketId, afterTicketId),
       );
-      return { previous };
+      return { previous, queryKey: activeTicketsKey };
     },
     onError: (error, _variables, context) => {
       if (context?.previous) {
-        queryClient.setQueryData(queryKeys.tickets(activeProjectId), context.previous);
+        queryClient.setQueryData(context.queryKey, context.previous);
       }
       toast.error(errorMessage(error, "Could not move ticket."));
     },
     onSettled: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.tickets(activeProjectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.ticketsScope(activeProjectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.graphScope(activeProjectId) }),
       ]);
     },
@@ -419,7 +437,7 @@ export function ProjectWorkspace() {
               </Link>
             </div>
             <div className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-sm text-zinc-500 shadow-sm">
-              {visibleTickets.length} / {tickets.data?.length || 0} tickets
+              Page {ticketPage + 1}: {visibleTickets.length} / {pageTickets.length} tickets
             </div>
           </div>
 
@@ -431,21 +449,39 @@ export function ProjectWorkspace() {
           {view === "board" && tickets.data ? (
             <div className="grid gap-3">
               <div className="flex flex-col gap-3 rounded-3xl border border-zinc-200 bg-white p-3 shadow-sm sm:flex-row sm:items-end sm:justify-between">
-                <SelectField
-                  className="min-w-64"
-                  label="Assignee filter"
-                  value={assigneeFilter}
-                  onChange={(event) => setAssigneeFilter(event.target.value)}
-                >
-                  <option value="all">All tickets</option>
-                  <option value="me">My tickets</option>
-                  <option value="unassigned">Unassigned</option>
-                  {(members.data || []).map((member) => (
-                    <option key={member.user_id} value={member.user_id}>
-                      {projectMemberLabel(members.data || [], member.user_id)}
-                    </option>
-                  ))}
-                </SelectField>
+                <div className="grid flex-1 gap-3 sm:grid-cols-2">
+                  <TextField
+                    label="Search tickets"
+                    value={ticketSearch}
+                    onChange={(event) => {
+                      setTicketSearch(event.target.value);
+                      setTicketPage(0);
+                    }}
+                    placeholder="Title or description"
+                  />
+                  <SelectField
+                    label="Assignee filter"
+                    value={assigneeFilter}
+                    onChange={(event) => setAssigneeFilter(event.target.value)}
+                  >
+                    <option value="all">All tickets</option>
+                    <option value="me">My tickets</option>
+                    <option value="unassigned">Unassigned</option>
+                    {(members.data || []).map((member) => (
+                      <option key={member.user_id} value={member.user_id}>
+                        {projectMemberLabel(members.data || [], member.user_id)}
+                      </option>
+                    ))}
+                  </SelectField>
+                </div>
+                <div className="flex gap-2">
+                  <Button disabled={ticketPage === 0} onClick={() => setTicketPage((page) => Math.max(0, page - 1))}>
+                    Previous
+                  </Button>
+                  <Button disabled={!hasNextTicketPage} onClick={() => setTicketPage((page) => page + 1)}>
+                    Next
+                  </Button>
+                </div>
                 {members.isError ? (
                   <div className="text-sm text-red-600">{errorMessage(members.error, "Could not load project members.")}</div>
                 ) : null}
@@ -453,6 +489,7 @@ export function ProjectWorkspace() {
               <TicketBoard
                 tickets={visibleTickets}
                 members={members.data || []}
+                labels={labels.data || []}
                 onOpenTicket={setSelectedTicketId}
                 onMoveTicket={(ticketId, status, beforeTicketId, afterTicketId) =>
                   moveTicket.mutate({ ticketId, status, beforeTicketId, afterTicketId })
@@ -542,6 +579,7 @@ export function ProjectWorkspace() {
             projectId={activeProjectId}
             tickets={tickets.data || []}
             members={members.data || []}
+            labels={labels.data || []}
             open={createTicketOpen}
             onClose={() => setCreateTicketOpen(false)}
           />
@@ -552,6 +590,7 @@ export function ProjectWorkspace() {
               ticketId={selectedTicketId}
               tickets={tickets.data || []}
               members={members.data || []}
+              labels={labels.data || []}
               onClose={() => setSelectedTicketId(null)}
             />
           ) : null}

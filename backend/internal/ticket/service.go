@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
+	"github.com/antonovs105/project-management-system-go/internal/apperror"
 	"github.com/antonovs105/project-management-system-go/internal/project"
+	"github.com/google/uuid"
 )
 
 // ProjectChecker exposes project access checks required by ticket workflows.
@@ -82,6 +85,8 @@ type CreateTicketRequest struct {
 	Type        string
 	ParentID    *string
 	AssigneeID  *string
+	DueDate     string
+	LabelIDs    []string
 }
 
 // MoveTicketRequest contains the target board position for a ticket.
@@ -107,6 +112,8 @@ const (
 	maxTicketTitleLength = 120
 	// maxTicketDescriptionLength is the longest accepted ticket description.
 	maxTicketDescriptionLength = 4000
+	// maxTicketSearchLength bounds full-text query complexity.
+	maxTicketSearchLength = 200
 )
 
 // ticketRanks defines allowed parent-child ordering for ticket hierarchy.
@@ -145,6 +152,14 @@ func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, pro
 		return nil, err
 	}
 	req.Description, err = normalizeOptionalTicketText(req.Description, "description", maxTicketDescriptionLength)
+	if err != nil {
+		return nil, err
+	}
+	dueDate, err := parseDueDate(req.DueDate)
+	if err != nil {
+		return nil, err
+	}
+	labelIDs, err := normalizeLabelIDs(req.LabelIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -206,6 +221,8 @@ func (s *Service) CreateTicket(ctx context.Context, req CreateTicketRequest, pro
 		ProjectID:   projectID,
 		ReporterID:  reporterID,
 		AssigneeID:  req.AssigneeID,
+		DueDate:     dueDate,
+		LabelIDs:    labelIDs,
 	}
 
 	result, err := s.repo.Create(ctx, t)
@@ -237,12 +254,12 @@ func (s *Service) ListTicketsInProject(ctx context.Context, projectID, userID st
 func (s *Service) GetTicketByID(ctx context.Context, ticketID, userID string) (*Ticket, error) {
 	ticket, err := s.repo.GetByID(ctx, ticketID)
 	if err != nil {
-		return nil, errors.New("ticket not found")
+		return nil, apperror.New(apperror.ErrNotFound, "ticket not found")
 	}
 
 	_, err = s.projectService.GetProjectByID(ctx, ticket.ProjectID, userID)
 	if err != nil {
-		return nil, errors.New("ticket not found or access denied")
+		return nil, apperror.New(apperror.ErrNotFound, "ticket not found or access denied")
 	}
 
 	return ticket, nil
@@ -250,13 +267,15 @@ func (s *Service) GetTicketByID(ctx context.Context, ticketID, userID string) (*
 
 // UpdateTicketRequest contains nullable partial ticket updates.
 type UpdateTicketRequest struct {
-	Title       *string  `json:"title"`
-	Description *string  `json:"description"`
-	Status      *string  `json:"status"`
-	Priority    *string  `json:"priority"`
-	Type        *string  `json:"type"`
-	ParentID    **string `json:"parent_id"`
-	AssigneeID  **string `json:"assignee_id"`
+	Title       *string   `json:"title"`
+	Description *string   `json:"description"`
+	Status      *string   `json:"status"`
+	Priority    *string   `json:"priority"`
+	Type        *string   `json:"type"`
+	ParentID    **string  `json:"parent_id"`
+	AssigneeID  **string  `json:"assignee_id"`
+	DueDate     *string   `json:"due_date"`
+	LabelIDs    *[]string `json:"label_ids"`
 }
 
 // UpdateTicket changes ticket fields and emits Update or Add activities as needed.
@@ -326,6 +345,20 @@ func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, tic
 		}
 		req.Description = &description
 	}
+	if req.DueDate != nil {
+		dueDate, err := parseDueDate(*req.DueDate)
+		if err != nil {
+			return err
+		}
+		ticketToUpdate.DueDate = dueDate
+	}
+	if req.LabelIDs != nil {
+		labelIDs, err := normalizeLabelIDs(*req.LabelIDs)
+		if err != nil {
+			return err
+		}
+		ticketToUpdate.LabelIDs = labelIDs
+	}
 	if req.Status != nil && !ticketStatuses[*req.Status] {
 		return invalidTicketInput("invalid ticket status")
 	}
@@ -367,6 +400,44 @@ func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, tic
 		s.notifyTicketAssigned(ctx, userID, ticketToUpdate)
 	}
 	return nil
+}
+
+// parseDueDate accepts an RFC 3339 timestamp or date-only value and normalizes it to UTC.
+func parseDueDate(value string) (*time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		parsed, err = time.Parse("2006-01-02", value)
+	}
+	if err != nil {
+		return nil, invalidTicketInput("due date must be an RFC 3339 timestamp or YYYY-MM-DD")
+	}
+	parsed = parsed.UTC()
+	return &parsed, nil
+}
+
+// normalizeLabelIDs validates, deduplicates, and bounds ticket label assignments.
+func normalizeLabelIDs(values []string) ([]string, error) {
+	if len(values) > 20 {
+		return nil, invalidTicketInput("a ticket can have at most 20 labels")
+	}
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if _, err := uuid.Parse(value); err != nil {
+			return nil, invalidTicketInput("invalid label id")
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result, nil
 }
 
 // MoveTicket reorders a ticket within or across board status groups.
@@ -430,6 +501,10 @@ func normalizeTicketListOptions(options TicketListOptions) (TicketListOptions, e
 
 // normalizeTicketFilters validates optional ticket metadata filters.
 func normalizeTicketFilters(options TicketListOptions) (TicketListOptions, error) {
+	options.Query = strings.TrimSpace(options.Query)
+	if utf8.RuneCountInString(options.Query) > maxTicketSearchLength {
+		return TicketListOptions{}, invalidTicketInput("ticket search query is too long")
+	}
 	options.Status = strings.ToLower(strings.TrimSpace(options.Status))
 	if options.Status != "" && !ticketStatuses[options.Status] {
 		return TicketListOptions{}, invalidTicketInput("invalid ticket status")
@@ -722,10 +797,10 @@ func (s *Service) GetTicketGraph(ctx context.Context, projectID, userID string, 
 func (s *Service) requireProjectPermission(ctx context.Context, projectID, userID string, permission string, deniedMessage string) error {
 	allowed, err := s.projectService.HasProjectPermission(ctx, projectID, userID, permission)
 	if err != nil {
-		return errors.New("project not found or access denied")
+		return apperror.New(apperror.ErrNotFound, "project not found or access denied")
 	}
 	if !allowed {
-		return errors.New(deniedMessage)
+		return apperror.New(apperror.ErrForbidden, deniedMessage)
 	}
 	return nil
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/antonovs105/project-management-system-go/internal/apperror"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 )
@@ -55,12 +56,14 @@ func (h *Handler) RegisterRoutes(api *echo.Group) {
 
 // createTicketRequest is the JSON payload for creating a ticket.
 type createTicketRequest struct {
-	Title       string  `json:"title"`
-	Description string  `json:"description"`
-	Priority    string  `json:"priority"`
-	Type        string  `json:"type"`
-	ParentID    *string `json:"parent_id"`
-	AssigneeID  *string `json:"assignee_id"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Priority    string   `json:"priority"`
+	Type        string   `json:"type"`
+	ParentID    *string  `json:"parent_id"`
+	AssigneeID  *string  `json:"assignee_id"`
+	DueDate     string   `json:"due_date"`
+	LabelIDs    []string `json:"label_ids"`
 }
 
 // Create creates a ticket in a project.
@@ -87,6 +90,8 @@ func (h *Handler) Create(c echo.Context) error {
 		Type:        req.Type,
 		ParentID:    req.ParentID,
 		AssigneeID:  req.AssigneeID,
+		DueDate:     req.DueDate,
+		LabelIDs:    req.LabelIDs,
 	}
 
 	ticket, err := h.service.CreateTicket(c.Request().Context(), serviceReq, projectID, userID)
@@ -173,13 +178,15 @@ func (h *Handler) StreamEvents(c echo.Context) error {
 
 // updateTicketRequest is the JSON payload for partial ticket updates.
 type updateTicketRequest struct {
-	Title       *string  `json:"title"`
-	Description *string  `json:"description"`
-	Status      *string  `json:"status"`
-	Priority    *string  `json:"priority"`
-	Type        *string  `json:"type"`
-	ParentID    **string `json:"parent_id"`
-	AssigneeID  **string `json:"assignee_id"`
+	Title       *string   `json:"title"`
+	Description *string   `json:"description"`
+	Status      *string   `json:"status"`
+	Priority    *string   `json:"priority"`
+	Type        *string   `json:"type"`
+	ParentID    **string  `json:"parent_id"`
+	AssigneeID  **string  `json:"assignee_id"`
+	DueDate     *string   `json:"due_date"`
+	LabelIDs    *[]string `json:"label_ids"`
 }
 
 // moveTicketRequest is the JSON payload for moving a ticket on the board.
@@ -228,6 +235,8 @@ func (h *Handler) Update(c echo.Context) error {
 		Type:        req.Type,
 		ParentID:    req.ParentID,
 		AssigneeID:  req.AssigneeID,
+		DueDate:     req.DueDate,
+		LabelIDs:    req.LabelIDs,
 	}
 
 	if err := h.service.UpdateTicket(c.Request().Context(), serviceReq, ticketID, userID); err != nil {
@@ -379,6 +388,7 @@ func ticketFilterOptions(c echo.Context, options TicketListOptions) (TicketListO
 	options.Status = strings.TrimSpace(c.QueryParam("status"))
 	options.Priority = strings.TrimSpace(c.QueryParam("priority"))
 	options.Type = strings.TrimSpace(c.QueryParam("type"))
+	options.Query = strings.TrimSpace(c.QueryParam("q"))
 	assignee := strings.TrimSpace(c.QueryParam("assignee"))
 	assigneeID := strings.TrimSpace(c.QueryParam("assignee_id"))
 	switch {
@@ -494,11 +504,9 @@ func writeTicketError(c echo.Context, err error) error {
 	switch {
 	case errors.Is(err, ErrInvalidTicketInput):
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
-	case strings.Contains(err.Error(), "insufficient permissions"):
+	case errors.Is(err, apperror.ErrForbidden):
 		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
-	case strings.Contains(err.Error(), "access denied"):
-		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
-	case strings.Contains(err.Error(), "not found"):
+	case errors.Is(err, apperror.ErrNotFound):
 		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
 	default:
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "ticket operation failed"})

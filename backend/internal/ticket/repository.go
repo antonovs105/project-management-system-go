@@ -57,15 +57,18 @@ func (r *PgRepository) Create(ctx context.Context, ticket *Ticket) (*ActivityRes
 	if _, err := tx.NamedExecContext(ctx, `
 		INSERT INTO tickets (
 			id, ap_id, title, description, status, priority, type, rank, parent_id,
-			project_id, reporter_id, is_resolved, resolved_at, resolved_by_actor_id
+			project_id, reporter_id, is_resolved, due_date, resolved_at, resolved_by_actor_id
 		)
 		VALUES (
 			:id, :ap_id, :title, :description, :status, :priority, :type, :rank, :parent_id,
-			:project_id, :reporter_id, :is_resolved,
+			:project_id, :reporter_id, :is_resolved, :due_date,
 			CASE WHEN :is_resolved THEN now() ELSE NULL END,
 			CASE WHEN :is_resolved THEN CAST(:reporter_id AS uuid) ELSE NULL END
 		)
 	`, ticket); err != nil {
+		return nil, err
+	}
+	if err := syncTicketLabels(ctx, tx, ticket.ID, ticket.ProjectID, ticket.LabelIDs); err != nil {
 		return nil, err
 	}
 	if err := tx.QueryRowxContext(ctx, `
@@ -133,6 +136,10 @@ func (r *PgRepository) ListByProjectID(ctx context.Context, projectID string, op
 	if options.Type != "" {
 		args = append(args, options.Type)
 		conditions = append(conditions, fmt.Sprintf("t.type = $%d", len(args)))
+	}
+	if options.Query != "" {
+		args = append(args, options.Query)
+		conditions = append(conditions, fmt.Sprintf("t.search_vector @@ websearch_to_tsquery('simple', $%d)", len(args)))
 	}
 	args = append(args, options.Limit, options.Offset)
 	limitPos := len(args) - 1
@@ -219,15 +226,16 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket, actorID strin
 			type = $6,
 			rank = $7,
 			parent_id = $8,
-			is_resolved = $9,
+			due_date = $9,
+			is_resolved = $10,
 			resolved_at = CASE
-				WHEN $9 AND resolved_at IS NULL THEN now()
-				WHEN NOT $9 THEN NULL
+				WHEN $10 AND resolved_at IS NULL THEN now()
+				WHEN NOT $10 THEN NULL
 				ELSE resolved_at
 			END,
 			resolved_by_actor_id = CASE
-				WHEN $9 AND NOT $10 THEN CAST($11 AS uuid)
-				WHEN $9 THEN resolved_by_actor_id
+				WHEN $10 AND NOT $11 THEN CAST($12 AS uuid)
+				WHEN $10 THEN resolved_by_actor_id
 				ELSE NULL
 			END
 		WHERE id = $1
@@ -240,6 +248,7 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket, actorID strin
 		ticket.Type,
 		ticket.Rank,
 		ticket.ParentID,
+		ticket.DueDate,
 		ticket.IsResolved,
 		current.IsResolved,
 		actorID,
@@ -253,6 +262,9 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket, actorID strin
 	}
 	if rowsAffected == 0 {
 		return nil, errors.New("ticket to update not found")
+	}
+	if err := syncTicketLabels(ctx, tx, ticket.ID, ticket.ProjectID, ticket.LabelIDs); err != nil {
+		return nil, err
 	}
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM ticket_assignees WHERE ticket_id = $1`, ticket.ID); err != nil {
@@ -844,6 +856,14 @@ func ticketSelectBase() string {
 			t.reporter_id::text,
 			ta.actor_id::text AS assignee_id,
 			t.is_resolved,
+			t.due_date,
+			COALESCE(ARRAY(
+				SELECT assignment.label_id::text
+				FROM ticket_labels assignment
+				JOIN project_labels label ON label.id = assignment.label_id
+				WHERE assignment.ticket_id = t.id
+				ORDER BY lower(label.name), assignment.label_id
+			), ARRAY[]::text[]) AS label_ids,
 			t.created_at,
 			t.updated_at
 		FROM tickets t
@@ -855,6 +875,30 @@ func ticketSelectBase() string {
 			LIMIT 1
 		) ta ON true
 	`
+}
+
+// syncTicketLabels replaces ticket label assignments while enforcing project ownership.
+func syncTicketLabels(ctx context.Context, tx *sqlx.Tx, ticketID, projectID string, labelIDs []string) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM ticket_labels WHERE ticket_id = $1`, ticketID); err != nil {
+		return err
+	}
+	for _, labelID := range labelIDs {
+		result, err := tx.ExecContext(ctx, `
+			INSERT INTO ticket_labels (ticket_id, label_id)
+			SELECT $1, id FROM project_labels WHERE id = $2 AND project_id = $3
+		`, ticketID, labelID, projectID)
+		if err != nil {
+			return err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if count != 1 {
+			return invalidTicketInput("label does not belong to the ticket project")
+		}
+	}
+	return nil
 }
 
 // lookupActorAPID resolves an actor UUID to its ActivityPub ID.
