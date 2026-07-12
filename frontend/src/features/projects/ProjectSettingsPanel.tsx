@@ -6,9 +6,10 @@ import { toast } from "sonner";
 import { Button, ErrorState, LoadingState, Modal, Panel, SelectField, TextAreaField, TextField } from "../../components/ui";
 import { api, errorMessage } from "../../lib/api";
 import { projectPermissionGroups } from "../../lib/constants";
-import { compactId, initials, relativeDate } from "../../lib/format";
+import { compactId, initials } from "../../lib/format";
 import { fieldLimits } from "../../lib/limits";
 import { queryKeys } from "../../lib/queryKeys";
+import { useI18n } from "../../lib/i18n-context";
 import type {
   ID,
   Project,
@@ -71,25 +72,25 @@ function PermissionPicker({
   );
 }
 
-function permissionsSummary(role: ProjectRole): string {
+function permissionsSummary(role: ProjectRole, all: string, none: string, count: string): string {
   if (role.permissions.length === allProjectPermissions().length) {
-    return "All permissions";
+    return all;
   }
   if (role.permissions.length === 0) {
-    return "No permissions";
+    return none;
   }
-  return `${role.permissions.length} permissions`;
+  return count;
 }
 
-function actorTitle(name: string, username: string, handle: string): string {
-  return name || username || handle || "Unknown actor";
+function actorTitle(name: string, username: string, handle: string, fallback: string): string {
+  return name || username || handle || fallback;
 }
 
-function actorSubtitle(handle: string, email?: string): string {
+function actorSubtitle(handle: string, email: string | undefined, fallback: string): string {
   if (email) {
     return `${handle} / ${email}`;
   }
-  return handle || "No handle";
+  return handle || fallback;
 }
 
 function InviteStatusBadge({ status }: { status: ProjectInvite["status"] }) {
@@ -113,6 +114,7 @@ function PersonMark({ label }: { label: string }) {
 }
 
 function ProjectRoleManager({ projectId }: { projectId: ID }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRole, setEditingRole] = useState<ProjectRole | null>(null);
@@ -130,7 +132,7 @@ function ProjectRoleManager({ projectId }: { projectId: ID }) {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.projectRoles(projectId) });
       closeModal();
-      toast.success("Role created");
+      toast.success(t("settings.roleCreated"));
     },
   });
 
@@ -144,7 +146,7 @@ function ProjectRoleManager({ projectId }: { projectId: ID }) {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.projectRoles(projectId) });
       closeModal();
-      toast.success("Role updated");
+      toast.success(t("settings.roleUpdated"));
     },
   });
 
@@ -153,9 +155,9 @@ function ProjectRoleManager({ projectId }: { projectId: ID }) {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.projectRoles(projectId) });
       closeModal();
-      toast.success("Role deleted");
+      toast.success(t("settings.roleDeleted"));
     },
-    onError: (error) => toast.error(errorMessage(error, "Could not delete role.")),
+    onError: (error) => toast.error(errorMessage(error, t("settings.roleDeleteFailed"))),
   });
 
   function openCreate() {
@@ -194,17 +196,17 @@ function ProjectRoleManager({ projectId }: { projectId: ID }) {
     <Panel className="overflow-hidden">
       <div className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h2 className="text-base font-semibold text-zinc-950">Project Roles</h2>
-          <p className="mt-1 text-sm text-zinc-500">Project-local permission sets.</p>
+          <h2 className="text-base font-semibold text-zinc-950">{t("settings.rolesTitle")}</h2>
+          <p className="mt-1 text-sm text-zinc-500">{t("settings.rolesBody")}</p>
         </div>
         <Button tone="primary" onClick={openCreate}>
           <Plus size={16} />
-          Role
+          {t("settings.role")}
         </Button>
       </div>
 
-      {roles.isLoading ? <LoadingState label="Loading roles" /> : null}
-      {roles.isError ? <ErrorState title="Could not load roles" body={errorMessage(roles.error, "Role request failed.")} /> : null}
+      {roles.isLoading ? <LoadingState label={t("settings.rolesLoading")} /> : null}
+      {roles.isError ? <ErrorState title={t("settings.rolesLoadFailed")} body={errorMessage(roles.error, t("settings.rolesRequestFailed"))} /> : null}
 
       <div className="divide-y divide-zinc-100">
         {roles.data?.map((role) => (
@@ -213,7 +215,7 @@ function ProjectRoleManager({ projectId }: { projectId: ID }) {
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-medium text-zinc-950">{role.name}</span>
                 {role.is_system ? (
-                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs text-zinc-500">system</span>
+                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs text-zinc-500">{t("settings.system")}</span>
                 ) : null}
               </div>
               <div className="mt-1 truncate text-xs text-zinc-500">
@@ -221,13 +223,13 @@ function ProjectRoleManager({ projectId }: { projectId: ID }) {
               </div>
             </div>
             <div className="min-w-0 text-sm text-zinc-600">
-              <div>{permissionsSummary(role)}</div>
-              <div className="mt-1 line-clamp-1 text-xs text-zinc-500">{role.description || "No description"}</div>
+              <div>{permissionsSummary(role, t("settings.allPermissions"), t("settings.noPermissions"), t("settings.permissionCount", { count: role.permissions.length }))}</div>
+              <div className="mt-1 line-clamp-1 text-xs text-zinc-500">{role.description || t("common.noDescription")}</div>
             </div>
             <div className="flex justify-end">
               <Button onClick={() => openEdit(role)}>
                 <Pencil size={15} />
-                Edit
+                {t("actions.edit")}
               </Button>
             </div>
           </div>
@@ -236,7 +238,7 @@ function ProjectRoleManager({ projectId }: { projectId: ID }) {
 
       <Modal
         open={modalOpen}
-        title={editingRole ? "Edit Role" : "Create Role"}
+        title={editingRole ? t("settings.editRole") : t("settings.createRole")}
         onClose={closeModal}
         formId="project-role"
         onSubmit={submitRole}
@@ -247,19 +249,19 @@ function ProjectRoleManager({ projectId }: { projectId: ID }) {
                 tone="danger"
                 disabled={deleteRole.isPending}
                 onClick={() => {
-                  if (window.confirm("Delete this role?")) {
+                  if (window.confirm(t("settings.deleteRoleConfirm"))) {
                     deleteRole.mutate(editingRole.id);
                   }
                 }}
               >
                 <Trash2 size={16} />
-                Delete
+                {t("actions.delete")}
               </Button>
             ) : null}
             <div className="flex flex-1 justify-end gap-2">
-              <Button onClick={closeModal}>Cancel</Button>
+              <Button onClick={closeModal}>{t("actions.cancel")}</Button>
               <Button type="submit" form="project-role" tone="primary" disabled={pending || !name.trim() || permissions.length === 0}>
-                Save
+                {t("actions.save")}
               </Button>
             </div>
           </>
@@ -267,20 +269,20 @@ function ProjectRoleManager({ projectId }: { projectId: ID }) {
       >
         <div className="grid gap-4">
           {createRole.isError ? (
-            <ErrorState title="Could not create role" body={errorMessage(createRole.error, "Role creation failed.")} />
+            <ErrorState title={t("settings.roleCreateFailed")} body={errorMessage(createRole.error, t("settings.roleCreationFailed"))} />
           ) : null}
           {updateRole.isError ? (
-            <ErrorState title="Could not update role" body={errorMessage(updateRole.error, "Role update failed.")} />
+            <ErrorState title={t("settings.roleUpdateFailed")} body={errorMessage(updateRole.error, t("settings.roleUpdateRequestFailed"))} />
           ) : null}
           <TextField
-            label="Name"
+            label={t("projects.name")}
             value={name}
             onChange={(event) => setName(event.target.value)}
             maxLength={fieldLimits.projectRoleNameMaxLength}
             required
           />
           <TextAreaField
-            label="Description"
+            label={t("projects.description")}
             value={description}
             onChange={(event) => setDescription(event.target.value)}
             maxLength={fieldLimits.projectRoleDescriptionMaxLength}
@@ -293,6 +295,7 @@ function ProjectRoleManager({ projectId }: { projectId: ID }) {
 }
 
 function ProjectMemberActions({ project }: { project: Project }) {
+  const { t, relativeDate } = useI18n();
   const queryClient = useQueryClient();
   const projectId = project.id;
   const [inviteRef, setInviteRef] = useState("");
@@ -326,9 +329,9 @@ function ProjectMemberActions({ project }: { project: Project }) {
     onSuccess: async () => {
       await refreshMembership();
       setInviteRef("");
-      toast.success("Invite created");
+      toast.success(t("settings.inviteCreated"));
     },
-    onError: (error) => toast.error(errorMessage(error, "Could not invite member.")),
+    onError: (error) => toast.error(errorMessage(error, t("settings.inviteFailed"))),
   });
 
   const removeMember = useMutation({
@@ -339,27 +342,27 @@ function ProjectMemberActions({ project }: { project: Project }) {
         queryClient.invalidateQueries({ queryKey: queryKeys.ticketsScope(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.graphScope(projectId) }),
       ]);
-      toast.success("Member removed");
+      toast.success(t("settings.memberRemoved"));
     },
-    onError: (error) => toast.error(errorMessage(error, "Could not remove member.")),
+    onError: (error) => toast.error(errorMessage(error, t("settings.memberRemoveFailed"))),
   });
 
   const updateMemberRole = useMutation({
     mutationFn: ({ userId, roleId }: { userId: ID; roleId: ID }) => api.updateProjectMemberRole(projectId, userId, { role_id: roleId }),
     onSuccess: async () => {
       await refreshMembership();
-      toast.success("Role updated");
+      toast.success(t("settings.roleUpdated"));
     },
-    onError: (error) => toast.error(errorMessage(error, "Could not update member role.")),
+    onError: (error) => toast.error(errorMessage(error, t("settings.memberRoleFailed"))),
   });
 
   const revokeInvite = useMutation({
     mutationFn: (inviteId: ID) => api.revokeInvite(inviteId),
     onSuccess: async () => {
       await refreshMembership();
-      toast.success("Invite revoked");
+      toast.success(t("settings.inviteRevoked"));
     },
-    onError: (error) => toast.error(errorMessage(error, "Could not revoke invite.")),
+    onError: (error) => toast.error(errorMessage(error, t("settings.inviteRevokeFailed"))),
   });
 
   const memberRows = members.data || [];
@@ -368,7 +371,7 @@ function ProjectMemberActions({ project }: { project: Project }) {
 
   function copyID(id: ID) {
     void navigator.clipboard?.writeText(id);
-    toast.success("ID copied");
+    toast.success(t("settings.idCopied"));
   }
 
   function exportMembersCSV() {
@@ -396,17 +399,17 @@ function ProjectMemberActions({ project }: { project: Project }) {
         <div>
           <h2 className="flex items-center gap-2 text-base font-semibold text-zinc-950">
             <Users size={17} />
-            Membership
+            {t("settings.membershipTitle")}
           </h2>
-          <p className="mt-1 text-sm text-zinc-500">Manage project people, pending invitations, and membership exports.</p>
+          <p className="mt-1 text-sm text-zinc-500">{t("settings.peopleBody")}</p>
         </div>
         <div className="grid grid-cols-2 gap-2 text-sm sm:flex">
           <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
-            <div className="text-xs text-zinc-400">Members</div>
+            <div className="text-xs text-zinc-400">{t("settings.members")}</div>
             <div className="mt-0.5 font-semibold text-zinc-950">{members.isLoading ? "..." : memberRows.length}</div>
           </div>
           <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
-            <div className="text-xs text-zinc-400">Invites</div>
+            <div className="text-xs text-zinc-400">{t("settings.invites")}</div>
             <div className="mt-0.5 font-semibold text-zinc-950">{invites.isLoading ? "..." : inviteRows.length}</div>
           </div>
         </div>
@@ -421,14 +424,14 @@ function ProjectMemberActions({ project }: { project: Project }) {
           }}
         >
           <TextField
-            label="Invitee"
+            label={t("settings.invitee")}
             placeholder="alice@example.com"
             value={inviteRef}
             onChange={(event) => setInviteRef(event.target.value)}
             required
           />
-          <SelectField label="Role" value={inviteRoleId} onChange={(event) => setInviteRoleId(event.target.value)}>
-            <option value="">Default role</option>
+          <SelectField label={t("settings.role")} value={inviteRoleId} onChange={(event) => setInviteRoleId(event.target.value)}>
+            <option value="">{t("settings.defaultRole")}</option>
             {roles.data?.map((role) => (
               <option key={role.id} value={role.id}>
                 {role.name}
@@ -437,14 +440,14 @@ function ProjectMemberActions({ project }: { project: Project }) {
           </SelectField>
           <Button className="self-end" type="submit" tone="primary" disabled={inviteMember.isPending || !inviteRef.trim()}>
             <Send size={16} />
-            Invite
+            {t("settings.invite")}
           </Button>
         </form>
       </div>
 
       {roles.isError ? (
         <div className="border-t border-zinc-100 p-4">
-          <ErrorState title="Could not load roles" body={errorMessage(roles.error, "Role request failed.")} />
+          <ErrorState title={t("settings.rolesLoadFailed")} body={errorMessage(roles.error, t("settings.rolesRequestFailed"))} />
         </div>
       ) : null}
 
@@ -454,27 +457,27 @@ function ProjectMemberActions({ project }: { project: Project }) {
             <div>
               <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-950">
                 <UserPlus size={15} />
-                Members
+                {t("settings.members")}
               </h3>
-              <p className="mt-1 text-xs text-zinc-500">Accepted local and remote collaborators on this project.</p>
+              <p className="mt-1 text-xs text-zinc-500">{t("settings.membersBody")}</p>
             </div>
             <Button onClick={exportMembersCSV} disabled={memberRows.length === 0}>
               <Download size={15} />
               CSV
             </Button>
           </div>
-          {members.isLoading ? <LoadingState label="Loading members" /> : null}
+          {members.isLoading ? <LoadingState label={t("settings.membersLoading")} /> : null}
           {members.isError ? (
             <div className="p-3">
-              <ErrorState title="Could not load members" body={errorMessage(members.error, "Member request failed.")} />
+              <ErrorState title={t("settings.membersLoadFailed")} body={errorMessage(members.error, t("settings.memberRequestFailed"))} />
             </div>
           ) : null}
           {!members.isLoading && !members.isError && memberRows.length === 0 ? (
-            <div className="p-6 text-center text-sm text-zinc-400">No members yet.</div>
+            <div className="p-6 text-center text-sm text-zinc-400">{t("settings.noMembers")}</div>
           ) : null}
           <div className="divide-y divide-zinc-100">
             {memberRows.map((member) => {
-              const title = actorTitle(member.name, member.username, member.handle);
+              const title = actorTitle(member.name, member.username, member.handle, t("settings.unknownActor"));
               return (
                 <div key={member.user_id} className="grid gap-3 p-3 md:grid-cols-[1fr_auto] md:items-center">
                   <div className="flex min-w-0 items-center gap-3">
@@ -483,18 +486,18 @@ function ProjectMemberActions({ project }: { project: Project }) {
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="truncate font-medium text-zinc-950">{title}</span>
                         {member.user_id === project.owner_id ? (
-                          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs text-zinc-500">owner</span>
+                          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs text-zinc-500">{t("settings.owner")}</span>
                         ) : null}
                         {member.is_remote ? (
-                          <span className="rounded-full border border-zinc-200 bg-zinc-950 px-2 py-0.5 text-xs text-white">remote</span>
+                          <span className="rounded-full border border-zinc-200 bg-zinc-950 px-2 py-0.5 text-xs text-white">{t("settings.remote")}</span>
                         ) : null}
                       </div>
-                      <div className="mt-1 truncate text-xs text-zinc-500">{actorSubtitle(member.handle, member.email)}</div>
+                      <div className="mt-1 truncate text-xs text-zinc-500">{actorSubtitle(member.handle, member.email, t("settings.noHandle"))}</div>
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 md:justify-end">
                     <label className="grid gap-1 text-xs text-zinc-500">
-                      <span className="sr-only">Role for {title}</span>
+                      <span className="sr-only">{t("settings.roleFor", { name: title })}</span>
                       <select
                         className="focus-ring h-9 min-w-40 rounded-full border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-800 shadow-sm disabled:opacity-50"
                         value={member.role_id}
@@ -520,13 +523,13 @@ function ProjectMemberActions({ project }: { project: Project }) {
                       tone="danger"
                       disabled={removeMember.isPending || updateMemberRole.isPending}
                       onClick={() => {
-                        if (window.confirm(`Remove ${title} from this project?`)) {
+                        if (window.confirm(t("settings.removeMemberConfirm", { name: title }))) {
                           removeMember.mutate(member.user_id);
                         }
                       }}
                     >
                       <UserMinus size={15} />
-                      Remove
+                      {t("settings.remove")}
                     </Button>
                   </div>
                 </div>
@@ -541,9 +544,9 @@ function ProjectMemberActions({ project }: { project: Project }) {
               <div>
                 <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-950">
                   <History size={15} />
-                  Invites
+                  {t("settings.invites")}
                 </h3>
-                <p className="mt-1 text-xs text-zinc-500">Pending and historical invite activity.</p>
+                <p className="mt-1 text-xs text-zinc-500">{t("settings.invitesBody")}</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button onClick={exportInvitesCSV} disabled={inviteRows.length === 0}>
@@ -568,23 +571,23 @@ function ProjectMemberActions({ project }: { project: Project }) {
                   }`}
                   onClick={() => setInviteStatus(status)}
                 >
-                  {status || "all"}
+                  {status ? t(`status.${status}`) : t("common.all")}
                 </button>
               ))}
             </div>
           </div>
-          {invites.isLoading ? <LoadingState label="Loading invites" /> : null}
+          {invites.isLoading ? <LoadingState label={t("settings.invitesLoading")} /> : null}
           {invites.isError ? (
             <div className="p-3">
-              <ErrorState title="Could not load invites" body={errorMessage(invites.error, "Invite request failed.")} />
+              <ErrorState title={t("settings.invitesLoadFailed")} body={errorMessage(invites.error, t("settings.inviteRequestFailed"))} />
             </div>
           ) : null}
           {!invites.isLoading && !invites.isError && inviteRows.length === 0 ? (
-            <div className="p-6 text-center text-sm text-zinc-400">No invites for this filter.</div>
+            <div className="p-6 text-center text-sm text-zinc-400">{t("settings.noInvites")}</div>
           ) : null}
           <div className="divide-y divide-zinc-100">
             {inviteRows.map((invite) => {
-              const title = actorTitle(invite.invitee_name, invite.invitee_username, invite.invitee_handle);
+              const title = actorTitle(invite.invitee_name, invite.invitee_username, invite.invitee_handle, t("settings.unknownActor"));
               return (
                 <div key={invite.id} className="grid gap-3 p-3 md:grid-cols-[1fr_auto] md:items-center">
                   <div className="flex min-w-0 items-center gap-3">
@@ -594,10 +597,10 @@ function ProjectMemberActions({ project }: { project: Project }) {
                         <span className="truncate font-medium text-zinc-950">{title}</span>
                         <InviteStatusBadge status={invite.status} />
                       </div>
-                      <div className="mt-1 truncate text-xs text-zinc-500">{actorSubtitle(invite.invitee_handle, invite.invitee_email)}</div>
+                      <div className="mt-1 truncate text-xs text-zinc-500">{actorSubtitle(invite.invitee_handle, invite.invitee_email, t("settings.noHandle"))}</div>
                       <div className="mt-1 flex items-center gap-1 text-xs text-zinc-400">
                         <Mail size={12} />
-                        invited by {invite.inviter_username} / {relativeDate(invite.created_at)}
+                        {t("settings.invitedBy", { name: invite.inviter_username, date: relativeDate(invite.created_at) })}
                       </div>
                     </div>
                   </div>
@@ -612,7 +615,7 @@ function ProjectMemberActions({ project }: { project: Project }) {
                     {invite.status === "pending" ? (
                       <Button tone="danger" disabled={revokeInvite.isPending} onClick={() => revokeInvite.mutate(invite.id)}>
                         <Trash2 size={15} />
-                        Revoke
+                        {t("settings.revoke")}
                       </Button>
                     ) : null}
                   </div>
@@ -627,6 +630,7 @@ function ProjectMemberActions({ project }: { project: Project }) {
 }
 
 export function ProjectSettingsPanel({ project, tickets }: { project: Project; tickets: Ticket[] }) {
+  const { t, relativeDate } = useI18n();
   return (
     <div className="space-y-4">
       <ProjectAdminOverview project={project} tickets={tickets} />
@@ -634,21 +638,21 @@ export function ProjectSettingsPanel({ project, tickets }: { project: Project; t
       <Panel className="p-4">
         <div className="grid gap-3 lg:grid-cols-3">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Handle</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">{t("settings.handle")}</div>
             <div className="mt-1 break-all text-sm text-zinc-950">{project.handle}</div>
           </div>
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Owner</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">{t("settings.ownerLabel")}</div>
             <div className="mt-1 break-all text-sm text-zinc-950">{project.owner_id}</div>
           </div>
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Updated</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">{t("settings.updated")}</div>
             <div className="mt-1 text-sm text-zinc-950">{relativeDate(project.updated_at)}</div>
           </div>
         </div>
       </Panel>
 
-      <Suspense fallback={<LoadingState label="Loading GitHub integration" />}>
+      <Suspense fallback={<LoadingState label={t("settings.loadingGitHub")} />}>
         <ProjectGitHubPanel projectId={project.id} />
       </Suspense>
       <ProjectWebhooksPanel projectId={project.id} />

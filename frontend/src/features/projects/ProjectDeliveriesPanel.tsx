@@ -4,7 +4,8 @@ import { toast } from "sonner";
 import { Button, EmptyState, ErrorState, LoadingState, Panel, SelectField } from "../../components/ui";
 import { api, errorMessage } from "../../lib/api";
 import { deliveryStates } from "../../lib/constants";
-import { compactId, relativeDate } from "../../lib/format";
+import { compactId } from "../../lib/format";
+import { useI18n } from "../../lib/i18n-context";
 import { queryKeys } from "../../lib/queryKeys";
 import type { DeliveryState, ID, ProjectDelivery } from "../../types";
 import { useState } from "react";
@@ -33,6 +34,7 @@ function DeliveryRow({
   onRetry: (deliveryId: ID) => void;
   retrying: boolean;
 }) {
+  const { t, relativeDate } = useI18n();
   return (
     <div className="grid gap-3 border-t border-zinc-100 px-4 py-3 lg:grid-cols-[1.2fr_1fr_0.8fr_auto] lg:items-center">
       <div className="min-w-0">
@@ -50,10 +52,10 @@ function DeliveryRow({
       </div>
       <div className="text-sm text-zinc-600">
         <div>
-          {delivery.attempts}/{delivery.max_attempts} attempts
+          {t("webhooks.attempts", { attempts: delivery.attempts, max: delivery.max_attempts })}
         </div>
         <div className="mt-1 text-xs text-zinc-500">
-          {delivery.last_attempt_at ? `Tried ${relativeDate(delivery.last_attempt_at)}` : `Queued ${relativeDate(delivery.created_at)}`}
+          {delivery.last_attempt_at ? t("deliveries.tried", { date: relativeDate(delivery.last_attempt_at) }) : t("deliveries.queuedAt", { date: relativeDate(delivery.created_at) })}
         </div>
         {delivery.last_error ? <div className="mt-1 line-clamp-2 text-xs text-red-700">{delivery.last_error}</div> : null}
       </div>
@@ -63,7 +65,7 @@ function DeliveryRow({
         </span>
         <Button onClick={() => onRetry(delivery.id)} disabled={!delivery.can_retry || retrying}>
           <RotateCcw size={15} />
-          Retry
+          {t("deliveries.retry")}
         </Button>
       </div>
     </div>
@@ -71,6 +73,7 @@ function DeliveryRow({
 }
 
 export function ProjectDeliveriesPanel({ projectId }: { projectId: ID }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [stateFilter, setStateFilter] = useState<DeliveryState | "">("");
 
@@ -91,34 +94,34 @@ export function ProjectDeliveriesPanel({ projectId }: { projectId: ID }) {
         queryClient.invalidateQueries({ queryKey: queryKeys.projectDeliveries(projectId, stateFilter) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.projectDeliverySummary(projectId) }),
       ]);
-      toast.success("Delivery queued");
+      toast.success(t("deliveries.queued"));
     },
-    onError: (error) => toast.error(errorMessage(error, "Could not retry delivery.")),
+    onError: (error) => toast.error(errorMessage(error, t("deliveries.retryFailed"))),
   });
 
   const summaryItems = summary.data
     ? [
-        ["Total", summary.data.total],
-        ["Pending", summary.data.pending],
-        ["Processing", summary.data.processing],
-        ["Delivered", summary.data.delivered],
-        ["Failed", summary.data.failed],
-        ["Dead", summary.data.dead],
-        ["Retryable", summary.data.retryable],
+        [t("overview.total"), summary.data.total],
+        [t("admin.pending"), summary.data.pending],
+        [t("deliveries.processing"), summary.data.processing],
+        [t("deliveries.delivered"), summary.data.delivered],
+        [t("overview.failed"), summary.data.failed],
+        [t("admin.dead"), summary.data.dead],
+        [t("overview.retryable"), summary.data.retryable],
       ]
     : [];
 
   return (
     <div className="space-y-4">
       {summary.isError ? (
-        <ErrorState title="Could not load delivery summary" body={errorMessage(summary.error, "Delivery summary request failed.")} />
+        <ErrorState title={t("deliveries.summaryLoadFailed")} body={errorMessage(summary.error, t("deliveries.summaryRequestFailed"))} />
       ) : null}
       {deliveries.isError ? (
-        <ErrorState title="Could not load deliveries" body={errorMessage(deliveries.error, "Delivery list request failed.")} />
+        <ErrorState title={t("deliveries.loadFailed")} body={errorMessage(deliveries.error, t("deliveries.requestFailed"))} />
       ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {summary.isLoading ? <LoadingState label="Loading delivery summary" /> : null}
+        {summary.isLoading ? <LoadingState label={t("deliveries.loadingSummary")} /> : null}
         {summaryItems.map(([label, value]) => (
           <Panel key={label} className="p-4">
             <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">{label}</div>
@@ -130,12 +133,12 @@ export function ProjectDeliveriesPanel({ projectId }: { projectId: ID }) {
       <Panel className="overflow-hidden">
         <div className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-end md:justify-between">
           <SelectField
-            label="State"
+            label={t("deliveries.state")}
             className="w-full md:w-56"
             value={stateFilter}
             onChange={(event) => setStateFilter(event.target.value as DeliveryState | "")}
           >
-            <option value="">All states</option>
+            <option value="">{t("deliveries.allStates")}</option>
             {deliveryStates.map((state) => (
               <option key={state.id} value={state.id}>
                 {state.label}
@@ -144,14 +147,14 @@ export function ProjectDeliveriesPanel({ projectId }: { projectId: ID }) {
           </SelectField>
           <Button onClick={() => deliveries.refetch()} disabled={deliveries.isFetching}>
             <RefreshCw size={16} />
-            Refresh
+            {t("actions.refresh")}
           </Button>
         </div>
 
-        {deliveries.isLoading ? <LoadingState label="Loading deliveries" /> : null}
+        {deliveries.isLoading ? <LoadingState label={t("deliveries.loading")} /> : null}
         {deliveries.data?.length === 0 ? (
           <div className="border-t border-zinc-100 px-4 py-4">
-            <EmptyState title="No deliveries" body="No outbound delivery records match the current filter." />
+            <EmptyState title={t("deliveries.empty")} body={t("deliveries.emptyBody")} />
           </div>
         ) : null}
         {deliveries.data?.map((delivery) => (

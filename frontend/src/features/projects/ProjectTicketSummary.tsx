@@ -1,6 +1,7 @@
 import { CheckCircle2, Clock3, Flame, ListChecks } from "lucide-react";
 import type { ReactNode } from "react";
 import type { TicketPriority, TicketStatus } from "../../types";
+import { useI18n } from "../../lib/i18n-context";
 
 type SummaryTicket = { status: TicketStatus; priority: TicketPriority };
 
@@ -15,6 +16,7 @@ function SummaryItem({ icon, label, value }: { icon: ReactNode; label: string; v
 }
 
 export function ProjectTicketSummary({ tickets }: { tickets: SummaryTicket[] }) {
+  const { t } = useI18n();
   const stats = {
     total: tickets.length,
     active: tickets.filter((ticket) => ticket.status === "in_progress" || ticket.status === "review").length,
@@ -24,10 +26,10 @@ export function ProjectTicketSummary({ tickets }: { tickets: SummaryTicket[] }) 
 
   return (
     <>
-      <SummaryItem icon={<ListChecks size={15} />} label="tickets" value={stats.total} />
-      <SummaryItem icon={<Clock3 size={15} />} label="active" value={stats.active} />
-      <SummaryItem icon={<Flame size={15} />} label="urgent" value={stats.urgent} />
-      <SummaryItem icon={<CheckCircle2 size={15} />} label="done" value={stats.done} />
+      <SummaryItem icon={<ListChecks size={15} />} label={t("summary.tickets")} value={stats.total} />
+      <SummaryItem icon={<Clock3 size={15} />} label={t("summary.active")} value={stats.active} />
+      <SummaryItem icon={<Flame size={15} />} label={t("summary.urgent")} value={stats.urgent} />
+      <SummaryItem icon={<CheckCircle2 size={15} />} label={t("summary.done")} value={stats.done} />
     </>
   );
 }

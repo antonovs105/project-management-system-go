@@ -25,6 +25,7 @@ import { EmptyState, Panel } from "../../components/ui";
 import { ticketStatuses } from "../../lib/constants";
 import type { BoardTicket, ID, Label, ProjectMember, TicketStatus } from "../../types";
 import { projectMemberLabel } from "./memberLabels";
+import { useI18n } from "../../lib/i18n-context";
 
 function columnTitle(status: TicketStatus): string {
   return ticketStatuses.find((item) => item.id === status)?.label || status;
@@ -43,6 +44,7 @@ function TicketCard({
   onOpen: (ticketId: ID) => void;
   draggable: boolean;
 }) {
+  const { t, locale } = useI18n();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: ticket.id,
     data: { ticket },
@@ -88,7 +90,7 @@ function TicketCard({
             {ticket.due_date ? (
               <div className="mt-1 flex items-center gap-1.5 text-xs text-zinc-500">
                 <CalendarClock size={13} />
-                <span>Due {new Date(ticket.due_date).toLocaleDateString()}</span>
+                <span>{t("board.due", { date: new Intl.DateTimeFormat(locale).format(new Date(ticket.due_date)) })}</span>
               </div>
             ) : null}
           </div>
@@ -125,6 +127,7 @@ function BoardColumn({
   onOpen: (ticketId: ID) => void;
   draggable: boolean;
 }) {
+  const { t } = useI18n();
   const { setNodeRef, isOver } = useDroppable({ id: status });
 
   return (
@@ -149,7 +152,7 @@ function BoardColumn({
         </SortableContext>
         {tickets.length === 0 ? (
 		  <div className="flex h-24 items-center justify-center rounded-2xl border border-dashed border-zinc-300 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
-            Empty
+            {t("board.empty")}
           </div>
         ) : null}
       </div>

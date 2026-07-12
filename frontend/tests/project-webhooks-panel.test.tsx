@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectWebhooksPanel } from "../src/features/projects/ProjectWebhooksPanel";
+import { I18nProvider } from "../src/components/I18nProvider";
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), deliveries: vi.fn(), create: vi.fn(), remove: vi.fn(), retry: vi.fn() }));
 
@@ -27,7 +28,7 @@ describe("ProjectWebhooksPanel", () => {
 
   it("creates a signed webhook and presents the secret once", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-    render(<QueryClientProvider client={client}><ProjectWebhooksPanel projectId="project-1" /></QueryClientProvider>);
+    render(<I18nProvider><QueryClientProvider client={client}><ProjectWebhooksPanel projectId="project-1" /></QueryClientProvider></I18nProvider>);
 
     fireEvent.change(screen.getByLabelText("Webhook name"), { target: { value: "Automation" } });
     fireEvent.change(screen.getByLabelText("HTTPS target URL"), { target: { value: "https://example.test/hook" } });

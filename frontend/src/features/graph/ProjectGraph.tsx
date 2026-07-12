@@ -3,7 +3,8 @@ import { ArrowUpRight, Network, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Button, EmptyState, IconButton, Panel } from "../../components/ui";
-import { compactId, relativeDate } from "../../lib/format";
+import { compactId } from "../../lib/format";
+import { useI18n } from "../../lib/i18n-context";
 import type { GraphData, GraphLink, GraphNode, ID, Ticket, TicketPriority, TicketType } from "../../types";
 
 function nodeColor(type: TicketType, priority: TicketPriority): string {
@@ -33,6 +34,7 @@ export function ProjectGraph({
   tickets: Ticket[];
   onOpenTicket: (ticketId: ID) => void;
 }) {
+  const { t, relativeDate } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 1, height: 560 });
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
@@ -92,7 +94,7 @@ export function ProjectGraph({
   }, [selectedNode]);
 
   if (data.nodes.length === 0) {
-    return <EmptyState icon={<Network size={36} />} title="No graph data" body="Create related tickets to build the graph." />;
+    return <EmptyState icon={<Network size={36} />} title={t("graph.noData")} body={t("graph.noDataBody")} />;
   }
 
   return (
@@ -100,27 +102,27 @@ export function ProjectGraph({
       <div className="flex flex-wrap items-center gap-4 border-b border-slate-200 px-4 py-3 text-xs text-slate-600">
         <span className="inline-flex items-center gap-1">
           <span className="h-2.5 w-2.5 rounded-full bg-violet-600" />
-          Epic
+          {t("graph.epic")}
         </span>
         <span className="inline-flex items-center gap-1">
           <span className="h-2.5 w-2.5 rounded-full bg-cyan-700" />
-          Task
+          {t("graph.task")}
         </span>
         <span className="inline-flex items-center gap-1">
           <span className="h-2.5 w-2.5 rounded-full bg-slate-500" />
-          Subtask
+          {t("graph.subtask")}
         </span>
         <span className="inline-flex items-center gap-1">
           <span className="h-2.5 w-2.5 rounded-full bg-red-600" />
-          Urgent
+          {t("graph.urgent")}
         </span>
         {data.truncated ? (
           <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-700">
-            Showing first {data.limit} nodes
+            {t("graph.showingFirst", { count: data.limit })}
           </span>
         ) : null}
         <span className="ml-auto rounded-full border border-zinc-200 px-2 py-0.5 text-zinc-500">
-          {data.nodes.length} nodes / {data.links.length} links
+          {t("graph.counts", { nodes: data.nodes.length, links: data.links.length })}
         </span>
       </div>
       <div className="grid xl:grid-cols-[1fr_340px]">
@@ -153,7 +155,7 @@ export function ProjectGraph({
                   <h3 className="mt-3 line-clamp-2 text-base font-semibold text-zinc-950">{selectedNode.label}</h3>
                   <p className="mt-1 text-xs text-zinc-500">{compactId(selectedNode.id)}</p>
                 </div>
-                <IconButton label="Close node details" onClick={() => setSelectedNode(null)}>
+                <IconButton label={t("graph.closeDetails")} onClick={() => setSelectedNode(null)}>
                   <X size={16} />
                 </IconButton>
               </div>
@@ -163,39 +165,39 @@ export function ProjectGraph({
                   {selectedTicket.description ? (
                     <p className="line-clamp-4 text-sm text-zinc-600">{selectedTicket.description}</p>
                   ) : (
-                    <p className="text-sm text-zinc-400">No description</p>
+                    <p className="text-sm text-zinc-400">{t("graph.noDescription")}</p>
                   )}
                   <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-zinc-500">
                     <div>
-                      <div className="text-zinc-400">Reporter</div>
+                      <div className="text-zinc-400">{t("graph.reporter")}</div>
                       <div className="mt-1 truncate text-zinc-950">{compactId(selectedTicket.reporter_id)}</div>
                     </div>
                     <div>
-                      <div className="text-zinc-400">Assignee</div>
+                      <div className="text-zinc-400">{t("graph.assignee")}</div>
                       <div className="mt-1 truncate text-zinc-950">
-                        {selectedTicket.assignee_id ? compactId(selectedTicket.assignee_id) : "unassigned"}
+                        {selectedTicket.assignee_id ? compactId(selectedTicket.assignee_id) : t("ticket.unassigned")}
                       </div>
                     </div>
                     <div>
-                      <div className="text-zinc-400">Resolved</div>
-                      <div className="mt-1 text-zinc-950">{selectedTicket.is_resolved ? "yes" : "no"}</div>
+                      <div className="text-zinc-400">{t("graph.resolved")}</div>
+                      <div className="mt-1 text-zinc-950">{selectedTicket.is_resolved ? t("overview.yes") : t("overview.no")}</div>
                     </div>
                     <div>
-                      <div className="text-zinc-400">Updated</div>
+                      <div className="text-zinc-400">{t("graph.updated")}</div>
                       <div className="mt-1 text-zinc-950">{relativeDate(selectedTicket.updated_at)}</div>
                     </div>
                   </div>
                   <Button className="mt-3 w-full" onClick={() => onOpenTicket(selectedTicket.id)}>
                     <ArrowUpRight size={16} />
-                    Open ticket
+                    {t("graph.openTicket")}
                   </Button>
                 </div>
               ) : null}
 
               <div className="rounded-2xl border border-zinc-200 bg-white p-3">
-                <h4 className="text-sm font-semibold text-zinc-950">Links</h4>
+                <h4 className="text-sm font-semibold text-zinc-950">{t("graph.links")}</h4>
                 <div className="mt-3 grid gap-2">
-                  {selectedLinks.length === 0 ? <div className="text-sm text-zinc-400">No links</div> : null}
+                  {selectedLinks.length === 0 ? <div className="text-sm text-zinc-400">{t("graph.noLinks")}</div> : null}
                   {selectedLinks.map((link, index) => {
                     const source = endpointId(link.source);
                     const target = endpointId(link.target);
@@ -217,7 +219,7 @@ export function ProjectGraph({
               </div>
             </div>
           ) : (
-            <div className="rounded-2xl border border-dashed border-zinc-300 bg-white p-4 text-sm text-zinc-400">No node selected</div>
+            <div className="rounded-2xl border border-dashed border-zinc-300 bg-white p-4 text-sm text-zinc-400">{t("graph.noSelection")}</div>
           )}
         </aside>
       </div>

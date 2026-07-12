@@ -7,6 +7,7 @@ import { api, errorMessage } from "../../lib/api";
 import { ticketPriorities, ticketStatuses } from "../../lib/constants";
 import { queryKeys } from "../../lib/queryKeys";
 import { downloadJSON } from "../../lib/download";
+import { useI18n } from "../../lib/i18n-context";
 import type { Project, ProjectBundle, ProjectDeliverySummary, ProjectRole, Ticket } from "../../types";
 import { downloadText, safeFilePart, ticketsToCSV } from "./projectSettingsExports";
 
@@ -44,6 +45,7 @@ function DistributionList({ title, rows, total }: { title: string; rows: Array<{
 }
 
 export function ProjectAdminOverview({ project, tickets }: { project: Project; tickets: Ticket[] }) {
+	const { t } = useI18n();
 	const queryClient = useQueryClient();
 	const importInput = useRef<HTMLInputElement>(null);
   const roles = useQuery({ queryKey: queryKeys.projectRoles(project.id), queryFn: () => api.listProjectRoles(project.id) });
@@ -63,21 +65,21 @@ export function ProjectAdminOverview({ project, tickets }: { project: Project; t
 		mutationFn: (bundle: ProjectBundle) => api.importProjectTickets(project.id, bundle),
 		onSuccess: async (result) => {
 			await queryClient.invalidateQueries({ queryKey: queryKeys.ticketsScope(project.id) });
-			toast.success(`Imported ${result.tickets_imported} tickets and ${result.comments_imported} comments.`);
+			toast.success(t("projects.imported", { tickets: result.tickets_imported, comments: result.comments_imported }));
 		},
-		onError: (error) => toast.error(errorMessage(error, "Ticket import failed.")),
+		onError: (error) => toast.error(errorMessage(error, t("overview.ticketImportFailed"))),
 	});
 
 	async function selectTicketImport(file: File | undefined) {
 		if (!file) return;
 		if (file.size > 10 * 1024 * 1024) {
-			toast.error("Project bundles must be 10 MiB or smaller.");
+			toast.error(t("projects.bundleTooLarge"));
 			return;
 		}
 		try {
 			ticketImport.mutate(JSON.parse(await file.text()) as ProjectBundle);
 		} catch {
-			toast.error("Select a valid Progo project JSON bundle.");
+			toast.error(t("projects.bundleInvalid"));
 		} finally {
 			if (importInput.current) importInput.current.value = "";
 		}
@@ -109,39 +111,39 @@ export function ProjectAdminOverview({ project, tickets }: { project: Project; t
   return (
     <Panel className="overflow-hidden">
       <div className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-start md:justify-between">
-        <div><h2 className="flex items-center gap-2 text-base font-semibold text-zinc-950"><BarChart3 size={17} />Administration Overview</h2><p className="mt-1 text-sm text-zinc-500">Operational snapshot and exports for project administrators.</p></div>
+        <div><h2 className="flex items-center gap-2 text-base font-semibold text-zinc-950"><BarChart3 size={17} />{t("overview.title")}</h2><p className="mt-1 text-sm text-zinc-500">{t("overview.body")}</p></div>
         <div className="flex flex-wrap gap-2">
 		  <input ref={importInput} className="sr-only" type="file" accept="application/json,.json" onChange={(event) => void selectTicketImport(event.target.files?.[0])} />
           <Button onClick={() => downloadText(`${safeFilePart(project.name)}-tickets.csv`, "text/csv", `${ticketsToCSV(tickets)}\n`)} disabled={tickets.length === 0}><Download size={16} />CSV</Button>
           <Button onClick={exportJSON}><FileJson size={16} />JSON</Button>
-		  <Button onClick={() => portableExport.mutate()} disabled={portableExport.isPending}><Download size={16} />Portable</Button>
-		  <Button onClick={() => importInput.current?.click()} disabled={ticketImport.isPending}><Upload size={16} />Import tickets</Button>
+		  <Button onClick={() => portableExport.mutate()} disabled={portableExport.isPending}><Download size={16} />{t("overview.portable")}</Button>
+		  <Button onClick={() => importInput.current?.click()} disabled={ticketImport.isPending}><Upload size={16} />{t("overview.importTickets")}</Button>
         </div>
       </div>
       <div className="grid gap-3 border-t border-zinc-100 p-4 sm:grid-cols-2 xl:grid-cols-5">
-        <MetricPill icon={<ListChecks size={14} />} label="Tickets" value={tickets.length} />
-        <MetricPill icon={<Clock3 size={14} />} label="Active" value={activeTickets} />
-        <MetricPill icon={<Flame size={14} />} label="Urgent" value={urgentTickets} />
-        <MetricPill icon={<CheckCircle2 size={14} />} label="Done" value={doneTickets} />
-        <MetricPill icon={<Shield size={14} />} label="Custom Roles" value={roles.isLoading ? "..." : customRoles} />
+        <MetricPill icon={<ListChecks size={14} />} label={t("overview.tickets")} value={tickets.length} />
+        <MetricPill icon={<Clock3 size={14} />} label={t("overview.active")} value={activeTickets} />
+        <MetricPill icon={<Flame size={14} />} label={t("overview.urgent")} value={urgentTickets} />
+        <MetricPill icon={<CheckCircle2 size={14} />} label={t("overview.done")} value={doneTickets} />
+        <MetricPill icon={<Shield size={14} />} label={t("overview.customRoles")} value={roles.isLoading ? "..." : customRoles} />
       </div>
       <div className="grid gap-4 border-t border-zinc-100 p-4 xl:grid-cols-[1fr_1fr_0.8fr]">
-        <DistributionList title="Ticket Status" rows={statusRows} total={tickets.length} />
-        <DistributionList title="Priority Mix" rows={priorityRows} total={tickets.length} />
+        <DistributionList title={t("overview.ticketStatus")} rows={statusRows} total={tickets.length} />
+        <DistributionList title={t("overview.priorityMix")} rows={priorityRows} total={tickets.length} />
         <div className="rounded-2xl border border-zinc-200 p-4">
-          <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-950"><Activity size={15} />Delivery Health</h3>
-          {deliverySummary.isLoading ? <div className="mt-4 text-sm text-zinc-500">Loading delivery summary</div> : null}
-          {deliverySummary.isError ? <div className="mt-4"><ErrorState title="Could not load delivery summary" body={errorMessage(deliverySummary.error, "Delivery summary failed.")} /></div> : null}
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-950"><Activity size={15} />{t("overview.deliveryHealth")}</h3>
+          {deliverySummary.isLoading ? <div className="mt-4 text-sm text-zinc-500">{t("overview.loadingDelivery")}</div> : null}
+          {deliverySummary.isError ? <div className="mt-4"><ErrorState title={t("overview.deliveryLoadFailed")} body={errorMessage(deliverySummary.error, t("overview.deliverySummaryFailed"))} /></div> : null}
           {delivery ? (
             <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-              {[["Total", delivery.total], ["Failed", delivery.failed + delivery.dead], ["Retryable", delivery.retryable], ["Can Retry", delivery.can_retry ? "yes" : "no"]].map(([label, value]) => (
+              {[[t("overview.total"), delivery.total], [t("overview.failed"), delivery.failed + delivery.dead], [t("overview.retryable"), delivery.retryable], [t("overview.canRetry"), delivery.can_retry ? t("overview.yes") : t("overview.no")]].map(([label, value]) => (
                 <div key={label} className="rounded-xl bg-zinc-50 p-3"><div className="text-xs text-zinc-400">{label}</div><div className="mt-1 font-semibold text-zinc-950">{value}</div></div>
               ))}
             </div>
           ) : null}
         </div>
       </div>
-      {roles.isError ? <div className="border-t border-zinc-100 p-4"><ErrorState title="Could not load role summary" body={errorMessage(roles.error, "Role summary failed.")} /></div> : null}
+      {roles.isError ? <div className="border-t border-zinc-100 p-4"><ErrorState title={t("overview.roleSummaryFailed")} body={errorMessage(roles.error, t("overview.roleSummaryRequestFailed"))} /></div> : null}
     </Panel>
   );
 }

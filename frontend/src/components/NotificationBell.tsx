@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { api, errorMessage, notificationsEventsURL } from "../lib/api";
-import { relativeDate } from "../lib/format";
+import { useI18n } from "../lib/i18n-context";
 import { queryKeys } from "../lib/queryKeys";
 import { useAuthStore } from "../store/auth";
 import type { Notification as AppNotification } from "../types";
@@ -36,6 +36,7 @@ function notificationLink(notification: AppNotification): string {
 }
 
 export function NotificationBell() {
+  const { t, relativeDate } = useI18n();
   const [open, setOpen] = useState(false);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const queryClient = useQueryClient();
@@ -151,7 +152,7 @@ export function NotificationBell() {
 
   return (
     <div className="relative">
-      <IconButton label="Notifications" onClick={() => setOpen((current) => !current)}>
+      <IconButton label={t("notifications.title")} onClick={() => setOpen((current) => !current)}>
         <Bell size={18} />
         {unreadCount > 0 ? (
           <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-red-600 px-1 text-[11px] font-semibold text-white">
@@ -163,20 +164,20 @@ export function NotificationBell() {
       {open ? (
         <div className="absolute right-0 top-11 z-40 w-80 overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-2xl">
           <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
-            <div className="font-semibold text-zinc-950">Notifications</div>
+            <div className="font-semibold text-zinc-950">{t("notifications.title")}</div>
             <Button
               className="h-8 px-3 text-xs"
               onClick={() => markAllRead.mutate()}
               disabled={markAllRead.isPending || unreadCount === 0}
             >
               <CheckCheck size={14} />
-              Read all
+              {t("notifications.readAll")}
             </Button>
           </div>
           <div className="max-h-96 overflow-y-auto p-2">
             {notifications.isError ? (
               <div className="px-3 py-2 text-sm text-red-600">
-                {errorMessage(notifications.error, "Could not load notifications.")}
+                {errorMessage(notifications.error, t("notifications.loadFailed"))}
               </div>
             ) : null}
             {(notifications.data || []).map((notification) => (
@@ -200,7 +201,7 @@ export function NotificationBell() {
               </Link>
             ))}
             {notifications.data?.length === 0 ? (
-              <div className="px-3 py-8 text-center text-sm text-zinc-500">No notifications yet.</div>
+              <div className="px-3 py-8 text-center text-sm text-zinc-500">{t("notifications.empty")}</div>
             ) : null}
           </div>
         </div>

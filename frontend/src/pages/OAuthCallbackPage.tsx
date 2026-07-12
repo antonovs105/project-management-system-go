@@ -100,8 +100,8 @@ export function OAuthCallbackPage() {
             </div>
 			) : mfaRequired ? (
 				<form className="grid gap-4" onSubmit={(event) => { event.preventDefault(); mutate({ exchangeCode: code, factor: mfaCode.trim() }); }}>
-					<TextField label="Authenticator or recovery code" value={mfaCode} onChange={(event) => setMFACode(event.target.value)} autoComplete="one-time-code" required />
-					<Button type="submit" tone="primary" disabled={isPending || !mfaCode.trim()}>Complete sign in</Button>
+					<TextField label={t("auth.mfaCode")} value={mfaCode} onChange={(event) => setMFACode(event.target.value)} autoComplete="one-time-code" required />
+					<Button type="submit" tone="primary" disabled={isPending || !mfaCode.trim()}>{t("auth.completeSignIn")}</Button>
 				</form>
 			) : (
             <LoadingState label={isPending ? t("oauth.loading") : t("common.working")} />

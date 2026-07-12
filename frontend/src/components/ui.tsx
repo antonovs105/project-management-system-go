@@ -2,6 +2,7 @@ import type { ComponentPropsWithoutRef, FormEventHandler, InputHTMLAttributes, R
 import { useEffect, useId, useRef } from "react";
 import { X } from "lucide-react";
 import { createPortal } from "react-dom";
+import { useI18n } from "../lib/i18n-context";
 
 type Tone = "primary" | "secondary" | "danger" | "ghost";
 
@@ -210,6 +211,7 @@ export function Modal({
   formId?: string;
   onSubmit?: FormEventHandler<HTMLFormElement>;
 }) {
+  const { t } = useI18n();
 	const titleId = useId();
 	const formDialogRef = useRef<HTMLFormElement>(null);
 	const divDialogRef = useRef<HTMLDivElement>(null);
@@ -272,7 +274,7 @@ export function Modal({
     <>
       <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4">
 		<h2 id={titleId} className="text-base font-semibold text-zinc-950">{title}</h2>
-        <IconButton label="Close" onClick={onClose}>
+        <IconButton label={t("common.close")} onClick={onClose}>
           <X size={18} />
         </IconButton>
       </div>

@@ -7,6 +7,7 @@ import { ProtectedRoute } from "./components/layout/ProtectedRoute";
 import { I18nProvider } from "./components/I18nProvider";
 import { ThemeProvider } from "./components/ThemeProvider";
 import { useTheme } from "./lib/theme-context";
+import { useI18n } from "./lib/i18n-context";
 
 const AccountPage = lazy(() => import("./pages/AccountPage").then((module) => ({ default: module.AccountPage })));
 const AccountRecoveryPage = lazy(() => import("./pages/AccountRecoveryPage").then((module) => ({ default: module.AccountRecoveryPage })));
@@ -37,13 +38,18 @@ function AppToaster() {
   return <Toaster richColors closeButton theme={theme} />;
 }
 
+function RouteLoading() {
+  const { t } = useI18n();
+  return <div className="p-6" role="status">{t("common.loading")}</div>;
+}
+
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <I18nProvider>
           <BrowserRouter>
-            <Suspense fallback={<div className="p-6" role="status">Loading…</div>}>
+            <Suspense fallback={<RouteLoading />}>
             <Routes>
               <Route path="/login" element={<AuthPage mode="login" />} />
               <Route path="/register" element={<AuthPage mode="register" />} />

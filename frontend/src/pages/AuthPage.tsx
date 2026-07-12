@@ -207,7 +207,7 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
               />
 				{mode === "login" ? (
 					<TextField
-						label="Authenticator or recovery code (if enabled)"
+              label={t("auth.mfaOptional")}
 						value={mfaCode}
 						onChange={(event) => setMFACode(event.target.value)}
 						autoComplete="one-time-code"
@@ -231,7 +231,7 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
               </Button>
               {mode === "login" ? (
                 <Link className="text-center text-sm font-medium text-zinc-700 underline-offset-4 hover:underline" to="/auth/forgot-password">
-                  Forgot your password?
+              {t("auth.forgotPassword")}
                 </Link>
               ) : null}
             </form>

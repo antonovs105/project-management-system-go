@@ -14,7 +14,7 @@ import { TicketDetailPanel } from "../features/tickets/TicketDetailPanel";
 import { TicketFormModal } from "../features/tickets/TicketFormModal";
 import { api, errorMessage, projectTicketEventsURL, type GraphFilters } from "../lib/api";
 import { ticketPriorities, ticketStatuses, ticketTypes } from "../lib/constants";
-import { relativeDate } from "../lib/format";
+import { useI18n } from "../lib/i18n-context";
 import { fieldLimits } from "../lib/limits";
 import { queryKeys } from "../lib/queryKeys";
 import { useAuthStore } from "../store/auth";
@@ -100,6 +100,7 @@ function isTicketEvent(value: unknown): value is TicketEvent {
 }
 
 export function ProjectWorkspace() {
+  const { t, relativeDate } = useI18n();
   const { projectId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -318,7 +319,7 @@ export function ProjectWorkspace() {
       if (context?.previous) {
         queryClient.setQueryData(context.queryKey, context.previous);
       }
-      toast.error(errorMessage(error, "Could not move ticket."));
+      toast.error(errorMessage(error, t("workspace.moveFailed")));
     },
     onSettled: async () => {
       await Promise.all([
@@ -336,7 +337,7 @@ export function ProjectWorkspace() {
         queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
       ]);
       setEditProjectOpen(false);
-      toast.success("Project updated");
+      toast.success(t("workspace.projectUpdated"));
     },
   });
 
@@ -345,7 +346,7 @@ export function ProjectWorkspace() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.projects });
       navigate("/projects", { replace: true });
-	  toast.success("Project archived");
+	  toast.success(t("workspace.projectArchived"));
     },
   });
 
@@ -362,10 +363,10 @@ export function ProjectWorkspace() {
 
   return (
     <div className="space-y-5">
-      {!projectId ? <ErrorState title="Missing project" body="The route did not include a project id." /> : null}
-      {project.isLoading ? <LoadingState label="Loading project" /> : null}
+      {!projectId ? <ErrorState title={t("workspace.missingProject")} body={t("workspace.missingProjectBody")} /> : null}
+      {project.isLoading ? <LoadingState label={t("workspace.loadingProject")} /> : null}
       {project.isError ? (
-        <ErrorState title="Could not load project" body={errorMessage(project.error, "Project request failed.")} />
+        <ErrorState title={t("workspace.projectLoadFailed")} body={errorMessage(project.error, t("workspace.projectRequestFailed"))} />
       ) : null}
 
       {project.data ? (
@@ -376,24 +377,24 @@ export function ProjectWorkspace() {
                 {project.data.handle}
               </div>
               <h1 className="truncate text-2xl font-semibold tracking-tight text-zinc-950">{project.data.name}</h1>
-              <p className="mt-1 max-w-3xl text-sm text-zinc-500">{project.data.description || "No description"}</p>
+              <p className="mt-1 max-w-3xl text-sm text-zinc-500">{project.data.description || t("common.noDescription")}</p>
               <div className="mt-4 flex flex-wrap gap-2">
                 <ProjectTicketSummary tickets={pageTickets} />
               </div>
-			  <p className="mt-3 text-xs text-zinc-600 dark:text-zinc-300">Updated {relativeDate(project.data.updated_at)}</p>
+			  <p className="mt-3 text-xs text-zinc-600 dark:text-zinc-300">{t("workspace.updated", { date: relativeDate(project.data.updated_at) })}</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button onClick={() => tickets.refetch()} disabled={tickets.isFetching}>
                 <RefreshCw size={16} />
-                Refresh
+                {t("actions.refresh")}
               </Button>
               <Button onClick={openProjectEditor}>
                 <Pencil size={16} />
-                Edit
+                {t("actions.edit")}
               </Button>
               <Button tone="primary" onClick={() => setCreateTicketOpen(true)}>
                 <Plus size={16} />
-                Ticket
+                {t("workspace.ticket")}
               </Button>
             </div>
           </div>
@@ -401,30 +402,30 @@ export function ProjectWorkspace() {
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex max-w-full overflow-x-auto rounded-full border border-zinc-200 bg-white p-1 shadow-sm">
               <Link to={`/projects/${activeProjectId}`} className={tabClass(view === "board")}>
-                Board
+                {t("workspace.board")}
               </Link>
               <Link to={`/projects/${activeProjectId}/graph`} className={tabClass(view === "graph")}>
                 <GitFork size={16} />
-                Graph
+                {t("workspace.graph")}
               </Link>
               <Link to={`/projects/${activeProjectId}/deliveries`} className={tabClass(view === "deliveries")}>
                 <Truck size={16} />
-                Deliveries
+                {t("workspace.deliveries")}
               </Link>
-			  <Link to={`/projects/${activeProjectId}/activity`} className={tabClass(view === "activity")}>Activity</Link>
+			  <Link to={`/projects/${activeProjectId}/activity`} className={tabClass(view === "activity")}>{t("workspace.activity")}</Link>
               <Link to={`/projects/${activeProjectId}/settings`} className={tabClass(view === "settings")}>
                 <Settings size={16} />
-                Settings
+                {t("workspace.settings")}
               </Link>
             </div>
             <div className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-sm text-zinc-500 shadow-sm">
-              Page {ticketPage + 1}: {visibleTickets.length} / {pageTickets.length} tickets
+              {t("workspace.ticketPage", { page: ticketPage + 1, visible: visibleTickets.length, total: pageTickets.length })}
             </div>
           </div>
 
-          {view === "board" && tickets.isLoading ? <LoadingState label="Loading tickets" /> : null}
+          {view === "board" && tickets.isLoading ? <LoadingState label={t("workspace.loadingTickets")} /> : null}
           {view === "board" && tickets.isError ? (
-            <ErrorState title="Could not load tickets" body={errorMessage(tickets.error, "Ticket list request failed.")} />
+            <ErrorState title={t("workspace.ticketsLoadFailed")} body={errorMessage(tickets.error, t("workspace.ticketsRequestFailed"))} />
           ) : null}
 
           {view === "board" && tickets.data ? (
@@ -432,22 +433,22 @@ export function ProjectWorkspace() {
               <div className="flex flex-col gap-3 rounded-3xl border border-zinc-200 bg-white p-3 shadow-sm sm:flex-row sm:items-end sm:justify-between">
                 <div className="grid flex-1 gap-3 sm:grid-cols-2">
                   <TextField
-                    label="Search tickets"
+                    label={t("workspace.searchTickets")}
                     value={ticketSearch}
                     onChange={(event) => {
                       setTicketSearch(event.target.value);
                       setTicketPage(0);
                     }}
-                    placeholder="Title or description"
+                    placeholder={t("workspace.searchPlaceholder")}
                   />
                   <SelectField
-                    label="Assignee filter"
+                    label={t("workspace.assigneeFilter")}
                     value={assigneeFilter}
                     onChange={(event) => setAssigneeFilter(event.target.value)}
                   >
-                    <option value="all">All tickets</option>
-                    <option value="me">My tickets</option>
-                    <option value="unassigned">Unassigned</option>
+                    <option value="all">{t("workspace.allTickets")}</option>
+                    <option value="me">{t("workspace.myTickets")}</option>
+                    <option value="unassigned">{t("ticket.unassigned")}</option>
                     {(members.data || []).map((member) => (
                       <option key={member.user_id} value={member.user_id}>
                         {projectMemberLabel(members.data || [], member.user_id)}
@@ -457,14 +458,14 @@ export function ProjectWorkspace() {
                 </div>
                 <div className="flex gap-2">
                   <Button disabled={ticketPage === 0} onClick={() => setTicketPage((page) => Math.max(0, page - 1))}>
-                    Previous
+                    {t("common.previous")}
                   </Button>
                   <Button disabled={!hasNextTicketPage} onClick={() => setTicketPage((page) => page + 1)}>
-                    Next
+                    {t("common.next")}
                   </Button>
                 </div>
                 {members.isError ? (
-                  <div className="text-sm text-red-600">{errorMessage(members.error, "Could not load project members.")}</div>
+                  <div className="text-sm text-red-600">{errorMessage(members.error, t("workspace.membersLoadFailed"))}</div>
                 ) : null}
               </div>
               <TicketBoard
@@ -478,7 +479,7 @@ export function ProjectWorkspace() {
                 emptyAction={
                   <Button tone="primary" onClick={() => setCreateTicketOpen(true)}>
                     <Plus size={16} />
-                    Create ticket
+                    {t("workspace.createTicket")}
                   </Button>
                 }
               />
@@ -488,39 +489,39 @@ export function ProjectWorkspace() {
           {view === "graph" ? (
             <div className="grid gap-3">
               <Panel className="grid gap-3 p-3 lg:grid-cols-[repeat(5,minmax(0,1fr))_auto] lg:items-end">
-                <SelectField label="Limit" value={graphLimit} onChange={(event) => setGraphLimit(event.target.value)}>
-                  <option value="100">100 nodes</option>
-                  <option value="250">250 nodes</option>
-                  <option value="500">500 nodes</option>
+                <SelectField label={t("workspace.limit")} value={graphLimit} onChange={(event) => setGraphLimit(event.target.value)}>
+                  <option value="100">{t("workspace.nodes", { count: 100 })}</option>
+                  <option value="250">{t("workspace.nodes", { count: 250 })}</option>
+                  <option value="500">{t("workspace.nodes", { count: 500 })}</option>
                 </SelectField>
-                <SelectField label="Status" value={graphStatus} onChange={(event) => setGraphStatus(event.target.value)}>
-                  <option value="">Any status</option>
+                <SelectField label={t("workspace.status")} value={graphStatus} onChange={(event) => setGraphStatus(event.target.value)}>
+                  <option value="">{t("workspace.anyStatus")}</option>
                   {ticketStatuses.map((status) => (
                     <option key={status.id} value={status.id}>
                       {status.label}
                     </option>
                   ))}
                 </SelectField>
-                <SelectField label="Priority" value={graphPriority} onChange={(event) => setGraphPriority(event.target.value)}>
-                  <option value="">Any priority</option>
+                <SelectField label={t("workspace.priority")} value={graphPriority} onChange={(event) => setGraphPriority(event.target.value)}>
+                  <option value="">{t("workspace.anyPriority")}</option>
                   {ticketPriorities.map((priority) => (
                     <option key={priority.id} value={priority.id}>
                       {priority.label}
                     </option>
                   ))}
                 </SelectField>
-                <SelectField label="Type" value={graphType} onChange={(event) => setGraphType(event.target.value)}>
-                  <option value="">Any type</option>
+                <SelectField label={t("workspace.type")} value={graphType} onChange={(event) => setGraphType(event.target.value)}>
+                  <option value="">{t("workspace.anyType")}</option>
                   {ticketTypes.map((type) => (
                     <option key={type.id} value={type.id}>
                       {type.label}
                     </option>
                   ))}
                 </SelectField>
-                <SelectField label="Assignee" value={graphAssignee} onChange={(event) => setGraphAssignee(event.target.value)}>
-                  <option value="all">Any assignee</option>
-                  <option value="me">My tickets</option>
-                  <option value="unassigned">Unassigned</option>
+                <SelectField label={t("workspace.assignee")} value={graphAssignee} onChange={(event) => setGraphAssignee(event.target.value)}>
+                  <option value="all">{t("workspace.anyAssignee")}</option>
+                  <option value="me">{t("workspace.myTickets")}</option>
+                  <option value="unassigned">{t("ticket.unassigned")}</option>
                   {(members.data || []).map((member) => (
                     <option key={member.user_id} value={member.user_id}>
                       {projectMemberLabel(members.data || [], member.user_id)}
@@ -537,15 +538,15 @@ export function ProjectWorkspace() {
                   }}
                 >
                   <RefreshCw size={16} />
-                  Reset
+                  {t("actions.reset")}
                 </Button>
               </Panel>
               {graph.isLoading ? (
-                <LoadingState label="Loading graph" />
+                <LoadingState label={t("workspace.loadingGraph")} />
               ) : graph.isError ? (
-                <ErrorState title="Could not load graph" body={errorMessage(graph.error, "Graph request failed.")} />
+                <ErrorState title={t("workspace.graphLoadFailed")} body={errorMessage(graph.error, t("workspace.graphRequestFailed"))} />
               ) : graph.data ? (
-                <Suspense fallback={<LoadingState label="Loading graph view" />}>
+                <Suspense fallback={<LoadingState label={t("workspace.loadingGraphView")} />}>
                   <ProjectGraph data={graph.data} tickets={tickets.data || []} onOpenTicket={setSelectedTicketId} />
                 </Suspense>
               ) : null}
@@ -579,7 +580,7 @@ export function ProjectWorkspace() {
 
           <Modal
             open={editProjectOpen}
-            title="Edit Project"
+            title={t("workspace.editProject")}
             onClose={() => setEditProjectOpen(false)}
             formId="edit-project"
             onSubmit={submitProject}
@@ -588,19 +589,19 @@ export function ProjectWorkspace() {
                 <Button
                   tone="danger"
                   onClick={() => {
-					if (window.confirm("Archive this project?")) {
+					if (window.confirm(t("workspace.archiveConfirm"))) {
 					  archiveProject.mutate();
                     }
                   }}
 				  disabled={archiveProject.isPending}
                 >
                   <Trash2 size={16} />
-				  Archive
+				  {t("actions.archive")}
                 </Button>
                 <div className="flex flex-1 justify-end gap-2">
-                  <Button onClick={() => setEditProjectOpen(false)}>Cancel</Button>
+                  <Button onClick={() => setEditProjectOpen(false)}>{t("actions.cancel")}</Button>
                   <Button type="submit" form="edit-project" tone="primary" disabled={updateProject.isPending || !projectName.trim()}>
-                    Save
+                    {t("actions.save")}
                   </Button>
                 </div>
               </>
@@ -608,20 +609,20 @@ export function ProjectWorkspace() {
           >
             <div className="grid gap-4">
               {updateProject.isError ? (
-                <ErrorState title="Could not update project" body={errorMessage(updateProject.error, "Project update failed.")} />
+                <ErrorState title={t("workspace.updateFailed")} body={errorMessage(updateProject.error, t("workspace.updateRequestFailed"))} />
               ) : null}
 			  {archiveProject.isError ? (
-				<ErrorState title="Could not archive project" body={errorMessage(archiveProject.error, "Project archive failed.")} />
+				<ErrorState title={t("workspace.archiveFailed")} body={errorMessage(archiveProject.error, t("workspace.archiveRequestFailed"))} />
               ) : null}
               <TextField
-                label="Name"
+                label={t("projects.name")}
                 value={projectName}
                 onChange={(event) => setProjectName(event.target.value)}
                 maxLength={fieldLimits.projectNameMaxLength}
                 required
               />
               <TextAreaField
-                label="Description"
+                label={t("projects.description")}
                 value={projectDescription}
                 onChange={(event) => setProjectDescription(event.target.value)}
                 maxLength={fieldLimits.projectDescriptionMaxLength}
@@ -632,7 +633,7 @@ export function ProjectWorkspace() {
       ) : null}
 
       {!project.isLoading && !project.data && !project.isError ? (
-        <Panel className="p-4 text-sm text-slate-500">Project not found.</Panel>
+        <Panel className="p-4 text-sm text-slate-500">{t("workspace.projectNotFound")}</Panel>
       ) : null}
     </div>
   );

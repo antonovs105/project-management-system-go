@@ -56,7 +56,7 @@ describe("shared accessibility behavior", () => {
   });
 
   it("focuses, labels, closes, and restores focus for dialogs", () => {
-    render(<ModalFixture />);
+    render(<I18nProvider><ModalFixture /></I18nProvider>);
     const trigger = screen.getByRole("button", { name: "Open settings" });
     trigger.focus();
     fireEvent.click(trigger);

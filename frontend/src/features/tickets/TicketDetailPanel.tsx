@@ -6,7 +6,8 @@ import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { api, attachmentContentURL, errorMessage, type UpdateTicketPayload } from "../../lib/api";
 import { ticketLinkTypes, ticketPriorities, ticketStatuses, ticketTypes } from "../../lib/constants";
-import { compactId, relativeDate } from "../../lib/format";
+import { compactId } from "../../lib/format";
+import { useI18n } from "../../lib/i18n-context";
 import { fieldLimits } from "../../lib/limits";
 import { queryKeys } from "../../lib/queryKeys";
 import type { GitHubCommit, ID, Label, ProjectMember, Ticket, TicketPriority, TicketStatus, TicketType } from "../../types";
@@ -39,6 +40,7 @@ function TicketEditor({
   labels: Label[];
   onClose: () => void;
 }) {
+  const { t, relativeDate } = useI18n();
   const queryClient = useQueryClient();
   const [title, setTitle] = useState(ticket.title);
   const [description, setDescription] = useState(ticket.description);
@@ -60,7 +62,7 @@ function TicketEditor({
         queryClient.invalidateQueries({ queryKey: queryKeys.ticketsScope(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.graphScope(projectId) }),
       ]);
-      toast.success("Ticket updated");
+      toast.success(t("ticket.updated"));
     },
   });
 
@@ -71,7 +73,7 @@ function TicketEditor({
         queryClient.invalidateQueries({ queryKey: queryKeys.ticketsScope(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.graphScope(projectId) }),
       ]);
-	  toast.success("Ticket archived");
+	  toast.success(t("ticket.archived"));
       onClose();
     },
   });
@@ -86,16 +88,16 @@ function TicketEditor({
     mutationFn: (file: File) => api.uploadTicketAttachment(ticket.id, file),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.ticketAttachments(ticket.id) });
-      toast.success("Attachment uploaded");
+	  toast.success(t("ticket.attachmentUploaded"));
     },
-    onError: (error) => toast.error(errorMessage(error, "Attachment upload failed.")),
+    onError: (error) => toast.error(errorMessage(error, t("ticket.attachmentUploadFailed"))),
   });
   const deleteAttachment = useMutation({
     mutationFn: api.deleteTicketAttachment,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.ticketAttachments(ticket.id) });
     },
-    onError: (error) => toast.error(errorMessage(error, "Attachment delete failed.")),
+    onError: (error) => toast.error(errorMessage(error, t("ticket.attachmentDeleteFailed"))),
   });
 
   function submitTicket(event: FormEvent<HTMLFormElement>) {
@@ -116,34 +118,34 @@ function TicketEditor({
   return (
     <form className="grid gap-4" onSubmit={submitTicket}>
       {updateTicket.isError ? (
-        <ErrorState title="Could not update ticket" body={errorMessage(updateTicket.error, "Ticket update failed.")} />
+        <ErrorState title={t("ticket.updateFailed")} body={errorMessage(updateTicket.error, t("ticket.updateRequestFailed"))} />
       ) : null}
       {archiveTicket.isError ? (
-		<ErrorState title="Could not archive ticket" body={errorMessage(archiveTicket.error, "Ticket archive failed.")} />
+		<ErrorState title={t("ticket.archiveFailed")} body={errorMessage(archiveTicket.error, t("ticket.archiveRequestFailed"))} />
       ) : null}
       <TextField
-        label="Title"
+        label={t("ticket.title")}
         value={title}
         onChange={(event) => setTitle(event.target.value)}
         maxLength={fieldLimits.ticketTitleMaxLength}
         required
       />
       <div className="grid gap-4 sm:grid-cols-3">
-        <SelectField label="Status" value={status} onChange={(event) => setStatus(event.target.value as TicketStatus)}>
+        <SelectField label={t("workspace.status")} value={status} onChange={(event) => setStatus(event.target.value as TicketStatus)}>
           {ticketStatuses.map((item) => (
             <option key={item.id} value={item.id}>
               {item.label}
             </option>
           ))}
         </SelectField>
-        <SelectField label="Priority" value={priority} onChange={(event) => setPriority(event.target.value as TicketPriority)}>
+        <SelectField label={t("ticket.priority")} value={priority} onChange={(event) => setPriority(event.target.value as TicketPriority)}>
           {ticketPriorities.map((item) => (
             <option key={item.id} value={item.id}>
               {item.label}
             </option>
           ))}
         </SelectField>
-        <SelectField label="Type" value={type} onChange={(event) => setType(event.target.value as TicketType)}>
+        <SelectField label={t("ticket.type")} value={type} onChange={(event) => setType(event.target.value as TicketType)}>
           {ticketTypes.map((item) => (
             <option key={item.id} value={item.id}>
               {item.label}
@@ -152,8 +154,8 @@ function TicketEditor({
         </SelectField>
       </div>
       {type !== "epic" ? (
-        <SelectField label="Parent" value={parentId} onChange={(event) => setParentId(event.target.value)}>
-          <option value="">None</option>
+        <SelectField label={t("ticket.parent")} value={parentId} onChange={(event) => setParentId(event.target.value)}>
+          <option value="">{t("ticket.none")}</option>
           {parents.map((candidate) => (
             <option key={candidate.id} value={candidate.id}>
               {candidate.title}
@@ -162,10 +164,10 @@ function TicketEditor({
         </SelectField>
       ) : null}
       <MemberAssigneeSelect members={members} value={assigneeId} onChange={setAssigneeId} />
-      <TextField label="Due date" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
+      <TextField label={t("ticket.dueDate")} type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
       {labels.length > 0 ? (
         <fieldset className="grid gap-2">
-          <legend className="text-sm font-medium text-zinc-700">Labels</legend>
+          <legend className="text-sm font-medium text-zinc-700">{t("ticket.labels")}</legend>
           <div className="flex flex-wrap gap-2">
             {labels.map((label) => (
               <label key={label.id} className="flex cursor-pointer items-center gap-2 rounded-full border border-zinc-200 px-3 py-1.5 text-sm">
@@ -182,17 +184,17 @@ function TicketEditor({
         </fieldset>
       ) : null}
       <TextAreaField
-        label="Description"
+        label={t("ticket.description")}
         value={description}
         onChange={(event) => setDescription(event.target.value)}
         maxLength={fieldLimits.ticketDescriptionMaxLength}
       />
       {capabilities.data?.attachments_enabled ? (
         <fieldset className="grid gap-2 rounded-xl border border-zinc-200 p-3">
-          <legend className="px-1 text-sm font-medium text-zinc-700">Attachments</legend>
+          <legend className="px-1 text-sm font-medium text-zinc-700">{t("ticket.attachments")}</legend>
           <label className="focus-ring inline-flex w-fit cursor-pointer items-center gap-2 rounded-full border border-zinc-200 px-3 py-2 text-sm font-medium">
             <Paperclip size={15} />
-            {uploadAttachment.isPending ? "Uploading..." : "Add file"}
+            {uploadAttachment.isPending ? t("ticket.uploading") : t("ticket.addFile")}
             <input
               className="sr-only"
               type="file"
@@ -205,11 +207,11 @@ function TicketEditor({
               }}
             />
           </label>
-          {attachments.isLoading ? <LoadingState label="Loading attachments" /> : null}
+          {attachments.isLoading ? <LoadingState label={t("ticket.attachmentsLoading")} /> : null}
           {attachments.isError ? (
             <ErrorState
-              title="Could not load attachments"
-              body={errorMessage(attachments.error, "Attachment request failed.")}
+              title={t("ticket.attachmentsLoadFailed")}
+              body={errorMessage(attachments.error, t("ticket.attachmentRequestFailed"))}
             />
           ) : null}
           {(attachments.data || []).map((attachment) => (
@@ -224,11 +226,11 @@ function TicketEditor({
                 <a
                   className="focus-ring rounded-full p-2 hover:bg-zinc-200"
                   href={attachmentContentURL(attachment.id)}
-                  aria-label={`Download ${attachment.filename}`}
+                  aria-label={t("ticket.downloadFile", { name: attachment.filename })}
                 >
                   <Download size={15} />
                 </a>
-                <IconButton label={`Delete ${attachment.filename}`} onClick={() => deleteAttachment.mutate(attachment.id)}>
+                <IconButton label={t("ticket.deleteFile", { name: attachment.filename })} onClick={() => deleteAttachment.mutate(attachment.id)}>
                   <Trash2 size={15} />
                 </IconButton>
               </div>
@@ -240,18 +242,18 @@ function TicketEditor({
         <Button
           tone="danger"
           onClick={() => {
-			if (window.confirm("Archive this ticket?")) {
+			if (window.confirm(t("ticket.archiveConfirm"))) {
 			  archiveTicket.mutate();
             }
           }}
 		  disabled={archiveTicket.isPending}
         >
           <Trash2 size={16} />
-		  Archive
+		  {t("actions.archive")}
         </Button>
         <Button type="submit" tone="primary" disabled={updateTicket.isPending || !title.trim()}>
           <Save size={16} />
-          Save
+          {t("actions.save")}
         </Button>
       </div>
     </form>
@@ -259,6 +261,7 @@ function TicketEditor({
 }
 
 function TicketLinksPanel({ projectId, ticketId, tickets }: { projectId: ID; ticketId: ID; tickets: Ticket[] }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [targetTicketId, setTargetTicketId] = useState("");
   const [linkType, setLinkType] = useState<(typeof ticketLinkTypes)[number]["id"]>("relates_to");
@@ -274,7 +277,7 @@ function TicketLinksPanel({ projectId, ticketId, tickets }: { projectId: ID; tic
         queryClient.invalidateQueries({ queryKey: queryKeys.graphScope(projectId) }),
       ]);
       setTargetTicketId("");
-      toast.success("Ticket link created");
+      toast.success(t("ticket.linkCreated"));
     },
   });
 
@@ -283,7 +286,7 @@ function TicketLinksPanel({ projectId, ticketId, tickets }: { projectId: ID; tic
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.graphScope(projectId) });
       setLinkId("");
-      toast.success("Ticket link removed");
+      toast.success(t("ticket.linkRemoved"));
     },
   });
 
@@ -301,13 +304,13 @@ function TicketLinksPanel({ projectId, ticketId, tickets }: { projectId: ID; tic
     <section className="border-t border-slate-200 pt-5">
       <div className="mb-3 flex items-center gap-2">
         <Link2 size={18} className="text-slate-500" />
-        <h3 className="font-semibold text-slate-950">Links</h3>
+        <h3 className="font-semibold text-slate-950">{t("ticket.links")}</h3>
       </div>
       <div className="grid min-w-0 gap-5">
         <form className="grid min-w-0 gap-3" onSubmit={submitLink}>
-          {addLink.isError ? <ErrorState title="Could not link ticket" body={errorMessage(addLink.error, "Link request failed.")} /> : null}
-          <SelectField label="Target" value={targetTicketId} onChange={(event) => setTargetTicketId(event.target.value)}>
-            <option value="">Select ticket</option>
+          {addLink.isError ? <ErrorState title={t("ticket.linkFailed")} body={errorMessage(addLink.error, t("ticket.linkRequestFailed"))} /> : null}
+          <SelectField label={t("ticket.linkTarget")} value={targetTicketId} onChange={(event) => setTargetTicketId(event.target.value)}>
+            <option value="">{t("ticket.selectTicket")}</option>
             {candidates.map((ticket) => (
               <option key={ticket.id} value={ticket.id}>
                 {ticket.title}
@@ -315,7 +318,7 @@ function TicketLinksPanel({ projectId, ticketId, tickets }: { projectId: ID; tic
             ))}
           </SelectField>
           <SelectField
-            label="Type"
+            label={t("ticket.linkType")}
             value={linkType}
             onChange={(event) => setLinkType(event.target.value as (typeof ticketLinkTypes)[number]["id"])}
           >
@@ -327,18 +330,18 @@ function TicketLinksPanel({ projectId, ticketId, tickets }: { projectId: ID; tic
           </SelectField>
           <Button className="w-full" type="submit" tone="primary" disabled={addLink.isPending || !targetTicketId}>
             <Link2 size={16} />
-            Add link
+            {t("ticket.addLink")}
           </Button>
         </form>
 
         <form className="grid min-w-0 gap-3 border-t border-slate-200 pt-4" onSubmit={submitRemove}>
           {removeLink.isError ? (
-            <ErrorState title="Could not remove link" body={errorMessage(removeLink.error, "Remove link request failed.")} />
+            <ErrorState title={t("ticket.removeLinkFailed")} body={errorMessage(removeLink.error, t("ticket.removeLinkRequestFailed"))} />
           ) : null}
-          <TextField label="Link ID" value={linkId} onChange={(event) => setLinkId(event.target.value)} />
+          <TextField label={t("ticket.linkId")} value={linkId} onChange={(event) => setLinkId(event.target.value)} />
           <Button className="w-full" type="submit" tone="danger" disabled={removeLink.isPending || !linkId.trim()}>
             <Unlink size={16} />
-            Remove link
+            {t("ticket.removeLink")}
           </Button>
         </form>
       </div>
@@ -351,6 +354,7 @@ function commitTitle(message: string): string {
 }
 
 function TicketGitHubCommitsPanel({ projectId, ticketId }: { projectId: ID; ticketId: ID }) {
+  const { t, relativeDate } = useI18n();
   const queryClient = useQueryClient();
   const [commitId, setCommitId] = useState("");
 
@@ -380,18 +384,18 @@ function TicketGitHubCommitsPanel({ projectId, ticketId }: { projectId: ID; tick
     onSuccess: async () => {
       await refreshGitHubLinks();
       setCommitId("");
-      toast.success("GitHub commit linked");
+      toast.success(t("ticket.commitLinked"));
     },
-    onError: (error) => toast.error(errorMessage(error, "Could not link GitHub commit.")),
+    onError: (error) => toast.error(errorMessage(error, t("ticket.commitLinkFailed"))),
   });
 
   const unlinkCommit = useMutation({
     mutationFn: (targetCommitId: ID) => api.unlinkTicketGitHubCommit(ticketId, targetCommitId),
     onSuccess: async () => {
       await refreshGitHubLinks();
-      toast.success("GitHub commit unlinked");
+      toast.success(t("ticket.commitUnlinked"));
     },
-    onError: (error) => toast.error(errorMessage(error, "Could not unlink GitHub commit.")),
+    onError: (error) => toast.error(errorMessage(error, t("ticket.commitUnlinkFailed"))),
   });
 
   return (
@@ -399,7 +403,7 @@ function TicketGitHubCommitsPanel({ projectId, ticketId }: { projectId: ID; tick
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="flex items-center gap-2">
           <Github size={18} className="text-slate-500" />
-          <h3 className="font-semibold text-slate-950">GitHub Commits</h3>
+          <h3 className="font-semibold text-slate-950">{t("ticket.githubCommits")}</h3>
         </div>
         <form
           className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]"
@@ -408,8 +412,8 @@ function TicketGitHubCommitsPanel({ projectId, ticketId }: { projectId: ID; tick
             linkCommit.mutate();
           }}
         >
-          <SelectField label="Imported commit" value={commitId} onChange={(event) => setCommitId(event.target.value)}>
-            <option value="">Select commit</option>
+          <SelectField label={t("ticket.importedCommit")} value={commitId} onChange={(event) => setCommitId(event.target.value)}>
+            <option value="">{t("ticket.selectCommit")}</option>
             {candidates.map((commit) => (
               <option key={commit.id} value={commit.id}>
                 {commit.short_sha} / {commitTitle(commit.message)}
@@ -418,16 +422,16 @@ function TicketGitHubCommitsPanel({ projectId, ticketId }: { projectId: ID; tick
           </SelectField>
           <Button className="self-end" type="submit" tone="primary" disabled={linkCommit.isPending || !commitId}>
             <Link2 size={16} />
-            Link
+            {t("github.link")}
           </Button>
         </form>
       </div>
       {projectCommits.isError ? (
-        <ErrorState title="Could not load imported commits" body={errorMessage(projectCommits.error, "Project commit request failed.")} />
+        <ErrorState title={t("ticket.importedCommitsLoadFailed")} body={errorMessage(projectCommits.error, t("ticket.projectCommitRequestFailed"))} />
       ) : null}
-      {commits.isLoading ? <LoadingState label="Loading GitHub commits" /> : null}
+      {commits.isLoading ? <LoadingState label={t("github.loadingCommits")} /> : null}
       {commits.isError ? (
-        <ErrorState title="Could not load GitHub commits" body={errorMessage(commits.error, "GitHub commit request failed.")} />
+        <ErrorState title={t("ticket.githubCommitsLoadFailed")} body={errorMessage(commits.error, t("ticket.githubCommitRequestFailed"))} />
       ) : null}
       <div className="space-y-2">
         {commits.data?.map((commit: GitHubCommit) => (
@@ -446,8 +450,8 @@ function TicketGitHubCommitsPanel({ projectId, ticketId }: { projectId: ID; tick
                   {commitTitle(commit.message)}
                 </a>
                 <div className="mt-1 text-xs text-slate-500">
-                  {commit.repository_full_name || "GitHub"} / {commit.author_name || "Unknown author"} /{" "}
-                  {commit.authored_at ? relativeDate(commit.authored_at) : "unknown date"}
+                  {commit.repository_full_name || "GitHub"} / {commit.author_name || t("github.unknownAuthor")} /{" "}
+                  {commit.authored_at ? relativeDate(commit.authored_at) : t("github.unknownDate")}
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
@@ -459,13 +463,13 @@ function TicketGitHubCommitsPanel({ projectId, ticketId }: { projectId: ID; tick
                   onClick={() => unlinkCommit.mutate(commit.id)}
                 >
                   <Unlink size={14} />
-                  Unlink
+                  {t("ticket.unlink")}
                 </Button>
               </div>
             </div>
           </div>
         ))}
-        {commits.data?.length === 0 ? <p className="text-sm text-slate-500">No linked GitHub commits yet.</p> : null}
+        {commits.data?.length === 0 ? <p className="text-sm text-slate-500">{t("ticket.noLinkedCommits")}</p> : null}
       </div>
     </section>
   );
@@ -486,6 +490,7 @@ export function TicketDetailPanel({
   labels: Label[];
   onClose: () => void;
 }) {
+  const { t, relativeDate } = useI18n();
   const queryClient = useQueryClient();
   const [comment, setComment] = useState("");
 
@@ -524,7 +529,7 @@ export function TicketDetailPanel({
 
   return createPortal(
     <div className="fixed left-0 top-0 z-40 flex h-dvh w-screen justify-end overflow-hidden bg-slate-950/40">
-      <button type="button" aria-label="Close ticket panel" className="hidden flex-1 md:block" onClick={onClose} />
+      <button type="button" aria-label={t("ticket.closePanel")} className="hidden flex-1 md:block" onClick={onClose} />
       <aside className="flex h-dvh w-full max-w-2xl flex-col overflow-hidden bg-white shadow-xl">
         <header className="flex items-start justify-between border-b border-slate-200 px-5 py-4">
           <div className="min-w-0">
@@ -538,18 +543,18 @@ export function TicketDetailPanel({
               ) : null}
             </div>
             <h2 className="truncate text-lg font-semibold text-slate-950">
-              {ticket.data?.title || `Ticket ${compactId(ticketId)}`}
+              {ticket.data?.title || `${t("workspace.ticket")} ${compactId(ticketId)}`}
             </h2>
           </div>
-          <IconButton label="Close ticket" onClick={onClose}>
+          <IconButton label={t("ticket.close")} onClick={onClose}>
             <X size={18} />
           </IconButton>
         </header>
 
         <div className="flex-1 overflow-y-auto px-5 py-5">
-          {ticket.isLoading ? <LoadingState label="Loading ticket" /> : null}
+          {ticket.isLoading ? <LoadingState label={t("ticket.loading")} /> : null}
           {ticket.isError ? (
-            <ErrorState title="Could not load ticket" body={errorMessage(ticket.error, "Ticket request failed.")} />
+            <ErrorState title={t("ticket.loadFailed")} body={errorMessage(ticket.error, t("ticket.requestFailed"))} />
           ) : null}
 
           {ticket.data ? (
@@ -571,25 +576,25 @@ export function TicketDetailPanel({
               <section className="border-t border-slate-200 pt-5">
                 <div className="mb-3 flex items-center gap-2">
                   <MessageSquare size={18} className="text-slate-500" />
-                  <h3 className="font-semibold text-slate-950">Comments</h3>
+                  <h3 className="font-semibold text-slate-950">{t("ticket.comments")}</h3>
                 </div>
                 <form className="mb-4 grid gap-2" onSubmit={submitComment}>
                   <TextAreaField
-                    label="Add comment"
+                    label={t("ticket.addComment")}
                     value={comment}
                     onChange={(event) => setComment(event.target.value)}
-                    placeholder="Write an update"
+                    placeholder={t("ticket.commentPlaceholder")}
                   />
                   <div className="flex justify-end">
                     <Button type="submit" tone="primary" disabled={createComment.isPending || !comment.trim()}>
-                      Comment
+                      {t("ticket.commentAction")}
                     </Button>
                   </div>
                 </form>
 
-                {comments.isLoading ? <LoadingState label="Loading comments" /> : null}
+                {comments.isLoading ? <LoadingState label={t("ticket.commentsLoading")} /> : null}
                 {comments.isError ? (
-                  <ErrorState title="Could not load comments" body={errorMessage(comments.error, "Comment request failed.")} />
+                  <ErrorState title={t("ticket.commentsLoadFailed")} body={errorMessage(comments.error, t("ticket.commentRequestFailed"))} />
                 ) : null}
                 <div className="space-y-2">
                   {comments.data?.map((item) => (
@@ -599,7 +604,7 @@ export function TicketDetailPanel({
                         <div className="flex items-center gap-2">
                           <span>{relativeDate(item.created_at)}</span>
                           <IconButton
-                            label="Delete comment"
+                            label={t("ticket.deleteComment")}
                             className="h-7 w-7"
                             onClick={() => removeComment.mutate(item.id)}
                             disabled={removeComment.isPending}
@@ -611,7 +616,7 @@ export function TicketDetailPanel({
                       <p className="whitespace-pre-wrap text-sm text-slate-800">{item.content}</p>
                     </div>
                   ))}
-                  {comments.data?.length === 0 ? <p className="text-sm text-slate-500">No comments yet.</p> : null}
+                  {comments.data?.length === 0 ? <p className="text-sm text-slate-500">{t("ticket.noComments")}</p> : null}
                 </div>
               </section>
             </div>

@@ -9,7 +9,6 @@ import { TicketBoard } from "../features/tickets/TicketBoard";
 import { TicketClassificationFields } from "../features/tickets/TicketClassificationFields";
 import { ProjectTicketSummary } from "../features/projects/ProjectTicketSummary";
 import { api, errorMessage } from "../lib/api";
-import { relativeDate } from "../lib/format";
 import { useI18n } from "../lib/i18n-context";
 import { fieldLimits } from "../lib/limits";
 import { queryKeys } from "../lib/queryKeys";
@@ -94,7 +93,7 @@ function projectPermissions(project?: RemoteProject): Set<string> {
 export function RemoteProjectWorkspace() {
   const { projectId = "" } = useParams();
   const queryClient = useQueryClient();
-  const { t } = useI18n();
+  const { t, relativeDate } = useI18n();
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [draft, setDraft] = useState({
@@ -308,7 +307,7 @@ export function RemoteProjectWorkspace() {
           <div className="mt-4 flex flex-wrap gap-2">
             <ProjectTicketSummary tickets={remoteTickets} />
           </div>
-          {remoteProject?.updated_at ? <p className="mt-3 text-xs text-zinc-400">Updated {relativeDate(remoteProject.updated_at)}</p> : null}
+          {remoteProject?.updated_at ? <p className="mt-3 text-xs text-zinc-400">{t("remoteWorkspace.updated")} {relativeDate(remoteProject.updated_at)}</p> : null}
         </div>
         <div className="flex flex-wrap gap-2">
           {remoteProject?.project_ap_id ? (
