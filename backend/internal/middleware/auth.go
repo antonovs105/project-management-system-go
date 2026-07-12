@@ -18,17 +18,24 @@ type TokenVersionValidator interface {
 	ValidateTokenVersion(ctx context.Context, userID string, tokenVersion int) error
 }
 
+// SessionValidator validates server-side browser session identifiers.
+type SessionValidator interface {
+	ValidateSession(ctx context.Context, userID, sessionID string) error
+}
+
 // JWTMiddleware authenticates Bearer JWTs and optionally validates token versions.
 func JWTMiddleware(secret []byte, validators ...TokenVersionValidator) echo.MiddlewareFunc {
 	var validator TokenVersionValidator
+	var sessionValidator SessionValidator
 	if len(validators) > 0 {
 		validator = validators[0]
+		sessionValidator, _ = validators[0].(SessionValidator)
 	}
 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 
 		return func(c echo.Context) error {
-			tokenString, err := requestToken(c.Request())
+			tokenString, cookieCredential, err := requestToken(c.Request())
 			if err != nil {
 				return c.JSON(http.StatusUnauthorized, map[string]string{"error": err.Error()})
 			}
@@ -62,6 +69,16 @@ func JWTMiddleware(secret []byte, validators ...TokenVersionValidator) echo.Midd
 					}
 					c.Set("tokenVersion", tokenVersion)
 				}
+				sessionID, _ := claims["sid"].(string)
+				if cookieCredential && strings.TrimSpace(sessionID) == "" && sessionValidator != nil {
+					return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid token"})
+				}
+				if sessionValidator != nil && strings.TrimSpace(sessionID) != "" {
+					if err := sessionValidator.ValidateSession(c.Request().Context(), userID, sessionID); err != nil {
+						return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid token"})
+					}
+					c.Set("sessionID", sessionID)
+				}
 
 				return next(c)
 			}
@@ -73,19 +90,19 @@ func JWTMiddleware(secret []byte, validators ...TokenVersionValidator) echo.Midd
 
 // requestToken prefers an explicit bearer credential and otherwise accepts the
 // HttpOnly browser session cookie.
-func requestToken(req *http.Request) (string, error) {
+func requestToken(req *http.Request) (string, bool, error) {
 	authHeader := strings.TrimSpace(req.Header.Get("Authorization"))
 	if authHeader != "" {
 		headerParts := strings.Fields(authHeader)
 		if len(headerParts) != 2 || headerParts[0] != "Bearer" || headerParts[1] == "" {
-			return "", errors.New("invalid authorization header format")
+			return "", false, errors.New("invalid authorization header format")
 		}
-		return headerParts[1], nil
+		return headerParts[1], false, nil
 	}
 	if token, ok := authsession.TokenFromRequest(req); ok {
-		return token, nil
+		return token, true, nil
 	}
-	return "", errors.New("missing authentication credential")
+	return "", false, errors.New("missing authentication credential")
 }
 
 // tokenVersionFromClaims reads the token_version claim without accepting fractional values.

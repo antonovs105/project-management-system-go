@@ -9,6 +9,7 @@ import { ThemeProvider } from "./components/ThemeProvider";
 import { useTheme } from "./lib/theme-context";
 
 const AccountPage = lazy(() => import("./pages/AccountPage").then((module) => ({ default: module.AccountPage })));
+const AccountRecoveryPage = lazy(() => import("./pages/AccountRecoveryPage").then((module) => ({ default: module.AccountRecoveryPage })));
 const AdminAuditPage = lazy(() => import("./pages/AdminAuditPage").then((module) => ({ default: module.AdminAuditPage })));
 const AdminFederationPage = lazy(() => import("./pages/AdminFederationPage").then((module) => ({ default: module.AdminFederationPage })));
 const AdminUsersPage = lazy(() => import("./pages/AdminUsersPage").then((module) => ({ default: module.AdminUsersPage })));
@@ -47,6 +48,9 @@ export function App() {
               <Route path="/login" element={<AuthPage mode="login" />} />
               <Route path="/register" element={<AuthPage mode="register" />} />
               <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
+              <Route path="/auth/forgot-password" element={<AccountRecoveryPage mode="forgot" />} />
+              <Route path="/auth/reset-password" element={<AccountRecoveryPage mode="reset" />} />
+              <Route path="/auth/verify-email" element={<AccountRecoveryPage mode="verify" />} />
               <Route path="/terms" element={<LegalPage />} />
 
               <Route element={<ProtectedRoute />}>

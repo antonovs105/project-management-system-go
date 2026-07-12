@@ -161,6 +161,8 @@ paths:
                   email:
                     type: string
                     format: email
+                  email_verified:
+                    type: boolean
         "401":
           $ref: "#/components/responses/Error"
   /auth/oauth/providers:
@@ -248,7 +250,68 @@ paths:
                   email:
                     type: string
                     format: email
+                  email_verified:
+                    type: boolean
         "401":
+          $ref: "#/components/responses/Error"
+  /auth/password/forgot:
+    post:
+      tags: [Auth]
+      operationId: requestPasswordReset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        "202":
+          description: Recovery request accepted regardless of account existence.
+  /auth/password/reset:
+    post:
+      tags: [Auth]
+      operationId: resetPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, new_password]
+              properties:
+                token:
+                  type: string
+                new_password:
+                  type: string
+                  format: password
+      responses:
+        "204":
+          description: Password replaced and existing sessions revoked.
+        "400":
+          $ref: "#/components/responses/Error"
+  /auth/email/verify:
+    post:
+      tags: [Auth]
+      operationId: verifyLocalEmail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+      responses:
+        "204":
+          description: Email ownership verified.
+        "400":
           $ref: "#/components/responses/Error"
   /api/v1/instance:
     get:
@@ -475,6 +538,63 @@ paths:
           $ref: "#/components/responses/Error"
         "401":
           $ref: "#/components/responses/Error"
+  /api/v1/me/email/verification:
+    post:
+      tags: [Auth]
+      operationId: resendEmailVerification
+      security:
+        - cookieAuth: []
+      responses:
+        "202":
+          description: Replacement verification email queued.
+  /api/v1/me/sessions:
+    get:
+      tags: [Auth]
+      operationId: listCurrentUserSessions
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Recent browser sessions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AccountSession"
+  /api/v1/me/sessions/{sessionID}:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      tags: [Auth]
+      operationId: revokeCurrentUserSession
+      security:
+        - cookieAuth: []
+      responses:
+        "204":
+          description: Session revoked.
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/me/security-events:
+    get:
+      tags: [Auth]
+      operationId: listCurrentUserSecurityEvents
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Durable authentication history.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SecurityEvent"
   /api/v1/me/logout:
     post:
       tags: [Auth]
@@ -3700,9 +3820,53 @@ components:
     TicketType:
       type: string
       enum: [epic, task, subtask]
+    AccountSession:
+      type: object
+      required: [id, user_agent, ip_address, created_at, last_seen_at, expires_at, current]
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_agent:
+          type: string
+        ip_address:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: [string, "null"]
+          format: date-time
+        current:
+          type: boolean
+    SecurityEvent:
+      type: object
+      required: [id, event_type, ip_address, user_agent, metadata, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+        ip_address:
+          type: string
+        user_agent:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
     User:
       type: object
-      required: [id, ap_id, username, email, instance_role, handle, name, summary, created_at, updated_at]
+      required: [id, ap_id, username, email, email_verified, instance_role, handle, name, summary, created_at, updated_at]
       properties:
         id:
           type: string
@@ -3715,6 +3879,8 @@ components:
         email:
           type: string
           format: email
+        email_verified:
+          type: boolean
         instance_role:
           $ref: "#/components/schemas/InstanceRole"
         handle:

@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/antonovs105/project-management-system-go/internal/account"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/c2s"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
@@ -106,6 +107,11 @@ var requiredDatabaseTables = []string{
 	"actors",
 	"actor_keys",
 	"users",
+	"account_tokens",
+	"user_sessions",
+	"user_mfa_credentials",
+	"auth_events",
+	"email_outbox",
 	"projects",
 	"project_members",
 	"project_roles",
@@ -139,6 +145,7 @@ type ApiServer struct {
 	metrics             *observability.Metrics
 	metricsToken        string
 	userHandler         *user.Handler
+	accountHandler      *account.Handler
 	instanceHandler     *instance.Handler
 	projectHandler      *project.Handler
 	labelHandler        *label.Handler
@@ -435,11 +442,29 @@ func main() {
 	}
 
 	userRepo := user.NewRepository(db, apConfig, privateKeyCodec)
+	accountRepository := account.NewRepository(db)
+	var accountMailer account.Mailer
+	if cfg.Email.Host != "" {
+		accountMailer, err = account.NewSMTPMailer(account.SMTPConfig{
+			Host:        cfg.Email.Host,
+			Port:        cfg.Email.Port,
+			Username:    cfg.Email.Username,
+			Password:    cfg.Email.Password,
+			FromAddress: cfg.Email.FromAddress,
+			FromName:    cfg.Email.FromName,
+			ImplicitTLS: cfg.Email.ImplicitTLS,
+		})
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	accountService := account.NewService(accountRepository, publicBaseURL, cfg.Instance.Name, accountMailer, !production)
 	userService := user.NewService(
 		userRepo,
 		[]byte(jwtSecret),
 		apConfig,
 		user.WithRegistrationEnabled(cfg.Registration.Enabled),
+		user.WithAccountSecurity(accountService),
 		user.WithOAuthConfig(user.OAuthConfig{
 			FrontendCallbackURL: cfg.OAuth.FrontendCallbackURL,
 			Google: user.OAuthProviderConfig{
@@ -455,6 +480,7 @@ func main() {
 		}),
 	)
 	userHandler := user.NewHandler(userService)
+	accountHandler := account.NewHandler(accountService)
 	instanceHandler := instance.NewHandler(cfg, userService, userService)
 
 	projectRepo := project.NewRepository(db, apConfig, privateKeyCodec)
@@ -591,6 +617,10 @@ func main() {
 	wfRepo := webfinger.NewRepository(db)
 	wfService := webfinger.NewService(wfRepo, apConfig)
 	wfHandler := webfinger.NewHandler(wfService)
+	if role.runsWorker() {
+		stopEmailDispatcher := accountService.StartEmailDispatcher(context.Background(), 5*time.Second)
+		defer stopEmailDispatcher()
+	}
 
 	server := &ApiServer{
 		db:                  db,
@@ -598,6 +628,7 @@ func main() {
 		metrics:             metrics,
 		metricsToken:        metricsToken,
 		userHandler:         userHandler,
+		accountHandler:      accountHandler,
 		instanceHandler:     instanceHandler,
 		projectHandler:      projectHandler,
 		labelHandler:        labelHandler,
@@ -652,6 +683,9 @@ func main() {
 		newConfiguredRateLimiter("auth-ip", cfg.RateLimits.Auth, redisClient),
 		newConfiguredRateLimiterWithIdentifier("auth-account", cfg.RateLimits.Auth, redisClient, authAccountRateLimitIdentifier),
 	)
+	if server.accountHandler != nil {
+		server.accountHandler.RegisterPublicRoutes(e, newConfiguredRateLimiter("account-recovery", cfg.RateLimits.Auth, redisClient))
+	}
 	server.wfHandler.RegisterRoutes(e, newConfiguredRateLimiter("discovery", cfg.RateLimits.Discovery, redisClient))
 	server.githubHandler.RegisterWebhookRoutes(e, newConfiguredRateLimiter("github-webhook", cfg.RateLimits.Auth, redisClient))
 
@@ -941,6 +975,9 @@ func registerAuthenticatedAPIRoutes(api *echo.Group, server *ApiServer, jwtSecre
 	api.GET("/me", server.getProfile)
 	server.instanceHandler.RegisterAuthenticatedRoutes(api)
 	server.userHandler.RegisterAccountRoutes(api)
+	if server.accountHandler != nil {
+		server.accountHandler.RegisterAccountRoutes(api)
+	}
 	server.userHandler.RegisterAdminRoutes(api)
 	server.federationHandler.RegisterRoutes(api)
 	server.projectHandler.RegisterRoutes(api)

@@ -8,6 +8,7 @@ type User struct {
 	APID          string    `db:"ap_id" json:"ap_id"`
 	Username      string    `db:"username" json:"username"`
 	Email         string    `db:"email" json:"email"`
+	EmailVerified bool      `db:"email_verified" json:"email_verified"`
 	PasswordHash  string    `db:"password_hash" json:"-"`
 	InstanceRole  string    `db:"instance_role" json:"instance_role"`
 	Handle        string    `db:"handle" json:"handle"`

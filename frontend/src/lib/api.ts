@@ -1,5 +1,6 @@
 import axios from "axios";
 import type {
+	AccountSession,
   AdminAuditAction,
   AdminAuditEvent,
   AdminAuditTargetType,
@@ -40,7 +41,8 @@ import type {
   RemoteActorInspection,
   RemoteProjectInvite,
   RemoteProjectInviteResult,
-  RemoteTicketWriteResult,
+	RemoteTicketWriteResult,
+	SecurityEvent,
   Ticket,
   TicketPriority,
   TicketStatus,
@@ -250,7 +252,8 @@ export interface RemoteActorFilters {
 export interface LoginResponse {
   user_id: ID;
   instance_role: InstanceRole;
-  email?: string;
+	email?: string;
+	email_verified: boolean;
 }
 
 interface ProfileResponse {
@@ -370,9 +373,39 @@ export const api = {
     return data;
   },
 
-  async register(payload: RegisterPayload): Promise<void> {
-    await http.post("/register", payload);
-  },
+	async register(payload: RegisterPayload): Promise<void> {
+		await http.post("/register", payload);
+	},
+
+	async forgotPassword(email: string): Promise<void> {
+		await http.post("/auth/password/forgot", { email });
+	},
+
+	async resetPassword(token: string, newPassword: string): Promise<void> {
+		await http.post("/auth/password/reset", { token, new_password: newPassword });
+	},
+
+	async verifyEmail(token: string): Promise<void> {
+		await http.post("/auth/email/verify", { token });
+	},
+
+	async requestEmailVerification(): Promise<void> {
+		await http.post(`${apiPrefix}/me/email/verification`);
+	},
+
+	async listSessions(): Promise<AccountSession[]> {
+		const { data } = await http.get<AccountSession[] | null>(`${apiPrefix}/me/sessions`);
+		return asArray(data);
+	},
+
+	async revokeSession(sessionId: ID): Promise<void> {
+		await http.delete(`${apiPrefix}/me/sessions/${sessionId}`);
+	},
+
+	async listSecurityEvents(): Promise<SecurityEvent[]> {
+		const { data } = await http.get<SecurityEvent[] | null>(`${apiPrefix}/me/security-events`);
+		return asArray(data);
+	},
 
   async profile(): Promise<ProfileResponse> {
     const { data } = await http.get<ProfileResponse>(`${apiPrefix}/me`);

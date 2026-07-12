@@ -1,22 +1,36 @@
-import { useMutation } from "@tanstack/react-query";
-import { KeyRound, Shield } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { History, KeyRound, MonitorSmartphone, Shield, Trash2 } from "lucide-react";
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
 import { Button, ErrorState, Panel, TextField } from "../components/ui";
 import { api, errorMessage } from "../lib/api";
-import { compactId } from "../lib/format";
+import { compactId, relativeDate } from "../lib/format";
 import { useI18n } from "../lib/i18n-context";
 import { fieldLimits } from "../lib/limits";
+import { queryKeys } from "../lib/queryKeys";
 import { useAuthStore } from "../store/auth";
 
 export function AccountPage() {
+	const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const { t } = useI18n();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+	const sessions = useQuery({ queryKey: queryKeys.accountSessions, queryFn: api.listSessions });
+	const securityEvents = useQuery({ queryKey: queryKeys.securityEvents, queryFn: api.listSecurityEvents });
+	const revokeSession = useMutation({
+		mutationFn: api.revokeSession,
+		onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.accountSessions }),
+		onError: (error) => toast.error(errorMessage(error, "Could not revoke that session.")),
+	});
+	const resendVerification = useMutation({
+		mutationFn: api.requestEmailVerification,
+		onSuccess: () => toast.success("A new verification email has been queued."),
+		onError: (error) => toast.error(errorMessage(error, "Could not queue verification email.")),
+	});
 
   const changePassword = useMutation({
     mutationFn: () => api.changePassword({ current_password: currentPassword, new_password: newPassword }),
@@ -139,6 +153,36 @@ export function AccountPage() {
           </div>
         </form>
       </Panel>
+
+		{user?.emailVerified === false ? (
+			<Panel className="p-5 xl:col-span-2">
+				<div className="flex flex-wrap items-center justify-between gap-3">
+					<div><h2 className="font-semibold text-zinc-950">Verify your email</h2><p className="text-sm text-zinc-500">Local accounts must verify email ownership before signing in again.</p></div>
+					<Button onClick={() => resendVerification.mutate()} disabled={resendVerification.isPending}>Resend verification</Button>
+				</div>
+			</Panel>
+		) : null}
+
+		<Panel className="p-5 xl:col-span-2">
+			<div className="mb-4 flex items-center gap-2"><MonitorSmartphone size={18} className="text-zinc-500" /><h2 className="font-semibold text-zinc-950">Sessions and devices</h2></div>
+			{sessions.isError ? <ErrorState title="Could not load sessions" body={errorMessage(sessions.error, "Session request failed.")} /> : null}
+			<div className="grid gap-2">
+				{(sessions.data || []).map((session) => (
+					<div key={session.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-200 p-3">
+						<div className="min-w-0"><div className="truncate text-sm font-medium text-zinc-950">{session.user_agent || "Unknown client"}{session.current ? " (current)" : ""}</div><div className="text-xs text-zinc-500">{session.ip_address || "Unknown IP"} · Last seen {relativeDate(session.last_seen_at)}</div></div>
+						<Button tone="danger" onClick={() => revokeSession.mutate(session.id)} disabled={revokeSession.isPending}><Trash2 size={15} />Revoke</Button>
+					</div>
+				))}
+			</div>
+		</Panel>
+
+		<Panel className="p-5 xl:col-span-2">
+			<div className="mb-4 flex items-center gap-2"><History size={18} className="text-zinc-500" /><h2 className="font-semibold text-zinc-950">Security activity</h2></div>
+			{securityEvents.isError ? <ErrorState title="Could not load security events" body={errorMessage(securityEvents.error, "Security event request failed.")} /> : null}
+			<div className="grid gap-2">
+				{(securityEvents.data || []).map((event) => <div key={event.id} className="rounded-xl border border-zinc-200 p-3 text-sm"><div className="font-medium text-zinc-950">{event.event_type.replaceAll(".", " ")}</div><div className="text-xs text-zinc-500">{event.ip_address || "Unknown IP"} · {relativeDate(event.created_at)}</div></div>)}
+			</div>
+		</Panel>
     </div>
   );
 }

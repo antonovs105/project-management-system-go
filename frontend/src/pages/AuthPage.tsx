@@ -66,7 +66,7 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
   const login = useMutation({
     mutationFn: api.login,
     onSuccess: (session) => {
-      setSession({ userId: session.user_id, instanceRole: session.instance_role, email: session.email });
+      setSession({ userId: session.user_id, instanceRole: session.instance_role, email: session.email, emailVerified: session.email_verified });
       navigate(destinationFromLocation(location.state), { replace: true });
     },
     onError: (error) => setFormError(errorMessage(error, t("auth.loginFailed"))),
@@ -219,6 +219,11 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
                 {pending ? t("common.working") : mode === "login" ? t("actions.signIn") : t("actions.createAccount")}
                 <ArrowRight size={16} />
               </Button>
+              {mode === "login" ? (
+                <Link className="text-center text-sm font-medium text-zinc-700 underline-offset-4 hover:underline" to="/auth/forgot-password">
+                  Forgot your password?
+                </Link>
+              ) : null}
             </form>
           )}
 

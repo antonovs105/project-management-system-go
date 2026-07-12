@@ -31,9 +31,30 @@ export type AdminAuditAction =
 export type AdminAuditTargetType = "user" | "federation_domain" | "federation_delivery";
 
 export interface SessionUser {
-  userId: ID;
-  instanceRole: InstanceRole;
-  email?: string;
+	userId: ID;
+	instanceRole: InstanceRole;
+	email?: string;
+	emailVerified?: boolean;
+}
+
+export interface AccountSession {
+	id: ID;
+	user_agent: string;
+	ip_address: string;
+	created_at: string;
+	last_seen_at: string;
+	expires_at: string;
+	revoked_at?: string;
+	current: boolean;
+}
+
+export interface SecurityEvent {
+	id: ID;
+	event_type: string;
+	ip_address: string;
+	user_agent: string;
+	metadata: Record<string, unknown>;
+	created_at: string;
 }
 
 export interface PublicInstanceConfig {

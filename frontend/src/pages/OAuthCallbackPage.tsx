@@ -46,7 +46,7 @@ export function OAuthCallbackPage() {
   const { mutate, isPending } = useMutation({
     mutationFn: api.exchangeOAuthCode,
     onSuccess: (session) => {
-      setSession({ userId: session.user_id, instanceRole: session.instance_role, email: session.email });
+      setSession({ userId: session.user_id, instanceRole: session.instance_role, email: session.email, emailVerified: session.email_verified });
       navigate("/projects", { replace: true });
     },
     onError: (error) => setExchangeError(errorMessage(error, t("oauth.exchangeFailed"))),

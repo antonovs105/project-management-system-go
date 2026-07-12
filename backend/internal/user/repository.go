@@ -137,8 +137,8 @@ func (r *PgRepository) insertUserGraph(ctx context.Context, tx *sqlx.Tx, user *U
 	}
 
 	userQuery := `
-		INSERT INTO users (id, username, email, password_hash, instance_role)
-		VALUES (:id, :username, :email, :password_hash, :instance_role)
+		INSERT INTO users (id, username, email, email_verified, password_hash, instance_role)
+		VALUES (:id, :username, :email, :email_verified, :password_hash, :instance_role)
 	`
 	if _, err := tx.NamedExecContext(ctx, userQuery, user); err != nil {
 		return err
@@ -193,6 +193,7 @@ func (r *PgRepository) GetUserByEmail(ctx context.Context, email string) (*User,
 			a.ap_id,
 			u.username,
 			u.email,
+			u.email_verified,
 			u.password_hash,
 			u.instance_role,
 			u.token_version,
@@ -481,6 +482,7 @@ func userSelectQuery() string {
 			a.ap_id,
 			u.username,
 			u.email,
+			u.email_verified,
 			u.instance_role,
 			u.token_version,
 			a.handle,
@@ -501,6 +503,7 @@ func userSelectWithPasswordQuery() string {
 			a.ap_id,
 			u.username,
 			u.email,
+			u.email_verified,
 			u.password_hash,
 			u.instance_role,
 			u.token_version,

@@ -144,7 +144,7 @@ func TestHandler_SessionCookieLifecycle(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		assert.NotContains(t, rec.Body.String(), "token")
-		assert.JSONEq(t, `{"user_id":"11111111-1111-4111-8111-111111111111","instance_role":"user","email":"user@example.test"}`, rec.Body.String())
+		assert.JSONEq(t, `{"user_id":"11111111-1111-4111-8111-111111111111","instance_role":"user","email":"user@example.test","email_verified":false}`, rec.Body.String())
 		cookies := rec.Result().Cookies()
 		require.Len(t, cookies, 1)
 		assert.Equal(t, authsession.CookieName, cookies[0].Name)

@@ -51,6 +51,7 @@ type Config struct {
 	Metrics      MetricsConfig      `yaml:"metrics"`
 	Federation   FederationConfig   `yaml:"federation"`
 	OAuth        OAuthConfig        `yaml:"oauth"`
+	Email        EmailConfig        `yaml:"email"`
 	GitHub       GitHubConfig       `yaml:"github"`
 }
 
@@ -146,6 +147,17 @@ type OAuthProviderConfig struct {
 	RedirectURL  string `yaml:"redirect_url"`
 }
 
+// EmailConfig controls transactional SMTP delivery for account lifecycle messages.
+type EmailConfig struct {
+	Host        string `yaml:"host"`
+	Port        int    `yaml:"port"`
+	Username    string `yaml:"username"`
+	Password    string `yaml:"password"`
+	FromAddress string `yaml:"from_address"`
+	FromName    string `yaml:"from_name"`
+	ImplicitTLS bool   `yaml:"implicit_tls"`
+}
+
 // GitHubConfig controls optional GitHub repository integration.
 type GitHubConfig struct {
 	APIToken      string `yaml:"api_token"`
@@ -186,6 +198,7 @@ func Default() Config {
 		OAuth: OAuthConfig{
 			FrontendCallbackURL: "http://localhost:5173/oauth/callback",
 		},
+		Email: EmailConfig{Port: 587, FromName: "Progo"},
 	}
 }
 
@@ -269,6 +282,11 @@ func Normalize(cfg *Config) {
 	cfg.OAuth.GitHub.ClientID = strings.TrimSpace(cfg.OAuth.GitHub.ClientID)
 	cfg.OAuth.GitHub.ClientSecret = strings.TrimSpace(cfg.OAuth.GitHub.ClientSecret)
 	cfg.OAuth.GitHub.RedirectURL = strings.TrimSpace(cfg.OAuth.GitHub.RedirectURL)
+	cfg.Email.Host = strings.TrimSpace(cfg.Email.Host)
+	cfg.Email.Username = strings.TrimSpace(cfg.Email.Username)
+	cfg.Email.Password = strings.TrimSpace(cfg.Email.Password)
+	cfg.Email.FromAddress = strings.TrimSpace(cfg.Email.FromAddress)
+	cfg.Email.FromName = strings.TrimSpace(cfg.Email.FromName)
 	cfg.GitHub.APIToken = strings.TrimSpace(cfg.GitHub.APIToken)
 	cfg.GitHub.WebhookSecret = strings.TrimSpace(cfg.GitHub.WebhookSecret)
 	cfg.Server.CORSAllowedOrigins = trimList(cfg.Server.CORSAllowedOrigins)
@@ -353,6 +371,9 @@ func (c Config) Validate() error {
 		if c.FederationAllowPrivateNetworks() {
 			return fmt.Errorf("federation.allow_private_networks cannot be enabled in production")
 		}
+		if c.Registration.Enabled && (c.Email.Host == "" || c.Email.Port < 1 || c.Email.FromAddress == "") {
+			return fmt.Errorf("transactional email SMTP configuration is required when registration is enabled in production")
+		}
 	}
 
 	return nil
@@ -409,6 +430,17 @@ func applyEnv(cfg *Config) error {
 	applyStringEnv(&cfg.OAuth.GitHub.ClientID, "GITHUB_OAUTH_CLIENT_ID")
 	applyStringEnv(&cfg.OAuth.GitHub.ClientSecret, "GITHUB_OAUTH_CLIENT_SECRET")
 	applyStringEnv(&cfg.OAuth.GitHub.RedirectURL, "GITHUB_OAUTH_REDIRECT_URL")
+	applyStringEnv(&cfg.Email.Host, "SMTP_HOST")
+	if err := applyIntEnv(&cfg.Email.Port, "SMTP_PORT"); err != nil {
+		return err
+	}
+	applyStringEnv(&cfg.Email.Username, "SMTP_USERNAME")
+	applyStringEnv(&cfg.Email.Password, "SMTP_PASSWORD")
+	applyStringEnv(&cfg.Email.FromAddress, "SMTP_FROM_ADDRESS")
+	applyStringEnv(&cfg.Email.FromName, "SMTP_FROM_NAME")
+	if err := applyBoolValueEnv(&cfg.Email.ImplicitTLS, "SMTP_IMPLICIT_TLS"); err != nil {
+		return err
+	}
 	applyStringEnv(&cfg.GitHub.APIToken, "GITHUB_API_TOKEN")
 	applyStringEnv(&cfg.GitHub.WebhookSecret, "GITHUB_WEBHOOK_SECRET")
 	applyStringEnv(&cfg.Projects.CreationPolicy, "PROJECT_CREATION_POLICY")

@@ -143,6 +143,8 @@ func TestValidateAcceptsProductionConfig(t *testing.T) {
 	cfg.Server.CORSAllowedOrigins = []string{"https://progo.example.test"}
 	cfg.Metrics.Token = strings.Repeat("m", 32)
 	cfg.Federation.AllowInsecureHTTP = &disabled
+	cfg.Email.Host = "smtp.example.test"
+	cfg.Email.FromAddress = "progo@example.test"
 
 	require.NoError(t, cfg.Validate())
 }
@@ -194,6 +196,8 @@ func validProductionConfig() Config {
 	cfg.Server.CORSAllowedOrigins = []string{"https://progo.example.test"}
 	cfg.Metrics.Token = strings.Repeat("m", 32)
 	cfg.Federation.AllowInsecureHTTP = &disabled
+	cfg.Email.Host = "smtp.example.test"
+	cfg.Email.FromAddress = "progo@example.test"
 	return cfg
 }
 

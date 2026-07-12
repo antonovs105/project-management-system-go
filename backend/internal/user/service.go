@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/antonovs105/project-management-system-go/internal/account"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/antonovs105/project-management-system-go/internal/authsession"
 	"github.com/golang-jwt/jwt/v5"
@@ -47,6 +48,9 @@ var ErrCannotDemoteLastAdmin = errors.New("cannot demote the last instance owner
 
 // ErrInvalidCredentials reports failed authentication without revealing which credential failed.
 var ErrInvalidCredentials = errors.New("invalid credentials")
+
+// ErrEmailNotVerified reports that a local account must prove email ownership before login.
+var ErrEmailNotVerified = errors.New("email address is not verified")
 
 // ErrRegistrationDisabled reports that this instance is closed to new accounts.
 var ErrRegistrationDisabled = errors.New("registration is disabled")
@@ -105,6 +109,7 @@ type Service struct {
 	oauthConfig         OAuthConfig
 	httpClient          *http.Client
 	registrationEnabled bool
+	accountSecurity     *account.Service
 }
 
 // OAuthProviderConfig contains one provider's OAuth client settings.
@@ -149,6 +154,13 @@ func WithRegistrationEnabled(enabled bool) Option {
 	}
 }
 
+// WithAccountSecurity enables email verification, session inventory, and durable auth events.
+func WithAccountSecurity(service *account.Service) Option {
+	return func(s *Service) {
+		s.accountSecurity = service
+	}
+}
+
 // NewService creates a user service with repository, JWT secret, and ActivityPub configuration.
 func NewService(repo Repository, jwtSecret []byte, apConfig activitypub.Config, options ...Option) *Service {
 	service := &Service{
@@ -186,6 +198,11 @@ func (s *Service) RegisterUser(ctx context.Context, username, email, password st
 	err = s.repo.CreateUser(ctx, newUser)
 	if err != nil {
 		return nil, err
+	}
+	if s.accountSecurity != nil {
+		if err := s.accountSecurity.SendRegistrationVerification(ctx, newUser.ID, newUser.Email); err != nil {
+			return nil, err
+		}
 	}
 
 	newUser.PasswordHash = ""
@@ -296,6 +313,11 @@ func (s *Service) ExchangeOAuthLoginCode(ctx context.Context, code string) (stri
 
 // ExchangeOAuthSession consumes a one-time frontend code and returns the authenticated session.
 func (s *Service) ExchangeOAuthSession(ctx context.Context, code string) (*AuthenticatedSession, error) {
+	return s.ExchangeOAuthSessionWithClient(ctx, code, account.ClientInfo{})
+}
+
+// ExchangeOAuthSessionWithClient consumes an OAuth code and records its browser session.
+func (s *Service) ExchangeOAuthSessionWithClient(ctx context.Context, code string, client account.ClientInfo) (*AuthenticatedSession, error) {
 	code = strings.TrimSpace(code)
 	if code == "" {
 		return nil, ErrOAuthInvalidCode
@@ -304,11 +326,15 @@ func (s *Service) ExchangeOAuthSession(ctx context.Context, code string) (*Authe
 	if err != nil {
 		return nil, err
 	}
-	token, err := s.issueToken(user)
+	sessionID, err := s.createSession(ctx, user.ID, client)
 	if err != nil {
 		return nil, err
 	}
-	return &AuthenticatedSession{Token: token, User: user}, nil
+	token, err := s.issueToken(user, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return &AuthenticatedSession{Token: token, User: user, SessionID: sessionID}, nil
 }
 
 // OAuthFrontendRedirectURL builds the SPA callback URL with a one-time code or safe error code.
@@ -336,6 +362,7 @@ func (s *Service) BootstrapAdmin(ctx context.Context, username, email, password 
 	if err != nil {
 		return nil, err
 	}
+	newUser.EmailVerified = true
 
 	err = s.repo.CreateAdminIfNoAdmin(ctx, newUser)
 	if err != nil {
@@ -482,6 +509,7 @@ func (s *Service) newLocalUser(username, email, password, instanceRole string) (
 		APID:          activitypub.UserAPID(s.apConfig, username),
 		Username:      username,
 		Email:         email,
+		EmailVerified: false,
 		PasswordHash:  string(hashedPassword),
 		InstanceRole:  instanceRole,
 		Handle:        activitypub.Handle(username, s.apConfig),
@@ -526,6 +554,7 @@ func (s *Service) newOAuthUser(profile OAuthProfile) (*User, error) {
 		APID:          activitypub.UserAPID(s.apConfig, username),
 		Username:      username,
 		Email:         email,
+		EmailVerified: true,
 		PasswordHash:  string(randomPasswordHash),
 		InstanceRole:  InstanceRoleUser,
 		Handle:        activitypub.Handle(username, s.apConfig),
@@ -636,8 +665,9 @@ func invalidUserInput(message string) error {
 
 // AuthenticatedSession contains the server-issued credential and public session identity.
 type AuthenticatedSession struct {
-	Token string
-	User  *User
+	Token     string
+	User      *User
+	SessionID string
 }
 
 // Login verifies credentials and returns a JWT bound to the user's token version.
@@ -651,6 +681,11 @@ func (s *Service) Login(ctx context.Context, email, password string) (string, er
 
 // LoginSession verifies credentials and returns the authenticated session.
 func (s *Service) LoginSession(ctx context.Context, email, password string) (*AuthenticatedSession, error) {
+	return s.LoginSessionWithClient(ctx, email, password, account.ClientInfo{})
+}
+
+// LoginSessionWithClient verifies credentials and records its browser session.
+func (s *Service) LoginSessionWithClient(ctx context.Context, email, password string, client account.ClientInfo) (*AuthenticatedSession, error) {
 	email = normalizeEmail(email)
 
 	user, err := s.repo.GetUserByEmail(ctx, email)
@@ -663,14 +698,24 @@ func (s *Service) LoginSession(ctx context.Context, email, password string) (*Au
 
 	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password))
 	if err != nil {
+		if s.accountSecurity != nil {
+			_ = s.accountSecurity.RecordAuthEvent(ctx, user.ID, "login.failed", client)
+		}
 		return nil, ErrInvalidCredentials
 	}
+	if s.accountSecurity != nil && !user.EmailVerified {
+		return nil, ErrEmailNotVerified
+	}
 
-	token, err := s.issueToken(user)
+	sessionID, err := s.createSession(ctx, user.ID, client)
 	if err != nil {
 		return nil, err
 	}
-	return &AuthenticatedSession{Token: token, User: user}, nil
+	token, err := s.issueToken(user, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return &AuthenticatedSession{Token: token, User: user, SessionID: sessionID}, nil
 }
 
 // RevokeSessions invalidates all currently issued sessions for a user.
@@ -682,7 +727,7 @@ func (s *Service) RevokeSessions(ctx context.Context, userID string) error {
 }
 
 // issueToken creates the normal Progo JWT for any authenticated local user.
-func (s *Service) issueToken(user *User) (string, error) {
+func (s *Service) issueToken(user *User, sessionID string) (string, error) {
 	now := time.Now().UTC()
 	claims := jwt.MapClaims{
 		"sub":           user.ID,
@@ -694,6 +739,9 @@ func (s *Service) issueToken(user *User) (string, error) {
 		"jti":           uuid.NewString(),
 		"exp":           now.Add(authsession.Lifetime).Unix(),
 	}
+	if sessionID != "" {
+		claims["sid"] = sessionID
+	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
@@ -703,6 +751,30 @@ func (s *Service) issueToken(user *User) (string, error) {
 	}
 
 	return tokenString, nil
+}
+
+// createSession persists browser-visible session state when account security is enabled.
+func (s *Service) createSession(ctx context.Context, userID string, client account.ClientInfo) (string, error) {
+	if s.accountSecurity == nil {
+		return "", nil
+	}
+	return s.accountSecurity.CreateSession(ctx, userID, client)
+}
+
+// ValidateSession rejects a revoked browser session claim.
+func (s *Service) ValidateSession(ctx context.Context, userID, sessionID string) error {
+	if s.accountSecurity == nil {
+		return nil
+	}
+	return s.accountSecurity.ValidateSession(ctx, userID, sessionID)
+}
+
+// RevokeSession invalidates one browser session without logging out every device.
+func (s *Service) RevokeSession(ctx context.Context, userID, sessionID string, client account.ClientInfo) error {
+	if s.accountSecurity == nil || sessionID == "" {
+		return s.RevokeSessions(ctx, userID)
+	}
+	return s.accountSecurity.RevokeSession(ctx, userID, sessionID, client)
 }
 
 // OAuthProfile is normalized identity data returned by an upstream provider.

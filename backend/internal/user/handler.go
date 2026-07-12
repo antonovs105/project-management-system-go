@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/antonovs105/project-management-system-go/internal/account"
 	"github.com/antonovs105/project-management-system-go/internal/authsession"
 	"github.com/labstack/echo/v4"
 )
@@ -65,9 +66,10 @@ type ExchangeOAuthCodeRequest struct {
 
 // SessionResponse is the non-sensitive identity returned after a session cookie is established.
 type SessionResponse struct {
-	UserID       string `json:"user_id"`
-	InstanceRole string `json:"instance_role"`
-	Email        string `json:"email,omitempty"`
+	UserID        string `json:"user_id"`
+	InstanceRole  string `json:"instance_role"`
+	Email         string `json:"email,omitempty"`
+	EmailVerified bool   `json:"email_verified"`
 }
 
 // UpdateInstanceRoleRequest is the JSON payload for changing a user's instance role.
@@ -273,7 +275,7 @@ func (h *Handler) ExchangeOAuthCode(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
-	session, err := h.service.ExchangeOAuthSession(c.Request().Context(), req.Code)
+	session, err := h.service.ExchangeOAuthSessionWithClient(c.Request().Context(), req.Code, requestClientInfo(c))
 	if err != nil {
 		return writeOAuthExchangeError(c, err)
 	}
@@ -294,8 +296,11 @@ func (h *Handler) Login(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
 
-	session, err := h.service.LoginSession(c.Request().Context(), req.Email, req.Password)
+	session, err := h.service.LoginSessionWithClient(c.Request().Context(), req.Email, req.Password, requestClientInfo(c))
 	if err != nil {
+		if errors.Is(err, ErrEmailNotVerified) {
+			return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		}
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": err.Error()})
 	}
 	setSessionCookie(c, session.Token)
@@ -305,7 +310,7 @@ func (h *Handler) Login(c echo.Context) error {
 
 // Logout revokes the user's issued sessions and expires the browser cookie.
 func (h *Handler) Logout(c echo.Context) error {
-	if err := h.service.RevokeSessions(c.Request().Context(), currentUserID(c)); err != nil {
+	if err := h.service.RevokeSession(c.Request().Context(), currentUserID(c), currentSessionID(c), requestClientInfo(c)); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "logout failed"})
 	}
 	c.SetCookie(authsession.ClearCookie(oauthCookieSecure(c)))
@@ -420,5 +425,16 @@ func sessionResponse(value *User) SessionResponse {
 	if value == nil {
 		return SessionResponse{}
 	}
-	return SessionResponse{UserID: value.ID, InstanceRole: value.InstanceRole, Email: value.Email}
+	return SessionResponse{UserID: value.ID, InstanceRole: value.InstanceRole, Email: value.Email, EmailVerified: value.EmailVerified}
+}
+
+// currentSessionID returns the validated browser session claim.
+func currentSessionID(c echo.Context) string {
+	value, _ := c.Get("sessionID").(string)
+	return strings.TrimSpace(value)
+}
+
+// requestClientInfo captures proxy-normalized request metadata for session history.
+func requestClientInfo(c echo.Context) account.ClientInfo {
+	return account.ClientInfo{IPAddress: c.RealIP(), UserAgent: strings.TrimSpace(c.Request().UserAgent())}
 }
