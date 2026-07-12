@@ -8,6 +8,7 @@ export const queryKeys = {
 	accountSessions: ["accountSessions"] as const,
 	securityEvents: ["securityEvents"] as const,
 	mfaStatus: ["mfaStatus"] as const,
+	apiTokens: ["apiTokens"] as const,
 	projects: ["projects"] as const,
 	archivedProjects: ["archivedProjects"] as const,
 	project: (projectId: ID) => ["project", projectId] as const,

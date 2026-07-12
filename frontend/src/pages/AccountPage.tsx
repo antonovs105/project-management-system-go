@@ -5,6 +5,7 @@ import type { FormEvent } from "react";
 import { toast } from "sonner";
 import { Button, ErrorState, Panel, TextField } from "../components/ui";
 import { NotificationPreferencesPanel } from "../features/account/NotificationPreferencesPanel";
+import { APITokenPanel } from "../features/account/APITokenPanel";
 import { PrivilegedAccountOnboarding } from "../features/account/PrivilegedAccountOnboarding";
 import { api, errorMessage } from "../lib/api";
 import { compactId, relativeDate } from "../lib/format";
@@ -215,6 +216,7 @@ export function AccountPage() {
 		</Panel>
 
     <NotificationPreferencesPanel />
+	<APITokenPanel />
 
 		<Panel className="p-5 xl:col-span-2">
 			<div className="mb-4 flex items-center gap-2"><MonitorSmartphone size={18} className="text-zinc-500" /><h2 className="font-semibold text-zinc-950">Sessions and devices</h2></div>

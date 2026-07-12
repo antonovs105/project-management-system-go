@@ -2,6 +2,8 @@ import axios from "axios";
 import type * as Contract from "../generated/api-schema";
 import type {
 	AccountSession,
+	APIToken,
+	APITokenScope,
 	ArchivedProject,
 	ArchivedTicket,
   AdminAuditAction,
@@ -9,6 +11,7 @@ import type {
   AdminAuditTargetType,
   AdminUser,
   Comment,
+	CreatedAPIToken,
   DeliveryFailureKind,
   DeliveryState,
   DomainBlock,
@@ -441,6 +444,20 @@ export const api = {
 	async exportCurrentUser(): Promise<UserBundle> {
 		const { data } = await http.get<UserBundle>(`${apiPrefix}/me/export`);
 		return data;
+	},
+
+	async listAPITokens(): Promise<APIToken[]> {
+		const { data } = await http.get<APIToken[] | null>(`${apiPrefix}/me/api-tokens`);
+		return asArray(data);
+	},
+
+	async createAPIToken(payload: { name: string; scopes: APITokenScope[]; expires_at?: string }): Promise<CreatedAPIToken> {
+		const { data } = await http.post<CreatedAPIToken>(`${apiPrefix}/me/api-tokens`, payload);
+		return data;
+	},
+
+	async revokeAPIToken(tokenId: ID): Promise<void> {
+		await http.delete(`${apiPrefix}/me/api-tokens/${tokenId}`);
 	},
 
 	async listProjectActivity(projectId: ID, offset = 0): Promise<ProjectActivityEvent[]> {

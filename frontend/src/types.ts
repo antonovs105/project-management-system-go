@@ -25,6 +25,9 @@ export interface SessionUser {
 }
 
 export type AccountSession = API.AccountSession;
+export type APIToken = API.ApiToken;
+export type CreatedAPIToken = API.CreatedApiToken;
+export type APITokenScope = API.ApiTokenScope;
 export type SecurityEvent = API.SecurityEvent;
 export type ProjectActivityEvent = API.ProjectActivityEvent;
 export type ArchivedProject = API.ArchivedProject;

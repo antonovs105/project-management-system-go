@@ -68,4 +68,18 @@ test("a verified user creates a project and ticket without accessibility violati
 	await page.getByRole("button", { name: "Export data" }).click();
 	const download = await downloadPromise;
 	expect(download.suggestedFilename()).toBe("progo-account-export.json");
+
+	const tokenName = `E2E automation ${suffix}`;
+	await page.getByLabel("Token name").fill(tokenName);
+	await page.getByRole("button", { name: "Create token" }).click();
+	const secret = await page.getByRole("status").locator("code").textContent();
+	expect(secret).toMatch(/^progo_/);
+	const tokenRead = await page.request.get(`${apiURL}/api/v1/projects`, { headers: { Authorization: `Bearer ${secret}` } });
+	expect(tokenRead.status()).toBe(200);
+	const tokenWrite = await page.request.post(`${apiURL}/api/v1/projects`, { headers: { Authorization: `Bearer ${secret}` }, data: { name: "forbidden", description: "" } });
+	expect(tokenWrite.status()).toBe(403);
+	await page.getByRole("button", { name: "I saved it" }).click();
+	await expect(page.getByText(tokenName)).toBeVisible();
+	await page.getByRole("button", { name: "Revoke" }).first().click();
+	await expect.poll(async () => (await page.request.get(`${apiURL}/api/v1/projects`, { headers: { Authorization: `Bearer ${secret}` } })).status()).toBe(401);
 });
