@@ -2,6 +2,7 @@
 package observability
 
 import (
+	"database/sql"
 	"net/http"
 	"strconv"
 	"strings"
@@ -86,6 +87,14 @@ func (m *Metrics) Handler() http.Handler {
 	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{
 		EnableOpenMetrics: true,
 	})
+}
+
+// RegisterDBStats exposes database/sql pool capacity, usage, waits, and connection churn.
+func (m *Metrics) RegisterDBStats(db *sql.DB, name string) {
+	if m == nil || db == nil {
+		return
+	}
+	m.registry.MustRegister(collectors.NewDBStatsCollector(db, strings.TrimSpace(name)))
 }
 
 // IncHTTPInFlight increments the in-flight HTTP request gauge.

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	"github.com/antonovs105/project-management-system-go/internal/apperror"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
 	"github.com/jmoiron/sqlx"
@@ -287,7 +288,7 @@ func (r *PgRepository) LocalTicketID(ctx context.Context, apID string) (string, 
 		WHERE ticket.ap_id = $1
 	`, apID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", errors.New("local ticket not found")
+		return "", apperror.New(apperror.ErrNotFound, "local ticket not found")
 	}
 	return id, err
 }
@@ -314,7 +315,7 @@ func (r *PgRepository) LocalProjectID(ctx context.Context, apID string) (string,
 		WHERE actor.ap_id = $1 AND actor.is_local = true
 	`, apID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", errors.New("local project not found")
+		return "", apperror.New(apperror.ErrNotFound, "local project not found")
 	}
 	return id, err
 }
@@ -336,7 +337,7 @@ func (r *PgRepository) ActorID(ctx context.Context, apID string) (*string, error
 		WHERE ap_id = $1
 	`, apID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, errors.New("actor not found")
+		return nil, apperror.New(apperror.ErrNotFound, "actor not found")
 	}
 	if err != nil {
 		return nil, err
@@ -369,9 +370,9 @@ func (h *Handler) writeCreateError(c echo.Context, err error) error {
 		return c.JSON(http.StatusUnprocessableEntity, map[string]string{"error": errUnsupportedActivity.Error()})
 	case errors.Is(err, errInvalidActivity):
 		return c.JSON(http.StatusUnprocessableEntity, map[string]string{"error": strings.TrimPrefix(err.Error(), errInvalidActivity.Error()+": ")})
-	case strings.Contains(err.Error(), "not found"):
+	case errors.Is(err, apperror.ErrNotFound):
 		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
-	case strings.Contains(err.Error(), "access denied"), strings.Contains(err.Error(), "insufficient permissions"):
+	case errors.Is(err, apperror.ErrForbidden):
 		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
 	default:
 		return c.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})

@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/antonovs105/project-management-system-go/internal/apperror"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 )
@@ -148,9 +149,9 @@ func writeCommentError(c echo.Context, err error) error {
 	switch {
 	case errors.Is(err, ErrInvalidCommentInput):
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
-	case strings.Contains(err.Error(), "insufficient permissions"):
+	case errors.Is(err, apperror.ErrForbidden):
 		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
-	case strings.Contains(err.Error(), "not found"), strings.Contains(err.Error(), "access denied"):
+	case errors.Is(err, apperror.ErrNotFound):
 		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
 	default:
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "comment operation failed"})

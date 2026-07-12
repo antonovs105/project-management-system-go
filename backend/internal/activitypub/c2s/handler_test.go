@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	"github.com/antonovs105/project-management-system-go/internal/apperror"
+	"github.com/antonovs105/project-management-system-go/internal/authsession"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
 	authmiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
@@ -308,6 +310,8 @@ func signedTestToken(t *testing.T, secret []byte, subject string) string {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub": subject,
 		"exp": time.Now().Add(time.Hour).Unix(),
+		"iss": authsession.Issuer,
+		"aud": authsession.Audience,
 	})
 	raw, err := token.SignedString(secret)
 	require.NoError(t, err)
@@ -346,21 +350,21 @@ func (f *fakeRepository) LocalTicketID(ctx context.Context, apID string) (string
 	if id, ok := f.tickets[apID]; ok {
 		return id, nil
 	}
-	return "", errors.New("local ticket not found")
+	return "", apperror.New(apperror.ErrNotFound, "local ticket not found")
 }
 
 func (f *fakeRepository) LocalProjectID(ctx context.Context, apID string) (string, error) {
 	if id, ok := f.projects[apID]; ok {
 		return id, nil
 	}
-	return "", errors.New("local project not found")
+	return "", apperror.New(apperror.ErrNotFound, "local project not found")
 }
 
 func (f *fakeRepository) ActorID(ctx context.Context, apID string) (*string, error) {
 	if id, ok := f.actors[apID]; ok {
 		return &id, nil
 	}
-	return nil, errors.New("actor not found")
+	return nil, apperror.New(apperror.ErrNotFound, "actor not found")
 }
 
 func (f *fakeRepository) CreatedActivity(ctx context.Context, actorID, objectAPID string) (*createdActivity, error) {

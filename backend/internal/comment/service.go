@@ -9,6 +9,7 @@ import (
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
+	"github.com/antonovs105/project-management-system-go/internal/apperror"
 	"github.com/antonovs105/project-management-system-go/internal/project"
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
 )
@@ -64,10 +65,10 @@ func (s *Service) CreateComment(ctx context.Context, ticketID, authorID, content
 	}
 	allowed, err := s.tickets.HasProjectPermission(ctx, ticket.ProjectID, authorID, project.PermissionCommentsCreate)
 	if err != nil {
-		return nil, errors.New("project not found or access denied")
+		return nil, apperror.New(apperror.ErrNotFound, "project not found or access denied")
 	}
 	if !allowed {
-		return nil, errors.New("insufficient permissions: missing comments.create")
+		return nil, apperror.New(apperror.ErrForbidden, "insufficient permissions: missing comments.create")
 	}
 	commentID, err := activitypub.NewID()
 	if err != nil {
@@ -126,7 +127,7 @@ func normalizeCommentListOffset(offset int) int {
 func (s *Service) DeleteComment(ctx context.Context, commentID, userID string) error {
 	comment, err := s.repo.GetByID(ctx, commentID)
 	if err != nil {
-		return errors.New("comment not found")
+		return apperror.New(apperror.ErrNotFound, "comment not found")
 	}
 	ticket, err := s.tickets.GetTicketByID(ctx, comment.TicketID, userID)
 	if err != nil {
@@ -138,10 +139,10 @@ func (s *Service) DeleteComment(ctx context.Context, commentID, userID string) e
 	}
 	allowed, err := s.tickets.HasProjectPermission(ctx, ticket.ProjectID, userID, permission)
 	if err != nil {
-		return errors.New("project not found or access denied")
+		return apperror.New(apperror.ErrNotFound, "project not found or access denied")
 	}
 	if !allowed {
-		return errors.New("insufficient permissions: missing " + permission)
+		return apperror.New(apperror.ErrForbidden, "insufficient permissions: missing "+permission)
 	}
 
 	deleteResult, err := s.repo.Delete(ctx, commentID, userID)

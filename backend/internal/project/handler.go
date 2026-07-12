@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/antonovs105/project-management-system-go/internal/apperror"
 	appconfig "github.com/antonovs105/project-management-system-go/internal/config"
 	"github.com/antonovs105/project-management-system-go/internal/user"
 	"github.com/google/uuid"
@@ -533,11 +534,11 @@ func writeProjectError(c echo.Context, err error) error {
 	switch {
 	case errors.Is(err, ErrInvalidProjectInput):
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
-	case strings.Contains(err.Error(), "already"), strings.Contains(err.Error(), "not pending"), strings.Contains(err.Error(), "still assigned"):
+	case errors.Is(err, apperror.ErrConflict):
 		return c.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
-	case strings.Contains(err.Error(), "insufficient permissions"), strings.Contains(err.Error(), "protected project role"), strings.Contains(err.Error(), "cannot remove the last"):
+	case errors.Is(err, apperror.ErrForbidden):
 		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
-	case strings.Contains(err.Error(), "access denied"), strings.Contains(err.Error(), "not found"):
+	case errors.Is(err, apperror.ErrNotFound):
 		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
 	default:
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "project operation failed"})

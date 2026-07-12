@@ -1,11 +1,13 @@
 package observability
 
 import (
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,6 +30,21 @@ func TestMetricsHandlerExportsPrometheusCollectors(t *testing.T) {
 	require.Contains(t, body, "pms_http_request_duration_seconds_bucket")
 	require.Contains(t, body, `pms_activitypub_delivery_attempts_total{failure_kind="http",outcome="retryable_failure",status_code="429"} 1`)
 	require.Contains(t, body, "pms_activitypub_delivery_attempt_duration_seconds_bucket")
+}
+
+func TestMetricsExportsDatabasePoolStats(t *testing.T) {
+	db, err := sql.Open("postgres", "postgres://unused")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	db.SetMaxOpenConns(25)
+
+	metrics := NewMetrics()
+	metrics.RegisterDBStats(db, "primary")
+	rec := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+
+	require.Contains(t, rec.Body.String(), `go_sql_max_open_connections{db_name="primary"} 25`)
+	require.Contains(t, rec.Body.String(), `go_sql_open_connections{db_name="primary"} 0`)
 }
 
 func TestMetricsNormalizesEmptyLabels(t *testing.T) {

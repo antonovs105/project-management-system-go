@@ -39,6 +39,7 @@ rate_limits:
 	t.Setenv("REGISTRATION_ENABLED", "true")
 	t.Setenv("PROJECT_CREATION_POLICY", ProjectCreationEveryone)
 	t.Setenv("AUTH_RATE_LIMIT_BURST", "12")
+	t.Setenv("DB_MAX_OPEN_CONNECTIONS", "40")
 
 	cfg, err := LoadFile(path)
 
@@ -51,7 +52,20 @@ rate_limits:
 	require.Equal(t, ProjectCreationEveryone, cfg.Projects.CreationPolicy)
 	require.Equal(t, 4.0, cfg.RateLimits.Auth.RequestsPerSecond)
 	require.Equal(t, 12, cfg.RateLimits.Auth.Burst)
+	require.Equal(t, 40, cfg.Database.MaxOpenConnections)
+	require.Equal(t, 10, cfg.Database.MaxIdleConnections)
 	require.True(t, cfg.FederationAllowInsecureHTTP())
+}
+
+func TestValidateRejectsInvalidDatabasePool(t *testing.T) {
+	cfg := validConfig()
+	cfg.Database.MaxOpenConnections = 5
+	cfg.Database.MaxIdleConnections = 6
+
+	err := cfg.Validate()
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "database.max_idle_connections")
 }
 
 func TestLoadFileNoEnvIgnoresEnvironmentOverrides(t *testing.T) {

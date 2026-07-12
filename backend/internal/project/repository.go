@@ -9,6 +9,7 @@ import (
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
+	"github.com/antonovs105/project-management-system-go/internal/apperror"
 	"github.com/antonovs105/project-management-system-go/internal/secrets"
 	"github.com/jmoiron/sqlx"
 )
@@ -505,7 +506,7 @@ func (r *PgRepository) DeleteRole(ctx context.Context, projectID, roleID string)
 		return err
 	}
 	if rowsAffected == 0 {
-		return errors.New("project role not found or protected")
+		return apperror.New(apperror.ErrForbidden, "project role not found or protected")
 	}
 	return nil
 }
@@ -575,7 +576,7 @@ func preventLastRoleManagerPermissionRemoval(ctx context.Context, tx *sqlx.Tx, r
 		return err
 	}
 	if remainingManagers == 0 {
-		return errors.New("cannot remove the last project role manager")
+		return apperror.New(apperror.ErrForbidden, "cannot remove the last project role manager")
 	}
 	return nil
 }
@@ -928,7 +929,7 @@ func (r *PgRepository) Update(ctx context.Context, project *Project, actorID str
 		return nil, err
 	}
 	if rowsAffected == 0 {
-		return nil, errors.New("no rows affected, project not found")
+		return nil, apperror.New(apperror.ErrNotFound, "no rows affected, project not found")
 	}
 
 	if _, err := tx.NamedExecContext(ctx, `
@@ -992,7 +993,7 @@ func (r *PgRepository) Delete(ctx context.Context, id string, actorID string) (*
 		WHERE project.id = $1
 		FOR UPDATE OF project
 	`, id); err != nil {
-		return nil, errors.New("project to delete not found")
+		return nil, apperror.New(apperror.ErrNotFound, "project to delete not found")
 	}
 
 	recipientInboxes, err := remoteProjectFollowerInboxes(ctx, tx, stored.ID)
@@ -1027,7 +1028,7 @@ func (r *PgRepository) Delete(ctx context.Context, id string, actorID string) (*
 		return nil, err
 	}
 	if rowsAffected == 0 {
-		return nil, errors.New("project to delete not found")
+		return nil, apperror.New(apperror.ErrNotFound, "project to delete not found")
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -1224,13 +1225,13 @@ func (r *PgRepository) UpdateMemberRole(ctx context.Context, projectID, targetUs
 		return nil, err
 	}
 	if !roleExists {
-		return nil, errors.New("project role not found")
+		return nil, apperror.New(apperror.ErrNotFound, "project role not found")
 	}
 
 	targetRole, err := collaboratorRoleForUpdate(ctx, tx, projectID, targetUserID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errors.New("project member not found")
+			return nil, apperror.New(apperror.ErrNotFound, "project member not found")
 		}
 		return nil, err
 	}
@@ -1252,7 +1253,7 @@ func (r *PgRepository) UpdateMemberRole(ctx context.Context, projectID, targetUs
 			return nil, err
 		}
 		if remainingManagers == 0 {
-			return nil, errors.New("cannot remove the last project role manager")
+			return nil, apperror.New(apperror.ErrForbidden, "cannot remove the last project role manager")
 		}
 	}
 
@@ -1299,7 +1300,7 @@ func (r *PgRepository) RemoveMember(ctx context.Context, projectID, actorID, tar
 	targetRole, err := collaboratorRoleForUpdate(ctx, tx, projectID, targetUserID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errors.New("target user is not a project member")
+			return nil, apperror.New(apperror.ErrConflict, "target user is not a project member")
 		}
 		return nil, err
 	}
@@ -1320,7 +1321,7 @@ func (r *PgRepository) RemoveMember(ctx context.Context, projectID, actorID, tar
 			return nil, err
 		}
 		if managers <= 1 {
-			return nil, errors.New("cannot remove the last project role manager")
+			return nil, apperror.New(apperror.ErrForbidden, "cannot remove the last project role manager")
 		}
 
 		var storedOwnerID string
@@ -1374,7 +1375,7 @@ func (r *PgRepository) RemoveMember(ctx context.Context, projectID, actorID, tar
 			return nil, err
 		}
 		if rowsAffected == 0 {
-			return nil, errors.New("target user is not a project member")
+			return nil, apperror.New(apperror.ErrConflict, "target user is not a project member")
 		}
 	} else {
 		result, err := tx.ExecContext(ctx, `
@@ -1392,7 +1393,7 @@ func (r *PgRepository) RemoveMember(ctx context.Context, projectID, actorID, tar
 			return nil, err
 		}
 		if rowsAffected == 0 {
-			return nil, errors.New("target user is not a project member")
+			return nil, apperror.New(apperror.ErrConflict, "target user is not a project member")
 		}
 	}
 
@@ -1494,14 +1495,14 @@ func (r *PgRepository) CreateInvite(ctx context.Context, invite *ProjectInvite) 
 		return nil, err
 	}
 	if member {
-		return nil, errors.New("user is already a project member")
+		return nil, apperror.New(apperror.ErrConflict, "user is already a project member")
 	}
 	pending, err := hasPendingInviteTx(ctx, tx, invite.ProjectID, invite.InviteeActorID)
 	if err != nil {
 		return nil, err
 	}
 	if pending {
-		return nil, errors.New("pending invite already exists")
+		return nil, apperror.New(apperror.ErrConflict, "pending invite already exists")
 	}
 
 	activityID, err := activitypub.NewID()
@@ -1606,17 +1607,17 @@ func (r *PgRepository) AcceptInvite(ctx context.Context, inviteID, userID string
 		return nil, err
 	}
 	if invite.InviteeActorID != userID {
-		return nil, errors.New("invite does not belong to current user")
+		return nil, apperror.New(apperror.ErrForbidden, "invite does not belong to current user")
 	}
 	if invite.Status != "pending" {
-		return nil, errors.New("invite is not pending")
+		return nil, apperror.New(apperror.ErrConflict, "invite is not pending")
 	}
 	member, err := isProjectMemberTx(ctx, tx, invite.ProjectID, userID)
 	if err != nil {
 		return nil, err
 	}
 	if member {
-		return nil, errors.New("user is already a project member")
+		return nil, apperror.New(apperror.ErrConflict, "user is already a project member")
 	}
 
 	followerInboxes, err := remoteProjectFollowerInboxes(ctx, tx, invite.ProjectID)
@@ -1717,10 +1718,10 @@ func (r *PgRepository) RejectInvite(ctx context.Context, inviteID, userID string
 		return nil, err
 	}
 	if invite.InviteeActorID != userID {
-		return nil, errors.New("invite does not belong to current user")
+		return nil, apperror.New(apperror.ErrForbidden, "invite does not belong to current user")
 	}
 	if invite.Status != "pending" {
-		return nil, errors.New("invite is not pending")
+		return nil, apperror.New(apperror.ErrConflict, "invite is not pending")
 	}
 
 	recipientInboxes, err := remoteActorInboxes(ctx, tx, invite.InviterActorID)
@@ -1801,7 +1802,7 @@ func (r *PgRepository) RevokeInvite(ctx context.Context, inviteID, actorID strin
 		return nil, err
 	}
 	if invite.Status != "pending" {
-		return nil, errors.New("invite is not pending")
+		return nil, apperror.New(apperror.ErrConflict, "invite is not pending")
 	}
 
 	recipientInboxes, err := remoteActorInboxes(ctx, tx, invite.InviteeActorID)

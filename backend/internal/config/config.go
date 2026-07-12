@@ -70,7 +70,11 @@ type ServerConfig struct {
 
 // DatabaseConfig controls PostgreSQL connectivity.
 type DatabaseConfig struct {
-	Source string `yaml:"source"`
+	Source                 string `yaml:"source"`
+	MaxOpenConnections     int    `yaml:"max_open_connections"`
+	MaxIdleConnections     int    `yaml:"max_idle_connections"`
+	ConnMaxLifetimeSeconds int    `yaml:"conn_max_lifetime_seconds"`
+	ConnMaxIdleTimeSeconds int    `yaml:"conn_max_idle_time_seconds"`
 }
 
 // SecurityConfig contains local application secrets.
@@ -157,6 +161,12 @@ func Default() Config {
 		Server: ServerConfig{
 			HTTPAddr:         ":8080",
 			RequestBodyLimit: "2M",
+		},
+		Database: DatabaseConfig{
+			MaxOpenConnections:     25,
+			MaxIdleConnections:     10,
+			ConnMaxLifetimeSeconds: 1800,
+			ConnMaxIdleTimeSeconds: 300,
 		},
 		Instance: InstanceConfig{
 			Name: "Progo",
@@ -275,6 +285,15 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Database.Source) == "" {
 		return fmt.Errorf("database.source is required")
 	}
+	if c.Database.MaxOpenConnections < 1 {
+		return fmt.Errorf("database.max_open_connections must be at least 1")
+	}
+	if c.Database.MaxIdleConnections < 0 || c.Database.MaxIdleConnections > c.Database.MaxOpenConnections {
+		return fmt.Errorf("database.max_idle_connections must be between 0 and database.max_open_connections")
+	}
+	if c.Database.ConnMaxLifetimeSeconds < 0 || c.Database.ConnMaxIdleTimeSeconds < 0 {
+		return fmt.Errorf("database connection lifetime settings cannot be negative")
+	}
 	if strings.TrimSpace(c.Security.JWTSecretKey) == "" {
 		return fmt.Errorf("security.jwt_secret_key is required")
 	}
@@ -360,6 +379,18 @@ func applyEnv(cfg *Config) error {
 	applyStringEnv(&cfg.App.Env, "APP_ENV")
 	applyStringEnv(&cfg.App.Role, "APP_ROLE")
 	applyStringEnv(&cfg.Database.Source, "DB_SOURCE")
+	if err := applyIntEnv(&cfg.Database.MaxOpenConnections, "DB_MAX_OPEN_CONNECTIONS"); err != nil {
+		return err
+	}
+	if err := applyIntEnv(&cfg.Database.MaxIdleConnections, "DB_MAX_IDLE_CONNECTIONS"); err != nil {
+		return err
+	}
+	if err := applyIntEnv(&cfg.Database.ConnMaxLifetimeSeconds, "DB_CONN_MAX_LIFETIME_SECONDS"); err != nil {
+		return err
+	}
+	if err := applyIntEnv(&cfg.Database.ConnMaxIdleTimeSeconds, "DB_CONN_MAX_IDLE_TIME_SECONDS"); err != nil {
+		return err
+	}
 	applyStringEnv(&cfg.Security.JWTSecretKey, "JWT_SECRET_KEY")
 	applyStringEnv(&cfg.Instance.PublicBaseURL, "PUBLIC_BASE_URL")
 	applyStringEnv(&cfg.Instance.LocalDomain, "LOCAL_DOMAIN")

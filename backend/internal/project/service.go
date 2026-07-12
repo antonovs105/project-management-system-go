@@ -12,6 +12,7 @@ import (
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
+	"github.com/antonovs105/project-management-system-go/internal/apperror"
 )
 
 // ErrInvalidProjectInput reports malformed project-management input.
@@ -102,7 +103,7 @@ func (s *Service) GetProjectByID(ctx context.Context, projectID, userID string) 
 	}
 
 	if err := s.RequireProjectPermission(ctx, projectID, userID, PermissionProjectRead, "project not found or access denied"); err != nil {
-		return nil, errors.New("project not found or access denied")
+		return nil, apperror.New(apperror.ErrNotFound, "project not found or access denied")
 	}
 
 	return project, nil
@@ -128,7 +129,11 @@ func (s *Service) RequireProjectPermission(ctx context.Context, projectID, userI
 		return err
 	}
 	if !allowed {
-		return errors.New(deniedMessage)
+		kind := apperror.ErrForbidden
+		if permission == PermissionProjectRead {
+			kind = apperror.ErrNotFound
+		}
+		return apperror.New(kind, deniedMessage)
 	}
 	return nil
 }
@@ -144,7 +149,7 @@ func (s *Service) RequireAnyProjectPermission(ctx context.Context, projectID, us
 			return nil
 		}
 	}
-	return errors.New(deniedMessage)
+	return apperror.New(apperror.ErrForbidden, deniedMessage)
 }
 
 // ListUserProjects returns projects where the user is a member.
@@ -285,7 +290,7 @@ func (s *Service) RemoveMemberFromProject(ctx context.Context, projectID, actorI
 				return err
 			}
 			if managers <= 1 {
-				return errors.New("cannot remove the last project role manager")
+				return apperror.New(apperror.ErrForbidden, "cannot remove the last project role manager")
 			}
 		}
 		return s.removeMember(ctx, projectID, actorID, targetUserID)
@@ -297,7 +302,7 @@ func (s *Service) RemoveMemberFromProject(ctx context.Context, projectID, actorI
 
 	targetCanManage, err := s.repo.HasPermission(ctx, projectID, targetUserID, PermissionRolesManage)
 	if err != nil {
-		return errors.New("target user is not a project member")
+		return apperror.New(apperror.ErrConflict, "target user is not a project member")
 	}
 	if targetCanManage {
 		if err := s.RequireProjectPermission(ctx, projectID, actorID, PermissionRolesManage, "insufficient permissions: missing roles.manage"); err != nil {
@@ -308,7 +313,7 @@ func (s *Service) RemoveMemberFromProject(ctx context.Context, projectID, actorI
 			return err
 		}
 		if managers <= 1 {
-			return errors.New("cannot remove the last project role manager")
+			return apperror.New(apperror.ErrForbidden, "cannot remove the last project role manager")
 		}
 	}
 
@@ -366,14 +371,14 @@ func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUser
 		return nil, err
 	}
 	if member {
-		return nil, errors.New("user is already a project member")
+		return nil, apperror.New(apperror.ErrConflict, "user is already a project member")
 	}
 	pending, err := s.repo.HasPendingInvite(ctx, projectID, newUserID)
 	if err != nil {
 		return nil, err
 	}
 	if pending {
-		return nil, errors.New("pending invite already exists")
+		return nil, apperror.New(apperror.ErrConflict, "pending invite already exists")
 	}
 
 	inviteID, err := activitypub.NewID()
@@ -458,11 +463,11 @@ func (s *Service) UpdateProjectRole(ctx context.Context, projectID, userID, role
 	}
 	role, err := s.repo.GetRoleByID(ctx, projectID, roleID)
 	if err != nil {
-		return nil, errors.New("project role not found")
+		return nil, apperror.New(apperror.ErrNotFound, "project role not found")
 	}
 	if role.IsSystem {
 		if req.Name != nil || req.Permissions != nil {
-			return nil, errors.New("protected project role cannot be renamed or have permissions changed")
+			return nil, apperror.New(apperror.ErrForbidden, "protected project role cannot be renamed or have permissions changed")
 		}
 	}
 	if req.Name != nil {
@@ -490,7 +495,7 @@ func (s *Service) UpdateProjectRole(ctx context.Context, projectID, userID, role
 				return nil, err
 			}
 			if remainingManagers == 0 {
-				return nil, errors.New("cannot remove the last project role manager")
+				return nil, apperror.New(apperror.ErrForbidden, "cannot remove the last project role manager")
 			}
 		}
 		role.Permissions = permissions
@@ -508,17 +513,17 @@ func (s *Service) DeleteProjectRole(ctx context.Context, projectID, userID, role
 	}
 	role, err := s.repo.GetRoleByID(ctx, projectID, roleID)
 	if err != nil {
-		return errors.New("project role not found")
+		return apperror.New(apperror.ErrNotFound, "project role not found")
 	}
 	if role.IsSystem || grantsSensitiveProjectAccess(role) {
-		return errors.New("protected project role cannot be deleted")
+		return apperror.New(apperror.ErrForbidden, "protected project role cannot be deleted")
 	}
 	assignments, err := s.repo.RoleAssignmentCount(ctx, projectID, roleID)
 	if err != nil {
 		return err
 	}
 	if assignments > 0 {
-		return errors.New("project role is still assigned")
+		return apperror.New(apperror.ErrConflict, "project role is still assigned")
 	}
 	return s.repo.DeleteRole(ctx, projectID, roleID)
 }
@@ -676,7 +681,7 @@ func (s *Service) RevokeInvite(ctx context.Context, inviteID, userID string) err
 	}
 	targetRole, err := s.repo.GetRoleByID(ctx, invite.ProjectID, invite.RoleID)
 	if err != nil {
-		return errors.New("project role not found")
+		return apperror.New(apperror.ErrNotFound, "project role not found")
 	}
 	if grantsSensitiveProjectAccess(targetRole) {
 		if err := s.RequireProjectPermission(ctx, invite.ProjectID, userID, PermissionRolesManage, "insufficient permissions: missing roles.manage"); err != nil {
