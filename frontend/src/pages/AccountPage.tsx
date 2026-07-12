@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { History, KeyRound, MonitorSmartphone, Shield, Trash2 } from "lucide-react";
+import { Download, History, KeyRound, MonitorSmartphone, Shield, Trash2 } from "lucide-react";
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
@@ -8,6 +8,7 @@ import { NotificationPreferencesPanel } from "../features/account/NotificationPr
 import { PrivilegedAccountOnboarding } from "../features/account/PrivilegedAccountOnboarding";
 import { api, errorMessage } from "../lib/api";
 import { compactId, relativeDate } from "../lib/format";
+import { downloadJSON } from "../lib/download";
 import { useI18n } from "../lib/i18n-context";
 import { fieldLimits } from "../lib/limits";
 import { queryKeys } from "../lib/queryKeys";
@@ -60,6 +61,11 @@ export function AccountPage() {
 		mutationFn: api.requestEmailVerification,
 		onSuccess: () => toast.success("A new verification email has been queued."),
 		onError: (error) => toast.error(errorMessage(error, "Could not queue verification email.")),
+	});
+	const exportAccount = useMutation({
+		mutationFn: api.exportCurrentUser,
+		onSuccess: (bundle) => downloadJSON("progo-account-export.json", bundle),
+		onError: (error) => toast.error(errorMessage(error, "Could not export account data.")),
 	});
 
   const changePassword = useMutation({
@@ -115,6 +121,7 @@ export function AccountPage() {
             <h1 className="text-xl font-semibold text-zinc-950">{t("account.title")}</h1>
             <p className="text-sm text-zinc-500">{user?.email || t("common.signedIn")}</p>
           </div>
+		  <Button className="ml-auto" onClick={() => exportAccount.mutate()} disabled={exportAccount.isPending}><Download size={16} />Export data</Button>
         </div>
         <div className="grid gap-3 text-sm">
           <div className="rounded-xl border border-zinc-200 p-3">

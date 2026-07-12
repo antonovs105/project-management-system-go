@@ -47,4 +47,25 @@ test("a verified user creates a project and ticket without accessibility violati
   await expect(page.getByRole("button", { name: `Open ticket ${ticketTitle}` })).toBeVisible();
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(accessibility.violations, accessibility.violations.map((violation) => `${violation.id}: ${violation.help}`).join("\n")).toEqual([]);
+
+	const sourceProjectID = page.url().split("/").at(-1)!;
+	const apiURL = process.env.E2E_API_URL || "http://localhost:8080";
+	const exportResponse = await page.request.get(`${apiURL}/api/v1/projects/${sourceProjectID}/export`);
+	expect(exportResponse.ok()).toBeTruthy();
+	const bundle = await exportResponse.json();
+	bundle.project.name = `${projectName} import`;
+
+	await page.goto("/projects");
+	const fileChooserPromise = page.waitForEvent("filechooser");
+	await page.getByRole("button", { name: "Import" }).click();
+	const fileChooser = await fileChooserPromise;
+	await fileChooser.setFiles({ name: "project.progo.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(bundle)) });
+	await expect(page).toHaveURL(/\/projects\/[0-9a-f-]+$/);
+	await expect(page.getByRole("heading", { name: `${projectName} import` })).toBeVisible();
+
+	await page.goto("/account");
+	const downloadPromise = page.waitForEvent("download");
+	await page.getByRole("button", { name: "Export data" }).click();
+	const download = await downloadPromise;
+	expect(download.suggestedFilename()).toBe("progo-account-export.json");
 });

@@ -1,11 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
-import { Activity, BarChart3, CheckCircle2, Clock3, Download, FileJson, Flame, ListChecks, Shield } from "lucide-react";
-import type { ReactNode } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Activity, BarChart3, CheckCircle2, Clock3, Download, FileJson, Flame, ListChecks, Shield, Upload } from "lucide-react";
+import { useRef, type ReactNode } from "react";
+import { toast } from "sonner";
 import { Button, ErrorState, Panel } from "../../components/ui";
 import { api, errorMessage } from "../../lib/api";
 import { ticketPriorities, ticketStatuses } from "../../lib/constants";
 import { queryKeys } from "../../lib/queryKeys";
-import type { Project, ProjectDeliverySummary, ProjectRole, Ticket } from "../../types";
+import { downloadJSON } from "../../lib/download";
+import type { Project, ProjectBundle, ProjectDeliverySummary, ProjectRole, Ticket } from "../../types";
 import { downloadText, safeFilePart, ticketsToCSV } from "./projectSettingsExports";
 
 function percent(count: number, total: number): number {
@@ -42,6 +44,8 @@ function DistributionList({ title, rows, total }: { title: string; rows: Array<{
 }
 
 export function ProjectAdminOverview({ project, tickets }: { project: Project; tickets: Ticket[] }) {
+	const queryClient = useQueryClient();
+	const importInput = useRef<HTMLInputElement>(null);
   const roles = useQuery({ queryKey: queryKeys.projectRoles(project.id), queryFn: () => api.listProjectRoles(project.id) });
   const deliverySummary = useQuery({ queryKey: queryKeys.projectDeliverySummary(project.id), queryFn: () => api.getProjectDeliverySummary(project.id) });
   const statusRows = ticketStatuses.map((status) => ({ ...status, count: tickets.filter((ticket) => ticket.status === status.id).length }));
@@ -51,6 +55,33 @@ export function ProjectAdminOverview({ project, tickets }: { project: Project; t
   const doneTickets = tickets.filter((ticket) => ticket.status === "done").length;
   const customRoles = roles.data?.filter((role) => !role.is_system).length || 0;
   const delivery = deliverySummary.data;
+	const portableExport = useMutation({
+		mutationFn: () => api.exportProject(project.id),
+		onSuccess: (bundle) => downloadJSON(`${safeFilePart(project.name)}.progo.json`, bundle),
+	});
+	const ticketImport = useMutation({
+		mutationFn: (bundle: ProjectBundle) => api.importProjectTickets(project.id, bundle),
+		onSuccess: async (result) => {
+			await queryClient.invalidateQueries({ queryKey: queryKeys.ticketsScope(project.id) });
+			toast.success(`Imported ${result.tickets_imported} tickets and ${result.comments_imported} comments.`);
+		},
+		onError: (error) => toast.error(errorMessage(error, "Ticket import failed.")),
+	});
+
+	async function selectTicketImport(file: File | undefined) {
+		if (!file) return;
+		if (file.size > 10 * 1024 * 1024) {
+			toast.error("Project bundles must be 10 MiB or smaller.");
+			return;
+		}
+		try {
+			ticketImport.mutate(JSON.parse(await file.text()) as ProjectBundle);
+		} catch {
+			toast.error("Select a valid Progo project JSON bundle.");
+		} finally {
+			if (importInput.current) importInput.current.value = "";
+		}
+	}
 
   function exportJSON() {
     const report: {
@@ -80,8 +111,11 @@ export function ProjectAdminOverview({ project, tickets }: { project: Project; t
       <div className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-start md:justify-between">
         <div><h2 className="flex items-center gap-2 text-base font-semibold text-zinc-950"><BarChart3 size={17} />Administration Overview</h2><p className="mt-1 text-sm text-zinc-500">Operational snapshot and exports for project administrators.</p></div>
         <div className="flex flex-wrap gap-2">
+		  <input ref={importInput} className="sr-only" type="file" accept="application/json,.json" onChange={(event) => void selectTicketImport(event.target.files?.[0])} />
           <Button onClick={() => downloadText(`${safeFilePart(project.name)}-tickets.csv`, "text/csv", `${ticketsToCSV(tickets)}\n`)} disabled={tickets.length === 0}><Download size={16} />CSV</Button>
           <Button onClick={exportJSON}><FileJson size={16} />JSON</Button>
+		  <Button onClick={() => portableExport.mutate()} disabled={portableExport.isPending}><Download size={16} />Portable</Button>
+		  <Button onClick={() => importInput.current?.click()} disabled={ticketImport.isPending}><Upload size={16} />Import tickets</Button>
         </div>
       </div>
       <div className="grid gap-3 border-t border-zinc-100 p-4 sm:grid-cols-2 xl:grid-cols-5">

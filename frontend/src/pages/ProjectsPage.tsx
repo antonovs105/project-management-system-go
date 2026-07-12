@@ -1,13 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight, FolderKanban, Network, Plus, RefreshCw, RotateCcw } from "lucide-react";
-import { useState } from "react";
+import { ArrowUpRight, FolderKanban, Network, Plus, RefreshCw, RotateCcw, Upload } from "lucide-react";
+import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { api, errorMessage } from "../lib/api";
 import { relativeDate } from "../lib/format";
 import { useI18n } from "../lib/i18n-context";
 import { fieldLimits } from "../lib/limits";
 import { queryKeys } from "../lib/queryKeys";
+import type { ProjectBundle } from "../types";
 import { Badge, Button, EmptyState, ErrorState, LoadingState, Modal, Panel, TextAreaField, TextField } from "../components/ui";
 
 export function ProjectsPage() {
@@ -17,6 +19,7 @@ export function ProjectsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+	const importInput = useRef<HTMLInputElement>(null);
 
   const projects = useQuery({
     queryKey: queryKeys.projects,
@@ -47,6 +50,31 @@ export function ProjectsPage() {
       navigate(`/projects/${project.id}`);
     },
   });
+	const importProject = useMutation({
+		mutationFn: api.importProject,
+		onSuccess: async (result) => {
+			await queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+			toast.success(`Imported ${result.tickets_imported} tickets and ${result.comments_imported} comments.`);
+			navigate(`/projects/${result.project_id}`);
+		},
+		onError: (error) => toast.error(errorMessage(error, "Project import failed.")),
+	});
+
+	async function selectImport(file: File | undefined) {
+		if (!file) return;
+		if (file.size > 10 * 1024 * 1024) {
+			toast.error("Project bundles must be 10 MiB or smaller.");
+			return;
+		}
+		try {
+			const bundle = JSON.parse(await file.text()) as ProjectBundle;
+			importProject.mutate(bundle);
+		} catch {
+			toast.error("Select a valid Progo project JSON bundle.");
+		} finally {
+			if (importInput.current) importInput.current.value = "";
+		}
+	}
 
   const canCreateProjects = capabilities.data?.can_create_projects ?? false;
   const localProjects = projects.data || [];
@@ -73,6 +101,11 @@ export function ProjectsPage() {
           <p className="mt-1 text-sm text-zinc-500">{t("projects.subtitle")}</p>
         </div>
         <div className="flex gap-2">
+		  <input ref={importInput} className="sr-only" type="file" accept="application/json,.json" onChange={(event) => void selectImport(event.target.files?.[0])} />
+		  <Button onClick={() => importInput.current?.click()} disabled={importProject.isPending}>
+			<Upload size={16} />
+			Import
+		  </Button>
           <Button onClick={() => projects.refetch()} disabled={projects.isFetching}>
             <RefreshCw size={16} />
             {t("actions.refresh")}

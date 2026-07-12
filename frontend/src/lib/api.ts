@@ -26,11 +26,13 @@ import type {
   ID,
   InstanceCapabilities,
   InstanceRole,
+	ImportResult,
   Label,
   Notification,
   NotificationPreference,
   OAuthProvider,
 	Project,
+	ProjectBundle,
 	ProjectActivityEvent,
   ProjectCreationPolicy,
   ProjectDelivery,
@@ -52,6 +54,7 @@ import type {
   TicketPriority,
   TicketStatus,
   TicketType,
+	UserBundle,
 } from "../types";
 import { useAuthStore } from "../store/auth";
 import { contractClient, contractData, contractVoid } from "./contractClient";
@@ -418,6 +421,26 @@ export const api = {
 	async getProject(projectId: ID): Promise<Project> {
     const { data } = await http.get<Project>(`${apiPrefix}/projects/${projectId}`);
     return data;
+	},
+
+	async exportProject(projectId: ID): Promise<ProjectBundle> {
+		const { data } = await http.get<ProjectBundle>(`${apiPrefix}/projects/${projectId}/export`);
+		return data;
+	},
+
+	async importProject(bundle: ProjectBundle): Promise<ImportResult> {
+		const { data } = await http.post<ImportResult>(`${apiPrefix}/projects/import`, bundle);
+		return data;
+	},
+
+	async importProjectTickets(projectId: ID, bundle: ProjectBundle): Promise<ImportResult> {
+		const { data } = await http.post<ImportResult>(`${apiPrefix}/projects/${projectId}/tickets/import`, bundle);
+		return data;
+	},
+
+	async exportCurrentUser(): Promise<UserBundle> {
+		const { data } = await http.get<UserBundle>(`${apiPrefix}/me/export`);
+		return data;
 	},
 
 	async listProjectActivity(projectId: ID, offset = 0): Promise<ProjectActivityEvent[]> {
