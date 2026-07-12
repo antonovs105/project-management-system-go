@@ -54,6 +54,17 @@
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 @layer components {
   .focus-ring {
     @apply outline-none ring-0 transition focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2;

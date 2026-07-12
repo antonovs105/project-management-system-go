@@ -1,4 +1,5 @@
 import type { ComponentPropsWithoutRef, FormEventHandler, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
+import { useEffect, useId, useRef } from "react";
 import { X } from "lucide-react";
 import { createPortal } from "react-dom";
 
@@ -209,6 +210,60 @@ export function Modal({
   formId?: string;
   onSubmit?: FormEventHandler<HTMLFormElement>;
 }) {
+	const titleId = useId();
+	const formDialogRef = useRef<HTMLFormElement>(null);
+	const divDialogRef = useRef<HTMLDivElement>(null);
+	const onCloseRef = useRef(onClose);
+	useEffect(() => {
+		onCloseRef.current = onClose;
+	}, [onClose]);
+
+	useEffect(() => {
+		if (!open) {
+			return;
+		}
+		const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		const dialog = formDialogRef.current || divDialogRef.current;
+		const focusable = dialog?.querySelector<HTMLElement>(
+			'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+		);
+		(focusable || dialog)?.focus();
+
+		function handleKeyDown(event: KeyboardEvent) {
+			if (event.key === "Escape") {
+				event.preventDefault();
+				onCloseRef.current();
+				return;
+			}
+			if (event.key !== "Tab" || !dialog) {
+				return;
+			}
+			const items = Array.from(dialog.querySelectorAll<HTMLElement>(
+				'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+			));
+			if (items.length === 0) {
+				event.preventDefault();
+				dialog.focus();
+				return;
+			}
+			const first = items[0];
+			const last = items[items.length - 1];
+			if (event.shiftKey && document.activeElement === first) {
+				event.preventDefault();
+				last.focus();
+			} else if (!event.shiftKey && document.activeElement === last) {
+				event.preventDefault();
+				first.focus();
+			}
+		}
+
+		document.addEventListener("keydown", handleKeyDown);
+		return () => {
+			document.removeEventListener("keydown", handleKeyDown);
+			previousFocus?.focus();
+		};
+	}, [open]);
+
   if (!open) {
     return null;
   }
@@ -216,7 +271,7 @@ export function Modal({
   const content = (
     <>
       <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4">
-        <h2 className="text-base font-semibold text-zinc-950">{title}</h2>
+		<h2 id={titleId} className="text-base font-semibold text-zinc-950">{title}</h2>
         <IconButton label="Close" onClick={onClose}>
           <X size={18} />
         </IconButton>
@@ -230,14 +285,19 @@ export function Modal({
     <div className="fixed left-0 top-0 z-50 flex h-dvh w-screen items-center justify-center overflow-y-auto bg-zinc-950/60 p-4 backdrop-blur-sm">
       {formId ? (
         <form
+		  ref={formDialogRef}
           id={formId}
+		  role="dialog"
+		  aria-modal="true"
+		  aria-labelledby={titleId}
+		  tabIndex={-1}
           onSubmit={onSubmit}
           className="max-h-[90vh] w-full max-w-xl overflow-auto rounded-3xl bg-white shadow-2xl"
         >
           {content}
         </form>
       ) : (
-        <div className="max-h-[90vh] w-full max-w-xl overflow-auto rounded-3xl bg-white shadow-2xl">{content}</div>
+		<div ref={divDialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="max-h-[90vh] w-full max-w-xl overflow-auto rounded-3xl bg-white shadow-2xl">{content}</div>
       )}
     </div>,
     document.body,

@@ -50,8 +50,7 @@ function TicketCard({
   });
 
   return (
-    <button
-      type="button"
+    <div
       ref={setNodeRef}
       style={{
         transform: CSS.Transform.toString(transform),
@@ -62,11 +61,9 @@ function TicketCard({
         "focus-ring w-full touch-none rounded-2xl text-left",
         draggable ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
       ].join(" ")}
-      onClick={() => onOpen(ticket.id)}
-      {...(draggable ? attributes : {})}
-      {...(draggable ? listeners : {})}
     >
-      <Panel className="group p-3 transition hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-md">
+	  <Panel className="group relative p-3 transition hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-md">
+		<button type="button" className="focus-ring block w-full rounded-xl pr-7 text-left" onClick={() => onOpen(ticket.id)} aria-label={`Open ticket ${ticket.title}`}>
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
             <div className="mb-2 flex flex-wrap gap-1.5">
@@ -95,15 +92,21 @@ function TicketCard({
               </div>
             ) : null}
           </div>
-          <span
-            className="pointer-events-none flex h-7 w-7 shrink-0 items-center justify-center rounded-xl text-zinc-300 transition group-hover:text-zinc-500"
-            aria-label="Drag ticket"
-          >
-            <GripVertical size={16} />
-          </span>
         </div>
+		</button>
+		{draggable ? (
+		  <button
+			type="button"
+			className="focus-ring absolute right-2 top-2 flex h-8 w-8 touch-none items-center justify-center rounded-xl text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 active:cursor-grabbing"
+			aria-label={`Move ticket ${ticket.title}`}
+			{...attributes}
+			{...listeners}
+		  >
+			<GripVertical size={16} aria-hidden="true" />
+		  </button>
+		) : null}
       </Panel>
-    </button>
+	</div>
   );
 }
 
@@ -127,7 +130,7 @@ function BoardColumn({
   return (
     <section className="flex min-h-[520px] min-w-[290px] flex-1 flex-col rounded-3xl border border-zinc-200 bg-white/70 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/70">
       <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
-        <div className="font-semibold text-zinc-900 dark:text-zinc-100">{columnTitle(status)}</div>
+		<h2 className="font-semibold text-zinc-900 dark:text-zinc-100">{columnTitle(status)}</h2>
         <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
           {tickets.length}
         </span>
@@ -186,6 +189,7 @@ export function TicketBoard({
   emptyBody?: string;
 }) {
   const [activeTicket, setActiveTicket] = useState<BoardTicket | null>(null);
+	const [announcement, setAnnouncement] = useState("");
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -265,6 +269,7 @@ export function TicketBoard({
       previousNeighbors.afterTicketId !== nextNeighbors.afterTicketId
     ) {
       onMoveTicket(ticket.id, targetStatus, nextNeighbors.beforeTicketId, nextNeighbors.afterTicketId);
+	  setAnnouncement(`Moved ${ticket.title} to ${columnTitle(targetStatus)}.`);
     }
     setActiveTicket(null);
   }
@@ -274,7 +279,8 @@ export function TicketBoard({
   }
 
   return (
-    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+	<DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+	  <div className="sr-only" aria-live="assertive" aria-atomic="true">{announcement}</div>
       <div className="flex gap-4 overflow-x-auto pb-3">
         {ticketStatuses.map((status) => (
           <BoardColumn
