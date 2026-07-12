@@ -121,7 +121,7 @@ func (h *Handler) List(c echo.Context) error {
 		return writeTicketError(c, err)
 	}
 
-	return c.JSON(http.StatusOK, tickets)
+	return apiresponse.WriteOffsetPage(c, http.StatusOK, tickets, options.Limit, options.Offset)
 }
 
 // StreamEvents streams project ticket changes as server-sent events.

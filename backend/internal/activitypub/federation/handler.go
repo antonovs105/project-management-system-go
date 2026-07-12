@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/antonovs105/project-management-system-go/internal/apiresponse"
 	"github.com/labstack/echo/v4"
 )
 
@@ -55,7 +56,7 @@ func (h *Handler) ListInboxActivities(c echo.Context) error {
 	if err != nil {
 		return writeFederationError(c, err)
 	}
-	return c.JSON(http.StatusOK, activities)
+	return apiresponse.WriteOffsetPage(c, http.StatusOK, activities, options.Limit, options.Offset)
 }
 
 // ListRemoteFollows returns remote actors followed by the current user.
@@ -68,7 +69,7 @@ func (h *Handler) ListRemoteFollows(c echo.Context) error {
 	if err != nil {
 		return writeFederationError(c, err)
 	}
-	return c.JSON(http.StatusOK, follows)
+	return apiresponse.WriteOffsetPage(c, http.StatusOK, follows, options.Limit, options.Offset)
 }
 
 // ListRemoteProjectInvites returns remote project invites addressed to the current user.
@@ -81,7 +82,7 @@ func (h *Handler) ListRemoteProjectInvites(c echo.Context) error {
 	if err != nil {
 		return writeFederationError(c, err)
 	}
-	return c.JSON(http.StatusOK, invites)
+	return apiresponse.WriteOffsetPage(c, http.StatusOK, invites, options.Limit, options.Offset)
 }
 
 // AcceptRemoteProjectInvite accepts a pending remote project invite for the current user.
@@ -112,7 +113,7 @@ func (h *Handler) ListRemoteProjects(c echo.Context) error {
 	if err != nil {
 		return writeFederationError(c, err)
 	}
-	return c.JSON(http.StatusOK, projects)
+	return apiresponse.WriteOffsetPage(c, http.StatusOK, projects, options.Limit, options.Offset)
 }
 
 // GetRemoteProject returns one accepted remote project workspace.
@@ -134,7 +135,7 @@ func (h *Handler) ListRemoteProjectTickets(c echo.Context) error {
 	if err != nil {
 		return writeFederationError(c, err)
 	}
-	return c.JSON(http.StatusOK, tickets)
+	return apiresponse.WriteOffsetPage(c, http.StatusOK, tickets, options.Limit, options.Offset)
 }
 
 // GetRemoteTicket returns one remote ticket through a signed federation read.

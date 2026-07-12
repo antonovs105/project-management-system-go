@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/antonovs105/project-management-system-go/internal/apiresponse"
 	"github.com/labstack/echo/v4"
 )
 
@@ -44,7 +45,15 @@ func (h *Handler) List(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "activity history failed"})
 	}
-	return c.JSON(http.StatusOK, values)
+	if limit <= 0 {
+		limit = 50
+	} else if limit > 200 {
+		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return apiresponse.WriteOffsetPage(c, http.StatusOK, values, limit, offset)
 }
 
 // ListArchivedProjects returns restorable projects for the current user.

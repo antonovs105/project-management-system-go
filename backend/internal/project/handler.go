@@ -161,7 +161,7 @@ func (h *Handler) List(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to retrieve projects"})
 	}
 
-	return c.JSON(http.StatusOK, projects)
+	return apiresponse.WriteOffsetPage(c, http.StatusOK, projects, options.Limit, options.Offset)
 }
 
 // ListMyInvites returns invites addressed to the current user.
@@ -175,7 +175,7 @@ func (h *Handler) ListMyInvites(c echo.Context) error {
 	if err != nil {
 		return writeProjectError(c, err)
 	}
-	return c.JSON(http.StatusOK, invites)
+	return apiresponse.WriteOffsetPage(c, http.StatusOK, invites, options.Limit, options.Offset)
 }
 
 // Update changes project metadata.
@@ -279,7 +279,7 @@ func (h *Handler) ListMembers(c echo.Context) error {
 	if err != nil {
 		return writeProjectError(c, err)
 	}
-	return c.JSON(http.StatusOK, members)
+	return apiresponse.WriteOffsetPage(c, http.StatusOK, members, options.Limit, options.Offset)
 }
 
 // ListInvites returns project invite history for membership managers.
@@ -297,7 +297,7 @@ func (h *Handler) ListInvites(c echo.Context) error {
 	if err != nil {
 		return writeProjectError(c, err)
 	}
-	return c.JSON(http.StatusOK, invites)
+	return apiresponse.WriteOffsetPage(c, http.StatusOK, invites, options.Limit, options.Offset)
 }
 
 // ListRoles returns configurable project roles.

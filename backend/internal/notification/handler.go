@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/antonovs105/project-management-system-go/internal/apiresponse"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 )
@@ -88,7 +89,7 @@ func (h *Handler) List(c echo.Context) error {
 	if err != nil {
 		return writeError(c, err)
 	}
-	return c.JSON(http.StatusOK, notifications)
+	return apiresponse.WriteOffsetPage(c, http.StatusOK, notifications, options.Limit, options.Offset)
 }
 
 // StreamEvents streams notification events for the current user.

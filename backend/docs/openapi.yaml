@@ -2,7 +2,13 @@ openapi: 3.1.0
 info:
   title: Project Management Federation API
   version: 0.1.0
-  description: Backend REST, ActivityPub, C2S, S2S inbox, WebFinger, and delivery administration contract.
+  description: |
+    Backend REST, ActivityPub, C2S, S2S inbox, WebFinger, and delivery administration contract.
+
+    Bounded REST list operations return JSON arrays for backward compatibility and expose a uniform
+    offset-pagination contract through `Link`, `X-Pagination-Limit`, `X-Pagination-Offset`,
+    `X-Pagination-Count`, and `X-Pagination-Has-More` response headers. The `Link` header preserves
+    active filters and supplies RFC 8288 `prev` and `next` relations when applicable.
 servers:
   - url: http://localhost:8080
 tags:
@@ -2778,6 +2784,19 @@ components:
       type: http
       scheme: bearer
       description: Optional in development; required when METRICS_TOKEN is configured.
+  headers:
+    PaginationLimit:
+      description: Requested bounded page size.
+      schema: { type: integer, minimum: 1 }
+    PaginationOffset:
+      description: Current zero-based result offset.
+      schema: { type: integer, minimum: 0 }
+    PaginationCount:
+      description: Number of records returned in this response.
+      schema: { type: integer, minimum: 0 }
+    PaginationHasMore:
+      description: Whether a subsequent offset page may contain records.
+      schema: { type: boolean }
   parameters:
     IfMatch:
       name: If-Match

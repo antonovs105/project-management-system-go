@@ -3135,7 +3135,16 @@ export interface components {
             };
         };
     };
-    headers: never;
+    headers: {
+        /** @description Requested bounded page size. */
+        PaginationLimit: number;
+        /** @description Current zero-based result offset. */
+        PaginationOffset: number;
+        /** @description Number of records returned in this response. */
+        PaginationCount: number;
+        /** @description Whether a subsequent offset page may contain records. */
+        PaginationHasMore: boolean;
+    };
     pathItems: never;
 }
 export type PublicInstanceConfig = components['schemas']['PublicInstanceConfig'];
@@ -3249,6 +3258,10 @@ export type RequestBodyUpdateProjectRole = components['requestBodies']['UpdatePr
 export type RequestBodyUpdateProjectMemberRole = components['requestBodies']['UpdateProjectMemberRole'];
 export type RequestBodyUpdateInstanceRole = components['requestBodies']['UpdateInstanceRole'];
 export type RequestBodyUpdateTicket = components['requestBodies']['UpdateTicket'];
+export type HeaderPaginationLimit = components['headers']['PaginationLimit'];
+export type HeaderPaginationOffset = components['headers']['PaginationOffset'];
+export type HeaderPaginationCount = components['headers']['PaginationCount'];
+export type HeaderPaginationHasMore = components['headers']['PaginationHasMore'];
 export type $defs = Record<string, never>;
 export interface operations {
     getHealth: {

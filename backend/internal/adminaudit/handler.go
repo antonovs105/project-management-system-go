@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/antonovs105/project-management-system-go/internal/apiresponse"
 	"github.com/labstack/echo/v4"
 )
 
@@ -35,7 +36,7 @@ func (h *Handler) ListEvents(c echo.Context) error {
 	if err != nil {
 		return writeAuditError(c, err)
 	}
-	return c.JSON(http.StatusOK, events)
+	return apiresponse.WriteOffsetPage(c, http.StatusOK, events, options.Limit, options.Offset)
 }
 
 // currentUserID extracts the authenticated user identifier from Echo context.

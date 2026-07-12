@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/antonovs105/project-management-system-go/internal/apiresponse"
 	"github.com/antonovs105/project-management-system-go/internal/apperror"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -71,7 +72,7 @@ func (h *Handler) List(c echo.Context) error {
 		return writeCommentError(c, err)
 	}
 
-	return c.JSON(http.StatusOK, comments)
+	return apiresponse.WriteOffsetPage(c, http.StatusOK, comments, normalizeCommentListLimit(options.Limit), normalizeCommentListOffset(options.Offset))
 }
 
 // Delete removes a comment by ID.

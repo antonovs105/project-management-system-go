@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/account"
+	"github.com/antonovs105/project-management-system-go/internal/apiresponse"
 	"github.com/antonovs105/project-management-system-go/internal/authsession"
 	"github.com/labstack/echo/v4"
 )
@@ -96,7 +97,7 @@ func (h *Handler) ListUsers(c echo.Context) error {
 	if err != nil {
 		return writeAdminUserError(c, err)
 	}
-	return c.JSON(http.StatusOK, users)
+	return apiresponse.WriteOffsetPage(c, http.StatusOK, users, options.Limit, options.Offset)
 }
 
 // UpdateInstanceRole changes a user's instance role.
