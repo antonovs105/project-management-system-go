@@ -5,6 +5,7 @@ import type { FormEvent } from "react";
 import { toast } from "sonner";
 import { Button, ErrorState, Panel, TextField } from "../components/ui";
 import { NotificationPreferencesPanel } from "../features/account/NotificationPreferencesPanel";
+import { PrivilegedAccountOnboarding } from "../features/account/PrivilegedAccountOnboarding";
 import { api, errorMessage } from "../lib/api";
 import { compactId, relativeDate } from "../lib/format";
 import { useI18n } from "../lib/i18n-context";
@@ -15,6 +16,7 @@ import { useAuthStore } from "../store/auth";
 export function AccountPage() {
 	const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
+  const setSession = useAuthStore((state) => state.setSession);
   const { t } = useI18n();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -33,7 +35,15 @@ export function AccountPage() {
 	});
 	const confirmMFA = useMutation({
 		mutationFn: api.confirmMFA,
-		onSuccess: (result) => { setRecoveryCodes(result.recovery_codes); setMFASetup(null); setMFACode(""); void queryClient.invalidateQueries({ queryKey: queryKeys.mfaStatus }); },
+		onSuccess: (result) => {
+			setRecoveryCodes(result.recovery_codes);
+			setMFASetup(null);
+			setMFACode("");
+			if (user?.mfaEnrollmentRequired) {
+				setSession({ ...user, mfaEnrollmentRequired: false });
+			}
+			void queryClient.invalidateQueries({ queryKey: queryKeys.mfaStatus });
+		},
 		onError: (error) => toast.error(errorMessage(error, "Could not confirm MFA.")),
 	});
 	const disableMFA = useMutation({
@@ -95,6 +105,7 @@ export function AccountPage() {
 
   return (
     <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
+      <PrivilegedAccountOnboarding instanceRole={user?.instanceRole} enrollmentRequired={user?.mfaEnrollmentRequired} />
       <Panel className="p-5">
         <div className="mb-4 flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-zinc-950 text-white">

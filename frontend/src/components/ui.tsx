@@ -1,4 +1,4 @@
-import type { FormEventHandler, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
+import type { ComponentPropsWithoutRef, FormEventHandler, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
 import { X } from "lucide-react";
 import { createPortal } from "react-dom";
 
@@ -149,8 +149,8 @@ export function Badge({ children, className }: { children: ReactNode; className?
   );
 }
 
-export function Panel({ children, className }: { children: ReactNode; className?: string }) {
-  return <section className={cx("rounded-2xl border border-zinc-200 bg-white shadow-sm", className)}>{children}</section>;
+export function Panel({ children, className, ...props }: ComponentPropsWithoutRef<"section">) {
+	return <section className={cx("rounded-2xl border border-zinc-200 bg-white shadow-sm", className)} {...props}>{children}</section>;
 }
 
 export function EmptyState({
