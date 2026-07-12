@@ -1,778 +1,449 @@
-# Progo codebase critical review
+# Progo codebase critical review — current state
 
-**Audit date:** 2026-07-12  
-**Repository commit:** `695e5ebd1ea8b620b21b4620ed2b281fc60174d5` (`fix: preserve deploy state on public check failure`)  
-**Scope:** backend, frontend, migrations, runtime configuration, Docker/Compose, deployment scripts, CI/CD, tests, and expected project-management capabilities.
+**Original audit date:** 2026-07-12
 
-## Remediation addendum — 2026-07-12
+**Current review date:** 2026-07-12
 
-The findings below describe commit `695e5eb...` before remediation. The working tree now contains a stabilization release that resolves the deploy-blocking findings and a selected baseline product slice.
+**Original audited commit:** `695e5ebd1ea8b620b21b4620ed2b281fc60174d5`
 
-### Resolved
+**Current reviewed commit:** `7b4ab01436316b3c50307589fd3d10481ebcd13f`
 
-| Area | Resolution | Verification |
-|---|---|---|
-| Go security baseline | Go and Docker are aligned on 1.26.5; CI runs pinned `govulncheck`. | Final scan: 0 reachable vulnerabilities. |
-| Frontend advisories | Direct dependencies and transitive overrides were upgraded; pnpm 11.1.2 is pinned. | Full and production audits: 0 known vulnerabilities. |
-| Browser sessions | Removed JWT persistence/decoding from `localStorage`; browser auth uses a 12-hour `HttpOnly`, `Secure`, `SameSite=Strict` cookie with logout/token-version revocation. Bearer auth remains for non-browser clients. | Middleware, handler lifecycle, frontend behavior, and live 401 checks pass. |
-| CSRF/session boundary | Credentialed CORS plus trusted-origin enforcement protects unsafe cookie-authenticated requests. | Origin middleware tests pass. |
-| OAuth | Google and GitHub authorization-code flows use derived RFC 7636 S256 PKCE verifiers. | OAuth URL/service tests pass. |
-| Browser headers | CSP, frame denial, MIME sniffing prevention, referrer and permissions policies are emitted by nginx and generated Caddy config. | Live frontend response contains CSP. |
-| Supply chain | Docker bases and Compose infrastructure images are digest-pinned; GitHub Actions are SHA-pinned; SSH uses a pre-provisioned host key; installer archives require SHA-256 verification. | Docker builds, shell syntax, and all Compose configs pass. |
-| Container isolation | Frontend runs as nginx without capabilities, read-only, with owned tmpfs paths; frontend was removed from federation networks. API and worker share one local image. | Complete live stack is healthy under Docker Desktop. |
-| CI maintenance | Added frontend test/type/lint/build/audit job, Linux race tests, a 35% backend coverage floor, Dependabot, least-privilege permissions, and CODEOWNERS. | Equivalent local gates pass except Windows race instrumentation (no host C compiler); CI provides Linux execution. |
-| Database reliability | Pool max-open/max-idle/lifetime/idle-time are configurable and bounded; `database/sql` stats are exported to Prometheus. | Live metrics report `go_sql_max_open_connections{db_name="primary"} 25`. |
-| Health semantics | `/health` is dependency-free liveness; `/ready` checks PostgreSQL schema and the shared Redis client. | Live responses: both 200, readiness checks all `ok`. |
-| Error classification | Removed production HTTP status classification based on `strings.Contains(err.Error())`; core domains use stable typed error categories. | Repository scan is clean and relevant package tests pass. |
-| Authentication throttling | Public auth has independent IP and normalized-account throttles; account identifiers are SHA-256 hashed. | Identifier normalization/body-preservation test passes. |
-| Frontend tests | Added Vitest/jsdom/Testing Library behavior tests alongside the existing contract checks. | 2/2 behavior and 8/8 contract tests pass. |
-| Accessibility/performance | Board drag-and-drop supports keyboard sensors; routes are lazy-loaded into separate production chunks. | Typecheck/lint/build pass; chunked build output confirmed. |
-| Ticket search/pagination | Added generated PostgreSQL `tsvector`, GIN index, bounded `q` API filter, 50-item server pages, and usable previous/next UI. | Migration 30 and focused service tests pass. |
-| Due dates | Added indexed due-date storage, API create/update/clear semantics, forms, and board display. | Migration 31 and date parser tests pass. |
-| Labels | Added project-scoped labels, permissioned CRUD, ticket assignment, settings UI, forms, and board badges. | Migration 32, label tests, full Go/frontend builds, and integration tests pass. |
-
-### Still open (not safe to pretend resolved)
-
-- Password recovery, local email verification, privileged-account MFA, session inventory, and durable authentication-event alerting require an email/MFA/product design and remain release blockers for an internet-facing public service.
-- Activity history, attachments/object storage, richer notification types/preferences/email delivery, and project archive/restore remain product-completeness work.
-- Optimistic concurrency, generated API clients, broad decomposition of oversized files, local/remote workspace consolidation, and realtime-hub consolidation remain maintainability work.
-- End-to-end browser tests, ephemeral install/upgrade/rollback/restore tests, backup retention/off-host encryption, and restore drills remain operational confidence gaps.
-- Actor private-key rotation and a uniform structured error response envelope remain security/API follow-ups.
-- Coverage is now enforced at 35%, but final measured backend statement coverage is only 39.0%; core project/ticket/comment/notification packages still need substantially deeper tests.
-
-### Review correction
-
-The original OE-8 statement said the final schema retained dormant `labels` tables. That was incorrect: migration 5 dropped the legacy bigint tables. The integration safety test creates an unrelated `public.labels` table only to prove migrations do not destroy external tables. The implemented label feature therefore uses a new UUID-based schema in migration 32.
+**Remediation series:** 56 conventional commits, 239 files changed
+**Scope:** backend, frontend, migrations, authentication, federation, Docker/Compose, deployment, observability, CI/CD, tests, and expected project-management capabilities.
 
 ## Executive verdict
 
-Progo is a substantial working full-stack system, not a CRUD prototype. It has a Go/Echo API, React client, PostgreSQL persistence, Redis/Asynq jobs, ActivityPub federation, HTTP Message Signatures, a maintenance CLI, metrics, migrations, and blue-green deployment. Several security controls are unusually good for a diploma-scale application: outbound federation SSRF protection, signature and digest verification, production configuration guards, role/permission checks, token invalidation by version, request limits, and meaningful database integration tests.
+The repository is no longer in the state described by the original review. The major security, dependency, session, CI, operational, accessibility, and baseline product gaps have been remediated.
 
-The current checkout is nevertheless **not production-ready**. The primary blockers are:
+The current checkout is a credible **controlled-deployment production candidate**. It is not independently certified for an unrestricted public deployment: there has been no external penetration test, long-duration load test, real third-party federation interoperability campaign, or production incident exercise. Production also depends on operators configuring SMTP, malware scanning, off-host encrypted backups, OAuth credentials, TLS, and monitoring correctly.
 
-1. The declared Go 1.25.0 toolchain is far behind its security patch level. `govulncheck` found **25 reachable vulnerabilities** when the code was analyzed with Go 1.25.0. The current fixed release in that line is Go 1.25.12.
-2. The locked frontend production graph has **43 audit advisories: 22 high, 20 moderate, and 1 low**. Directly locked affected packages include Axios 1.13.2 and React Router 7.11.0.
-3. A 72-hour bearer JWT is persisted in browser `localStorage`. One successful XSS or compromised same-origin script can steal a reusable session.
-4. Frontend quality gates are effectively absent from CI. The eight frontend tests only search source text; they do not render the application or test user behavior.
-5. Backend statement coverage is only **38.5% overall**, with the core `project`, `ticket`, `comment`, and `notification` packages at 13.5%, 22.4%, 14.6%, and 15.1% respectively.
-6. The product prioritizes a very complex federation/deployment layer while baseline project-management and account-lifecycle features remain absent: labels, due dates, search, usable pagination, activity history, attachments, password recovery, local email verification, and comprehensive notifications.
+Of the 52 original findings:
 
-### Overall assessment
-
-| Area | Rating | Summary |
+| Disposition | Count | Meaning |
 |---|---:|---|
-| Functional breadth | 7/10 | Strong project, ticket, role, federation, GitHub, notification, and admin surface. |
-| Backend security design | 7/10 | Good authorization and federation defenses, undermined by patch and session-management gaps. |
-| Frontend security | 3/10 | Vulnerable lockfile, persistent bearer token, no CSP, and no behavioral security tests. |
-| Maintainability | 4/10 | Clear vertical slices, but several 1,000-2,100-line files and substantial duplication. |
-| Test confidence | 4/10 | Many backend tests and good DB integration scenarios, but low measured coverage and almost no real frontend testing. |
-| Production operations | 5/10 | Good health/metrics/deploy foundations, but mutable artifacts, unbounded DB pool, weak supply-chain verification, and no restore drill. |
-| Product completeness | 5/10 | Advanced differentiating features exist before several baseline PM and identity features. |
+| Resolved | **45** | The reported defect or missing capability has an implemented control and relevant verification. |
+| Partially resolved | **7** | Material remediation exists, but maintainability or depth can still be improved. |
+| Open critical/high release blockers from the original audit | **0** | No original critical security or baseline-feature blocker remains unimplemented. |
 
-## Scope and method
+The seven partial residuals are `OE-2`, `OE-3`, `OE-6`, `STD-10`, `TEST-3`, `TEST-5`, and `TEST-7`. They are described honestly below.
 
-The review inspected 80 production Go files (26,569 lines), 50 Go test files (15,555 lines), 42 frontend TypeScript/TSX files (9,030 lines), 58 SQL migration files, Dockerfiles, Compose definitions, Caddy generation, installer/deploy scripts, OpenAPI, and both GitHub Actions workflows.
+## Current validation evidence
 
-Validation performed:
+### Backend
 
-- `go test -count=1 -covermode=atomic -coverprofile=... ./...` — passed with 38.5% total statement coverage when the compiler temp directory was outside the backend tree.
+- `go test -count=1 -covermode=atomic -coverprofile ... ./...` — passed.
+- PostgreSQL integration suite with the real 40-migration schema — passed.
+- Merged unit and integration statement coverage — **56.3%**.
+- Core merged coverage: project **51.2%**, ticket **46.7%**, comment **52.4%**, notification **51.8%**.
 - `go vet ./...` — passed.
-- `node --test tests/*.test.mjs` — 8/8 passed.
-- `tsc -b --pretty false` — passed.
-- `eslint .` — passed.
-- `vite build` — passed; main bundle was 607.49 kB minified / 176.91 kB gzip, plus a 194.19 kB graph chunk.
-- `govulncheck` with local Go 1.26.3 — 3 reachable standard-library advisories, fixed in Go 1.26.4/1.26.5.
-- `govulncheck` with the repository-declared Go 1.25.0 — 25 reachable standard-library vulnerabilities; the newest observed fix requirement is Go 1.25.12.
-- `pnpm audit --prod --json` — 43 advisories in the locked production dependency graph.
+- Four fuzz targets ran locally without a crash or invariant failure: HTTP Message Signature fields, inbound ActivityPub activities, federation URLs, and GitHub repository identifiers.
+- `govulncheck@v1.6.0 ./...` — **0 reachable vulnerabilities**. It reported vulnerable symbols only in unused dependency paths: 3 imported-package and 24 required-module advisories were not called by this code.
 
-Limitations:
+### Frontend
 
-- Database integration tests could not be rerun locally because the Docker daemon was not running. CI is configured to run them against PostgreSQL.
-- The race detector could not run in this Windows environment because CGO requires a C compiler that is not installed. CI also does not currently run `-race`.
-- No live production instance, real secrets, external federation peer, browser accessibility tooling, penetration test, or restore exercise was available.
-- Dependency audit results are inventory findings. Several React Router advisories concern SSR/RSC paths that this client-only Vite application does not use, and several Axios advisories concern its Node adapter. They still show that the lockfile is not being patched or gated.
+- TypeScript project build — passed.
+- ESLint — passed.
+- Vitest — **10 files / 17 tests passed**.
+- Production Vite build — passed.
+- Main client chunk — 493.68 kB minified / 148.80 kB gzip; graph functionality remains a separate 194.59 kB chunk.
+- Complete dependency audit — **0 advisories** across 555 production, development, and optional dependency entries.
+- Production dependency audit — **0 advisories** across 157 entries.
 
-## What is already done well
+### Live Docker
 
-The following should be preserved during refactoring:
+The complete local stack was rebuilt from the reviewed commit.
 
-- `backend/internal/activitypub/netguard/netguard.go` validates schemes, redirects, DNS results, and private/reserved addresses, including validation at dial time to reduce DNS-rebinding risk.
-- `backend/internal/activitypub/httpsig/service.go` verifies signed method/authority/path/date, body digest, signature age, actor identity, and refreshed keys.
-- Inbox requests are limited to 1 MiB and globally bounded by the API body limit.
-- ActivityPub writes are transactionally deduplicated by activity AP ID and inbox target.
-- JWT parsing rejects algorithms other than HS256, and `token_version` allows password changes to invalidate old tokens.
-- Production startup rejects weak/missing secrets, HTTP public URLs, localhost identities, wildcard CORS, insecure federation HTTP, and private-network federation.
-- Project authorization is permission-based rather than relying on frontend visibility.
-- PostgreSQL constraints cover many role/status/value invariants and relationship uniqueness rules.
-- The backend image runs as a non-root user; backend services use read-only filesystems and `no-new-privileges` in production Compose.
-- API/worker roles, Prometheus metrics, readiness checks, delivery retries, dead deliveries, and database backups are present.
-- The integration suite creates isolated schemas and applies the actual migrations, which is much more valuable than repository mocks alone.
+| Service | Result |
+|---|---|
+| PostgreSQL | Running and healthy. |
+| Redis | Running and healthy. |
+| Migrations | Exited 0; schema is `40`, `dirty=false`. |
+| API | Running and healthy. |
+| Worker | Running; Asynq processing started, delivery worker started, metrics listening on `:9091`, and due-notification candidates were processed. |
+| Frontend | Running; HTTP 200. |
+| Prometheus | Running and successfully scraping protected metrics. |
 
-# 1. Overengineering review
+Live behavior:
 
-## OE-1 — Product-priority inversion: federation before baseline PM features
+- `/health` returned 200 with dependency-free liveness.
+- `/ready` returned 200 with PostgreSQL, schema, and Redis all `ok`.
+- an unauthenticated authenticated-API request returned 401.
+- metrics rejected an unauthenticated request and returned 200 with the configured bearer token.
+- `go_sql_max_open_connections{db_name="primary"}` reported 25.
+- the frontend emitted CSP, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and a strict referrer policy.
 
-**Severity:** High maintainability/product risk
+### Restore exercise
 
-ActivityPub is not inherently overengineering if federation is the product's defining requirement. The problem is proportion: a large fraction of backend code, migrations, admin UI, delivery recovery, remote caching, HTTP signatures, domain moderation, and deployment work supports federation while basic PM workflows are incomplete.
+A second Compose project was created on separate ports and isolated PostgreSQL, Redis, and attachment volumes. The drill:
 
-Evidence:
+1. created database and attachment probes with `before-backup`;
+2. created and validated a PostgreSQL custom-format dump and attachment archive;
+3. mutated both probes to `after-backup`;
+4. stopped the isolated API, dropped and recreated its database, restored the dump, replayed migrations, and restored attachments;
+5. confirmed both probes returned to `before-backup`;
+6. confirmed schema `40:false` and healthy readiness after restore.
 
-- Federation includes `activitypub/c2s`, delivery queues, moderation, remote actors, remote inboxes, remote projects, HTTP signatures, WebFinger, domain blocks, recovery loops, and separate local/remote workspaces.
-- Migrations already retain `labels` and `ticket_labels`, but there is no label service, repository, handler, API client, or UI.
-- There are no ticket due dates, activity history, attachments, ticket search, or practical pagination controls.
-- Local account recovery and email verification do not exist.
+The exact POSIX `backup.sh` and `restore-backup.sh` wrappers could not run natively on this Windows host because neither `sh` nor a WSL distribution is installed. CI runs those exact wrappers on Ubuntu; the local exercise verified their underlying destructive database, attachment, migration, and readiness operations against disposable infrastructure.
 
-Impact: engineering cost is concentrated in the hardest distributed-system edge cases while mainstream users still cannot perform routine PM and account-recovery tasks. Every future feature must also answer local/remote federation semantics, raising its cost.
+# 1. Overengineering and maintainability
 
-Recommendation: explicitly choose one of two product strategies:
+## OE-1 — Product-priority inversion
 
-1. **Federation-first:** document federation as the non-negotiable differentiator and freeze protocol expansion until baseline PM/account capabilities are complete.
-2. **Project-management-first:** place federation behind a feature flag/module boundary and ship a smaller local product first.
+**Status: Resolved**
 
-## OE-2 — Oversized composition, repository, service, and UI files
+Federation remains a defining feature, but the baseline product is no longer missing around it. The remediation added account recovery, verified email, MFA, session inventory, labels, indexed search, pagination, due dates, activity history, attachments, richer notifications, archive/restore, portability, API tokens, and outbound webhooks.
 
-**Severity:** High maintainability risk
+The correct current strategy is federation-first differentiation on top of a viable PM baseline, not federation instead of a baseline.
 
-Largest production hotspots:
+## OE-2 — Oversized files
 
-| File | Lines | Concern |
+**Status: Partially resolved — medium residual maintainability risk**
+
+Material decomposition is complete in the two worst original hotspots:
+
+- the 2,105-line project repository is split by project lifecycle, membership, roles, and invites;
+- the 1,312-line project settings component is split, with GitHub settings lazy-loaded;
+- common ticket workspace primitives and the generic realtime hub were extracted.
+
+Remaining handwritten hotspots still deserve later decomposition:
+
+| File | Current approximate lines | Residual concern |
 |---|---:|---|
-| `backend/internal/project/repository.go` | 2,105 | Membership, roles, invites, project CRUD, ActivityPub documents, delivery side effects, and helper SQL in one repository. |
-| `frontend/src/features/projects/ProjectSettingsPanel.tsx` | 1,312 | Overview metrics, settings, roles, members, invitations, GitHub integration, and multiple forms in one component. |
-| `backend/internal/activitypub/remoteinbox/repository.go` | 1,274 | Persists and applies many unrelated ActivityPub activity types. |
-| `backend/internal/activitypub/federation/service.go` | 1,123 | Discovery, follows, remote projects/invites/tickets, parsing, and remote writes. |
-| `backend/cmd/api/main.go` | 1,010 | Config validation, dependency composition, workers, route setup, metrics, health checks, logging, and rate limiting. |
-| `frontend/src/lib/api.ts` | 755 | Every DTO, filter, normalization helper, URL helper, and API call. |
+| `internal/activitypub/remoteinbox/repository.go` | 1,162 | Multiple inbound activity applicators remain together. |
+| `internal/user/service.go` | 1,126 | Local accounts, sessions, OAuth, and provider HTTP code share one service file. |
+| `cmd/api/main.go` | 1,106 | Composition, middleware, probes, and process lifecycle remain together. |
+| `internal/activitypub/federation/service.go` | 1,044 | Discovery, remote projects, tickets, and document parsing remain together. |
+| `internal/ticket/repository.go` | 1,014 | CRUD, ranking, ActivityPub projection, labels, and recipients remain together. |
 
-Impact: large change surfaces, merge conflicts, difficult focused testing, and high cognitive load. Package-level coverage hides which responsibilities are untested.
+These are no longer release blockers, but they remain the clearest source-level maintainability debt.
 
-Recommendation:
+## OE-3 — Duplicated local and remote workspaces
 
-- Split project persistence into `project`, `membership`, `role`, and `invite` repositories or cohesive files behind one package interface.
-- Dispatch inbound ActivityPub types to per-activity applicators.
-- Move API composition to an `internal/app` package and keep `cmd/api/main.go` as a small entry point.
-- Split `ProjectSettingsPanel` by tab/feature and lazy-load secondary panels.
-- Split the API client by domain while sharing one configured transport.
+**Status: Partially resolved — low/medium residual risk**
 
-## OE-3 — Duplicated local and remote project workflows
-
-**Severity:** Medium
-
-`ProjectWorkspace.tsx` (618 lines) and `RemoteProjectWorkspace.tsx` (583 lines) both define summary widgets, ticket statistics, optimistic ticket movement, ticket create/edit/delete flows, and board rendering. The APIs differ, but most presentation and client-state logic is duplicated.
-
-Impact: fixes for validation, accessibility, optimistic rollback, and UI behavior must be implemented twice and can drift.
-
-Recommendation: create shared `ProjectSummary`, `TicketWorkspace`, editor, and mutation-adapter abstractions. Keep federation-specific capabilities in a small adapter rather than a separate page implementation.
+Local and remote pages now share `TicketBoard`, `ProjectTicketSummary`, classification controls, common formatting, and pagination controls. Federation-specific transport and mutation orchestration still live in the remote page, while the local page manages richer local capabilities. A further mutation-adapter abstraction is possible, but forcing complete unification would hide meaningful protocol differences.
 
 ## OE-4 — Duplicated realtime hubs
 
-**Severity:** Low/Medium
+**Status: Resolved**
 
-`backend/internal/ticket/events.go` and `backend/internal/notification/events.go` implement nearly the same local subscriber map, Redis subscription/reconnect loop, duplicate-suppression map, close behavior, and publish timeout.
+Ticket and notification event fanout use one typed `internal/realtime` implementation with bounded subscriber buffers, Redis reconnection, echo suppression, and close behavior. Concurrent fanout has a bounded load test and the Linux CI race detector covers this code.
 
-Recommendation: use a small generic internal pub/sub helper parameterized by channel name, key extraction, and payload type. Do not create a full event-bus framework; one tested helper is enough.
+## OE-5 — Ceremony-heavy quality gates
 
-## OE-5 — Quality gates that enforce ceremony rather than risk
+**Status: Resolved**
 
-**Severity:** Medium
+Documentation enforcement is limited to exported API/package documentation. The architecture scanner excludes generated/cache/temp trees and has regression coverage. CI time is now concentrated on behavior, race, vulnerabilities, integration, browser accessibility, fuzzing, coverage, and restore safety.
 
-`backend/internal/commentguard/comment_guard_test.go` requires GoDoc-style comments on every top-level declaration, including unexported helpers. Go's useful convention is documentation for exported API; enforcing comments on private helpers produces repetitive comments such as “currentUserID returns...” that restate code.
+## OE-6 — Manual API contract duplication
 
-`backend/internal/architecture/architecture_test.go` recursively scans every `.go` file under the module instead of analyzing package source through `go/packages`. It skipped `.gocache` but not `.gotmp`. During coverage, it parsed generated `*.cover.go` files and falsely reported architecture violations. Moving `GOTMPDIR` outside the module made the same code pass.
+**Status: Partially resolved — medium residual contract risk**
 
-Recommendation:
+OpenAPI now generates the frontend schema, `openapi-fetch` provides a typed transport, CI rejects stale generated output, and runtime Echo routes are compared with the OpenAPI paths. DTO-shape contract tests cover important schemas.
 
-- Restrict documentation enforcement to exported declarations and package comments, or use standard linters.
-- Replace filesystem-wide AST walks with `go/packages`, or at minimum exclude every generated/cache/temp directory and test the scanner against them.
-- Spend CI time on vulnerability, race, integration, accessibility, and behavior checks instead.
+Residual: the Go handlers and the OpenAPI document are still authored separately, and not every live request/response is automatically validated against its schema. A generated Go server boundary or response-validation middleware would close the final gap.
 
-## OE-6 — Manual contract duplication
+## OE-7 — Blue-green complexity without verification
 
-**Severity:** Medium
+**Status: Resolved for the documented single-VM requirement**
 
-The API contract is represented independently in:
+Zero/low-downtime single-VM deployment remains an explicit operational choice. The deployment now preserves previous state on failed public checks, pins/verifies artifacts, validates Compose, creates verified backups, supports guarded restoration, and has disposable CI restore coverage. The implementation is complex, but now has matching safety controls.
 
-- Echo route registration,
-- a 3,606-line handwritten OpenAPI file,
-- a manually enumerated route list in `openapi_contract_test.go`,
-- handwritten TypeScript models in `types.ts`, and
-- handwritten client methods in `api.ts`.
+## OE-8 — Dormant label schema
 
-The tests verify selected routes and selected response schemas, but they do not automatically prove that every runtime route, request, response, and frontend type matches OpenAPI.
+**Status: Resolved; original evidence corrected**
 
-Recommendation: make OpenAPI the source of truth and generate the TypeScript client/types, or generate OpenAPI from typed Go route definitions. Add a runtime-route-versus-contract comparison and validate the document with a standards-compliant OpenAPI validator.
+The original review incorrectly treated an integration safety table as dormant application schema. The old bigint tables were removed by migration 5. A real UUID label model is now implemented end to end with case-insensitive uniqueness and ticket assignments.
 
-## OE-7 — Blue-green deployment complexity without matching verification
+## OE-9 — Eager frontend routes
 
-**Severity:** Medium
+**Status: Resolved**
 
-Blue-green deployment is justified if near-zero downtime on one VM is a requirement. Otherwise it doubles API, worker, frontend, port, health-check, and configuration definitions. `deploy/docker-compose.bluegreen.yml` duplicates the full backend environment four times.
+Routes and heavy secondary panels are lazy-loaded. The graph visualization, GitHub settings, administration, account, invitation, and federation surfaces build as separate chunks.
 
-The scripts perform useful local readiness checks and a backup, but there are no automated deploy tests, rollback tests, restore tests, or retention rules. After Caddy switches, a public readiness failure exits without automatically restoring the previous Caddy configuration.
+## OE-10 — Docker cache context
 
-Recommendation: either document zero-downtime as a requirement and test failure/rollback paths, or simplify to one Compose stack with a short controlled restart.
+**Status: Resolved**
 
-## OE-8 — Dormant schema
+Backend cache, coverage, binary, and temporary artifacts are excluded from the Docker context. Live builds transferred a small backend context rather than the local Go cache.
 
-**Severity:** Low
+# 2. Vulnerabilities and security
 
-`labels` and `ticket_labels` exist from the early schema, and an integration safety test explicitly preserves `public.labels`, but the application has no label feature. Dormant tables create ambiguity about supported behavior and migration ownership.
+## SEC-1 — Unpatched Go baseline
 
-Recommendation: implement labels in the next baseline feature slice or remove the unused tables in a deliberate migration.
+**Status: Resolved**
 
-## OE-9 — Most frontend routes are eagerly bundled
+Go is aligned on 1.26.5 in the module/toolchain, Docker build, and CI. Current `govulncheck` found zero reachable vulnerabilities.
 
-**Severity:** Medium performance/maintainability risk
+## SEC-2 — Vulnerable frontend graph
 
-`frontend/src/App.tsx` statically imports every route page. Only the graph implementation is lazy-loaded inside `ProjectWorkspace`. The resulting production build places 607.49 kB minified / 176.91 kB gzip in the main JavaScript chunk before the graph chunk.
+**Status: Resolved**
 
-Impact: login and simple list pages pay the parsing/execution cost of admin, federation, project settings, GitHub, and remote-project code they may never use.
+Direct dependencies, transitive overrides, and the lockfile were upgraded; pnpm 11.1.2 is pinned. Current complete and production-only audits both report zero advisories.
 
-Recommendation: lazy-load route-level pages and large secondary panels, then enforce a bundle budget in CI. Measure actual browser performance rather than splitting every small component mechanically.
+## SEC-3 — Long-lived JWT in `localStorage`
 
-## OE-10 — Backend Docker context does not exclude the repository-standard cache
+**Status: Resolved**
 
-**Severity:** Medium build risk
+Browser authentication uses a 12-hour `HttpOnly`, `Secure`, `SameSite=Strict` cookie. Tokens are not persisted or decoded from browser storage. Logout, password changes, session revocation, token versioning, and per-session validation invalidate credentials. Bearer credentials remain available for explicit API clients.
 
-The repository convention and validation commands use `backend/.cache`, but `backend/.dockerignore` excludes `.gocache` and not `.cache`. A normal local Docker build can therefore send a very large module/build cache into the build context before `COPY . .`; during this audit that ignored cache exceeded 1 GiB.
+## SEC-4 — Mutable/unverified supply chain
 
-Impact: slow builds, unnecessary disk/network use, cache invalidation, and accidental inclusion of local tooling artifacts in builder layers.
+**Status: Resolved**
 
-Recommendation: exclude `.cache`, `.gotmp`, coverage/temp outputs, and other generated directories; keep the Docker context allowlist-oriented where practical.
+Docker bases and infrastructure images use digests, GitHub Actions use commit SHAs, SSH relies on provisioned known-host keys, and downloaded installation archives require SHA-256 verification. Production defaults no longer silently consume mutable `main` artifacts.
 
-# 2. Vulnerabilities and security issues
+## SEC-5 — OAuth without PKCE
 
-## SEC-1 — Declared Go 1.25.0 is an unpatched security baseline
+**Status: Resolved**
 
-**Severity:** Critical release blocker
+Google and GitHub authorization-code flows derive and verify RFC 7636 S256 PKCE values in addition to authenticated, expiring state.
 
-Evidence:
+## SEC-6 — Missing browser headers
 
-- `backend/go.mod` declares `go 1.25.0`.
-- CI uses `actions/setup-go` with `go-version-file: backend/go.mod`, so builds can resolve the declared version rather than a currently patched toolchain.
-- An official `govulncheck` run under Go 1.25.0 found **25 reachable standard-library vulnerabilities**.
-- Findings included network/TLS, X.509, URL parsing, cookie parsing, PEM/ASN.1 parsing, email parsing, and HTTP/2 paths actually reached from this code.
-- The newest observed fix requirement is Go **1.25.12**. The current 1.26 line requires **1.26.5** for the latest TLS fix.
+**Status: Resolved**
 
-Impact: production behavior can include known denial-of-service, parsing, panic, and TLS weaknesses even if application code is correct.
+Nginx and generated Caddy configuration emit CSP, frame denial, nosniff, referrer, and permissions policies. Headers were confirmed against the live frontend.
 
-Fix now:
+## SEC-7 — IP-only authentication throttling
 
-- Pin CI to `go1.26.5` (preferred) or at least `go1.25.12`.
-- Pin the Docker builder to the same patch and immutable image digest.
-- Add `govulncheck ./...` to CI and fail on reachable vulnerabilities.
-- Define an automated patch-update policy.
+**Status: Resolved**
 
-Official references: [Go release history](https://go.dev/doc/devel/release), [GO-2026-5856](https://pkg.go.dev/vuln/GO-2026-5856).
+Public auth uses both IP and normalized-account identifiers. Account identifiers are SHA-256 hashed before limiter storage, request bodies are preserved, and Redis provides replica-consistent buckets with bounded failure time.
 
-## SEC-2 — Locked frontend production dependencies contain known advisories
+## SEC-8 — CI/CD trust hardening
 
-**Severity:** Critical release blocker
+**Status: Resolved**
 
-`pnpm audit --prod --json` reported:
+Workflows use least-privilege permissions and SHA-pinned actions. CI includes tests, race detection, vet, reachable-vulnerability scanning, dependency audit, generated-contract checks, browser E2E/accessibility, fuzz smoke, coverage artifacts, and a restore drill. CODEOWNERS and Dependabot are present.
 
-- **22 high**
-- **20 moderate**
-- **1 low**
-- **43 total** across 219 production/optional dependency entries
+## SEC-9 — Frontend on federation network
 
-Important locked packages and minimum observed fixes:
+**Status: Resolved**
 
-| Package/path | Locked | Minimum fix indicated by audit | Notes |
-|---|---:|---:|---|
-| `axios` | 1.13.2 | 1.16.0 | Multiple high/moderate prototype-pollution, request manipulation, credential/proxy leakage, and DoS advisories. Some are Node-adapter-only; others affect shared/browser paths. |
-| `react-router` via `react-router-dom` | 7.11.0 | 7.15.0 | Several SSR/RSC issues are not reachable in this SPA, but client redirect/XSS advisories and stale patch hygiene still apply. |
-| `preact` via graph tooltip | 10.28.1 | 10.28.2 | JSON VNode injection advisory. Graph labels are user-controlled strings, so reachability should be explicitly tested after upgrading. |
-| `lodash-es` via force graph | 4.17.22 | 4.17.24 | Code-injection/prototype-pollution advisories; exact vulnerable helpers may not be called by this app. |
-| `follow-redirects` | 1.15.11 | 1.15.12 | Authentication-header leakage in affected redirect scenarios; primarily Axios's Node path. |
-| `form-data` | 4.0.5 | 4.0.6 | CRLF injection in multipart names/filenames; Node path. |
-| `postcss` | 8.5.6 | 8.5.10 | Build-time CSS stringification issue. |
-| `picomatch` | 2.3.1 / 4.0.3 | 2.3.2 / 4.0.4 | Build-time glob method-injection/ReDoS advisories. |
+The frontend is not attached to federation-only networks. Container permissions are also hardened.
 
-Impact: the lockfile makes builds repeatable but repeats known vulnerable versions. The absence of audit/Dependabot gates allowed advisories to accumulate.
+## SEC-10 — Private-key encryption rotation
 
-Fix now:
+**Status: Resolved**
 
-- Upgrade direct dependencies and regenerate `pnpm-lock.yaml`.
-- Use `pnpm.overrides` for vulnerable transitives when upstream packages have not updated.
-- Rerun typecheck, lint, behavioral tests, production build, and audit.
-- Add Dependabot/Renovate and a production-dependency audit job.
+Actor private keys use versioned authenticated encryption, the active key plus previous decryption keys are configurable, and rotation/decryption behavior is tested. Configuration parity covers API, worker, local Compose, and blue/green Compose.
 
-References: [Axios GHSA-hfxv-24rg-xrqf](https://github.com/advisories/GHSA-hfxv-24rg-xrqf), [React Router GHSA-8x6r-g9mw-2r78](https://github.com/advisories/GHSA-8x6r-g9mw-2r78), [Preact GHSA-36hm-qxxp-pg3m](https://github.com/advisories/GHSA-36hm-qxxp-pg3m).
+# 3. Industry standards and patterns
 
-## SEC-3 — Long-lived bearer JWT is persisted in `localStorage`
+## STD-1 — Unlimited/unobservable DB pool
 
-**Severity:** High
+**Status: Resolved**
 
-Evidence:
+Maximum open/idle connections and lifetime/idle time are bounded and configurable. `database/sql` pool statistics are exported. The live API reported a 25-connection maximum.
 
-- `frontend/src/store/auth.ts` persists `token`, `user`, and authentication state through Zustand persistence under `pms.session`.
-- `backend/internal/user/service.go:638-645` issues a bearer JWT valid for 72 hours.
-- Logout only clears browser state; there is no server-side logout/session revocation endpoint.
-- No CSP is emitted by Caddy or frontend nginx.
+## STD-2 — Error classification by message text
 
-Impact: any XSS, compromised dependency, malicious browser extension with origin access, or same-origin application compromise can read and exfiltrate a token usable for up to 72 hours. The vulnerable frontend dependency inventory increases the importance of this design weakness.
+**Status: Resolved**
 
-OWASP explicitly recommends not storing session identifiers/JWTs in web storage because JavaScript can always read them. Prefer an `HttpOnly; Secure; SameSite` cookie or a BFF pattern: [OWASP HTML5 Security](https://cheatsheetseries.owasp.org/cheatsheets/HTML5_Security_Cheat_Sheet.html), [OWASP Session Management](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html).
+Core domains use stable error categories with `errors.Is/As`. A centralized serializer emits a consistent machine-readable envelope and request correlation without disclosing internal errors.
 
-Recommendation:
+## STD-3 — Mixed liveness/readiness
 
-- Use short-lived access sessions and rotating, hashed server-side refresh/session records.
-- Deliver the session in `HttpOnly; Secure; SameSite=Lax/Strict` cookies.
-- Add CSRF protection for state-changing cookie-authenticated requests.
-- Add logout-current-session, logout-all-sessions, device/session listing, and revocation.
-- Add `iss`, `aud`, `iat`, and `jti` validation and explicit parser options.
+**Status: Resolved**
 
-## SEC-4 — Mutable and unverified install/deploy supply chain
+`/health` is dependency-free. `/ready` uses bounded checks against the shared PostgreSQL and Redis clients and validates the required schema.
 
-**Severity:** High
+## STD-4 — Incomplete pagination
 
-Evidence:
+**Status: Resolved**
 
-- README recommends `curl .../deploy/install.sh | sh` from the mutable `main` branch.
-- `deploy/install.sh` defaults `PROGO_REF=main`, downloads a GitHub tarball, extracts it, and executes its scripts without a checksum or signature.
-- The installer defaults `IMAGE_TAG=main`, also mutable.
-- Docker base images use mutable tags rather than immutable digests.
-- The frontend builder runs unpinned `npm install -g pnpm`.
+List responses preserve array compatibility while exposing `Link` and `X-Pagination-*` metadata through CORS. Visible pagination exists for projects, invitations, users, audit events, activity, federation inbox/follows, local tickets, remote tickets, members, invites, comments, delivery administration, and remote actors. Member reference data drains all server pages rather than truncating assignee choices.
 
-Impact: a compromised repository/tag, registry account, DNS/TLS trust path, package publication, or unexpected tag update changes production code without an auditable release decision.
+## STD-5 — No optimistic concurrency
 
-Recommendation:
+**Status: Resolved**
 
-- Install only versioned releases or immutable commit SHAs.
-- Publish and verify SHA-256 checksums/signatures for deployment assets.
-- Deploy images by digest and record the digest in deployment state.
-- Pin pnpm via Corepack/packageManager and pin base images by digest, with automated digest-update PRs.
-- Avoid piping an unverified network response directly to a shell.
+Projects and tickets carry versions, mutation APIs require `If-Match`, stale mutations fail with precondition responses, and the UI sends current versions. Archive/restore uses the same concurrency model.
 
-Docker documents that tags are mutable and digests are required for fully reproducible integrity: [Docker build best practices](https://docs.docker.com/build/building/best-practices/).
+## STD-6 — Accessibility not gated
 
-## SEC-5 — OAuth authorization-code flows omit PKCE
+**Status: Resolved**
 
-**Severity:** Medium
+The board supports keyboard movement and explicit equivalent controls. Dialogs manage focus and Escape/restore behavior. Vitest includes axe checks; Playwright covers browser journeys and accessibility; localization guards prevent silent hardcoded regressions.
 
-The OAuth flow correctly uses a signed, expiring state value, an HttpOnly browser-binding cookie, fixed provider endpoints, and a one-time frontend exchange code. However, Google and GitHub authorization requests do not send a PKCE challenge, and token exchange does not send a verifier.
+## STD-7 — Weak frontend container hardening
 
-RFC 9700 recommends PKCE even for confidential web clients because it protects against authorization-code misuse and injection: [OAuth 2.0 Security Best Current Practice](https://datatracker.ietf.org/doc/rfc9700/).
+**Status: Resolved**
 
-Recommendation: add transaction-bound S256 PKCE for both providers. Store the verifier server-side or in a protected browser-bound transaction cookie and enforce one-time consumption.
+The frontend runs unprivileged with a read-only root filesystem, only required tmpfs mounts, all capabilities dropped, and `no-new-privileges`.
 
-## SEC-6 — Missing browser security headers
+## STD-8 — No dependency/security maintenance
 
-**Severity:** Medium
+**Status: Resolved**
 
-Neither `frontend/nginx.conf` nor generated Caddy configuration sets a Content Security Policy, `frame-ancestors`/X-Frame-Options, `X-Content-Type-Options`, `Referrer-Policy`, or HSTS.
+Automated vulnerability and dependency gates, pinned toolchains, Dependabot, race tests, and browser/build checks are part of CI.
 
-Impact: weaker defense in depth against XSS, clickjacking, MIME confusion, referrer leakage, and HTTPS downgrade on first contact.
+## STD-9 — Configuration drift
 
-Recommendation: set and test at least:
+**Status: Resolved to a practical enforceable contract**
 
-- `Content-Security-Policy` tailored to Vite assets, API/SSE connections, and required images;
-- `frame-ancestors 'none'` (and optionally `X-Frame-Options: DENY`);
-- `X-Content-Type-Options: nosniff`;
-- `Referrer-Policy: strict-origin-when-cross-origin`;
-- HSTS after confirming permanent HTTPS/domain readiness;
-- a restrictive `Permissions-Policy`.
+A typed configuration inventory and parity tests ensure every runtime environment field is represented in examples and all Compose roles. Blue/green duplication still exists by design, but drift is now test-detectable.
 
-Reference: [OWASP HTTP Security Response Headers](https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html).
+## STD-10 — API ergonomics
 
-## SEC-7 — Authentication throttling is IP-only
+**Status: Partially resolved — low/medium residual risk**
 
-**Severity:** Medium
+Errors, request IDs, pagination metadata, optimistic concurrency, generated frontend schemas, and typed contract calls are standardized. Residual improvements are a discoverable hosted OpenAPI documentation route and comprehensive live response-schema validation for every endpoint.
 
-Public auth endpoints share a per-IP token-bucket limiter. This is useful, Redis-backed in production, and proxy-aware. It does not track failed attempts by account/email, however, so distributed credential stuffing can rotate source IPs.
+# 4. Tests and coverage
 
-Recommendation: add account-aware progressive delays/lockout with careful anti-DoS limits, authentication event logging/alerts, and optional MFA. OWASP recommends associating failed-login counters with the account rather than only source IP: [OWASP Authentication](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html).
+## TEST-1 — Source-text-only frontend tests
 
-## SEC-8 — CI/CD trust hardening is incomplete
+**Status: Resolved**
 
-**Severity:** Medium
+The frontend now has rendered React behavior tests, axe accessibility checks, localization source analysis, and real Playwright journeys against the API/PostgreSQL stack. Source guards remain only for deliberate structural invariants.
 
-Evidence:
+## TEST-2 — Frontend absent from CI
 
-- GitHub Actions use mutable major tags such as `actions/checkout@v4`, `actions/setup-go@v5`, and Docker actions by major version.
-- Deployment populates `known_hosts` at run time with `ssh-keyscan`; this is trust on first use and does not authenticate the expected host key.
-- There is no CODEOWNERS protection shown for workflow/deploy files, no artifact attestation/SBOM, and no vulnerability scan before pushing/deploying images.
+**Status: Resolved**
 
-Recommendation:
+CI installs from the frozen lockfile, verifies generated API types, runs tests, lint, build, dependency audit, and browser E2E/accessibility.
 
-- Pin every third-party action to a reviewed full commit SHA.
-- Store the expected SSH host key/fingerprint as protected configuration and compare it.
-- Add least-privilege job-level permissions, workflow CODEOWNERS, image SBOM/provenance, and container scanning.
+## TEST-3 — Weak core data-path coverage
 
-GitHub states that a full-length commit SHA is the only immutable way to reference an action: [GitHub Actions secure use](https://docs.github.com/en/actions/reference/security/secure-use).
+**Status: Partially resolved — medium residual test risk**
 
-## SEC-9 — Frontend is unnecessarily attached to the federation network
+The original unit-only percentages understated repository confidence because real PostgreSQL integration tests were excluded. Merged coverage is now 56.3%, with core packages between 46.7% and 52.4%, and regression floors enforce those results.
 
-**Severity:** Medium
+Residual: unit-only coverage remains low in project, comment, label, account, activity-history, attachment, and portability repositories. More focused transaction/authorization tests would improve diagnosis speed and edge-case confidence even though the integration suite exercises the real schema.
 
-Both blue and green frontend containers join the external `federation` network. They only serve static assets and health responses; Caddy reaches them through localhost-published ports. Federation connectivity is unnecessary.
+## TEST-4 — Environment-sensitive architecture test
 
-Impact: compromise of the nginx/static container gives direct network reachability to federation-connected backends, potentially across multiple local instances.
+**Status: Resolved**
 
-Recommendation: remove frontend services from the federation network and place them on a narrowly scoped private/default network only if needed.
+Generated and temporary coverage trees are excluded and the scanner has regression tests.
 
-## SEC-10 — ActivityPub key encryption lacks rotation support
+## TEST-5 — No race, fuzz, load, or resilience tests
 
-**Severity:** Low/Medium
+**Status: Partially resolved — medium residual operational risk**
 
-Private keys are correctly encrypted with AES-GCM using random nonces. Ciphertext has only an `enc:v1:` marker; it has no key identifier or multi-key decrypt support. Replacing `ACTOR_PRIVATE_KEY_ENCRYPTION_KEY` therefore makes existing actor keys unreadable unless every row is re-encrypted atomically.
+Linux CI runs `-race`. Four untrusted-input fuzz targets run in CI. Concurrent realtime fanout, Redis outage bounds, database-readiness failure, delivery retry/recovery, webhook lease recovery, restore behavior, and federation failure states have deterministic tests.
 
-Recommendation: introduce key IDs, active/legacy decrypt keys, a rotation command, metrics for legacy-key usage, and a tested backup/restore procedure. Use a KMS or secret manager in higher-assurance deployments.
+Residual: there is no long-duration k6/Vegeta-style load profile, soak test, multi-replica chaos environment, or measured capacity target for SSE, inbox traffic, and database saturation.
 
-# 3. Deviations from current industry standards and patterns
+## TEST-6 — No coverage policy/trend
 
-## STD-1 — Database pool is unlimited and not observable
+**Status: Resolved**
 
-**Severity:** High reliability risk
+CI publishes unit and integration coverage profiles, enforces an aggregate floor, merges execution evidence, and enforces risk-based floors for project, ticket, comment, and notification packages.
 
-`sqlx.Connect` is used without `SetMaxOpenConns`, `SetMaxIdleConns`, `SetConnMaxLifetime`, or `SetConnMaxIdleTime`. Go's default maximum open connection count is unlimited: [database/sql documentation](https://pkg.go.dev/database/sql#DB.SetMaxOpenConns).
+## TEST-7 — Partial/self-referential OpenAPI checks
 
-Impact: concurrent requests/SSE-related work/background delivery can create enough database connections to exhaust PostgreSQL, the host, or network resources. There are no exported `DB.Stats()` pool metrics.
+**Status: Partially resolved — low/medium residual contract risk**
 
-Recommendation: make pool limits/configuration explicit, size them against PostgreSQL capacity and replica count, configure connection lifetimes, expose pool metrics, and alert on waits/exhaustion.
+Runtime routes are compared with OpenAPI, generated TypeScript freshness is enforced, and important DTOs are validated. Full request/response schema validation is still not automatic for every handler and status code.
 
-## STD-2 — Error classification relies on message substrings
+## TEST-8 — Deployment safety untested
 
-**Severity:** Medium
+**Status: Resolved**
 
-At least 12 handler branches use patterns such as `strings.Contains(err.Error(), "insufficient permissions")`, `"not found"`, and `"already"` to select HTTP status codes.
+CI validates scripts and Compose, starts disposable infrastructure, creates a verified backup, mutates data, runs the guarded restore, and checks the restored value. The local isolated drill additionally confirmed database, attachment, migration, and readiness recovery.
 
-Impact: rewording or wrapping an error can silently change a 403/404/409 into another response. It also spreads domain-to-HTTP mapping across handlers.
+# 5. Expected project features
 
-Recommendation: define typed/sentinel domain errors with stable codes, use `errors.Is/As`, and centralize translation to a consistent error envelope such as Problem Details (`application/problem+json`).
+## FEAT-1 — Account recovery and verified identity
 
-## STD-3 — Health and readiness semantics are mixed
+**Status: Implemented**
 
-**Severity:** Medium
+Forgot/reset password, local email verification/resend, enumeration-resistant responses, session inventory/revocation, MFA and recovery codes, security-event history, email outbox delivery, and offline owner recovery are present. Privileged accounts are restricted until MFA enrollment.
 
-`/health` performs an unbounded `db.Ping()` and returns 500 when PostgreSQL is unavailable. A liveness probe should normally answer whether the process/event loop is alive; dependency failure belongs in readiness. Otherwise an orchestrator can restart healthy application processes during a database outage and amplify the incident.
+## FEAT-2 — Labels/tags
 
-`/ready` is better: it uses a two-second context and checks schema plus Redis. It creates a new Redis client on every readiness request instead of reusing the existing client.
+**Status: Implemented**
 
-Recommendation:
+Project-scoped label CRUD, ticket assignment, validation, indexes, UI management, and board/detail display are complete.
 
-- Make `/health` a cheap in-process liveness response.
-- Keep dependency checks in `/ready` with explicit bounded timeouts.
-- Reuse initialized clients and expose degraded dependency details only as appropriate.
+## FEAT-3 — Search and usable pagination
 
-## STD-4 — Pagination contract is incomplete and the frontend effectively disables it
+**Status: Implemented**
 
-**Severity:** High scalability/product risk
+Tickets use indexed PostgreSQL full-text search. Operational list screens expose real pagination and boundary metadata.
 
-The backend accepts `limit`/`offset`, but most list responses are raw arrays with no `total`, `next`, cursor, or pagination metadata. The frontend nearly always requests offset 0 with hardcoded limits of 100, 200, or 500 and exposes no next/previous/load-more control.
+## FEAT-4 — Due dates/scheduling baseline
 
-Impact: records past the cap become invisible, while increasing caps shifts the problem into slow responses and large browser state. Offset pagination also becomes inconsistent on frequently changing feeds.
+**Status: Implemented**
 
-Recommendation: use a standard paginated envelope and cursor pagination for ordered feeds. Add visible pagination/infinite loading and tests covering the boundary past the first page.
+Tickets support due dates, clearing/updating them, indexes, forms, board display, and due/overdue notification dispatch. Sprints and milestones remain optional scope enhancements, not baseline blockers.
 
-## STD-5 — No optimistic concurrency for collaborative edits
+## FEAT-5 — Activity history
 
-**Severity:** Medium
+**Status: Implemented**
 
-Projects and tickets have timestamps but update APIs do not require an expected version/ETag. Concurrent editors use last-write-wins and can silently overwrite one another; realtime invalidation does not prevent the race.
+Project/ticket lifecycle and changes produce user-visible, paginated activity records with actor context.
 
-Recommendation: add a row version or `updated_at` precondition, return ETags, accept `If-Match`, and respond 409/412 on stale updates. The UI should offer refresh/merge behavior.
+## FEAT-6 — Attachments
 
-## STD-6 — Accessibility is not a quality gate
+**Status: Implemented**
 
-**Severity:** Medium
+Ticket attachments have bounded upload, filename/content validation, hashes, authorization, local object storage, orphan cleanup, optional ClamAV scanning, download controls, UI, and integration tests.
 
-The Kanban board configures only `PointerSensor`; dnd-kit keyboard sensors and sortable keyboard coordinates are absent. A button has `aria-label="Drag ticket"`, but keyboard users cannot perform the equivalent movement. There are no axe/Playwright/accessibility tests and very few explicit ARIA live/relationship attributes.
+## FEAT-7 — Notifications
 
-Recommendation: implement keyboard drag/reorder or equivalent move controls, focus management, live announcements, and automated axe checks plus manual screen-reader/keyboard verification.
+**Status: Implemented baseline**
 
-## STD-7 — Frontend container hardening trails backend hardening
+Assignment, due-soon, overdue, mentions/comments, invitations, federation failure, and security events are supported, with per-type in-app/email preferences and durable email dispatch. Additional product-specific events can be added without changing the architecture.
 
-**Severity:** Low/Medium
+## FEAT-8 — Archive/restore
 
-The backend final image uses a non-root user, read-only filesystem, tmpfs, and `no-new-privileges`. The nginx frontend image has no `USER`, is not read-only in Compose, and does not drop capabilities. Database/Redis/migration images are also tag-based and unpinned.
+**Status: Implemented**
 
-Recommendation: use an unprivileged nginx image/config, read-only root filesystem, writable tmpfs only where needed, `cap_drop: [ALL]`, and immutable digests.
+Projects and tickets support versioned archive/restore workflows and dedicated archived views. Hard deletion remains an explicit privileged destructive action.
 
-## STD-8 — No automated dependency/security maintenance
+## FEAT-9 — Owner onboarding/recovery
 
-**Severity:** High
+**Status: Implemented**
 
-CI runs backend tests/vet/integration only. It does not run frontend tests/lint/build, `govulncheck`, `pnpm audit`, CodeQL/static analysis, secret scanning, container scanning, SBOM generation, or dependency update automation.
+CLI creation remains the secure bootstrap boundary. The frontend guides privileged enrollment, the installer/runbook documents first login, the last owner cannot be demoted, and offline owner recovery revokes sessions and can reset MFA.
 
-Recommendation: treat these as merge/deploy gates, with documented exceptions for advisories proven unreachable.
+## FEAT-10 — Backup lifecycle
 
-## STD-9 — Configuration is powerful but drift-prone
+**Status: Implemented**
 
-**Severity:** Medium
+Backups include PostgreSQL and attachments, checksums, retention, optional off-host copy, optional age encryption, mandatory pre-restore safety backup, guarded restore confirmation, migration replay, and automated restore verification.
 
-Configuration exists in YAML, environment variables, `.env`, pmsctl generation/export code, local Compose, instance Compose, and duplicated blue/green service blocks. This is useful for install compatibility but creates many representations of the same fields.
+## FEAT-11 — Import/export and portability
 
-Recommendation: define one typed configuration schema, generate example YAML/env documentation and Compose fragments where possible, and add parity tests proving every production field reaches API and worker roles.
+**Status: Implemented**
 
-## STD-10 — API ergonomics are inconsistent
+Versioned project and user export, project import, and ticket import are exposed through API and UI.
 
-**Severity:** Medium
+## FEAT-12 — API credentials and outbound webhooks
 
-- Errors are mostly `{ "error": "..." }` but mapping and disclosure vary by handler.
-- Lists are raw arrays with ad hoc pagination.
-- OpenAPI is static and not exposed through a discoverable documentation route.
-- Frontend types/client are handwritten rather than contract-generated.
-- Some update endpoints return no updated representation while others do.
+**Status: Implemented**
 
-Recommendation: standardize errors, pagination, idempotency expectations, update responses, and request correlation. Generate client types and publish versioned API documentation.
+Users can create/revoke expiring scoped API tokens. Projects can manage signed outbound webhooks with event selection, encrypted secrets, durable deliveries, retries, stale-lease recovery, and delivery inspection.
 
-# 4. Tests and coverage review
+## FEAT-13 — Localization
 
-## Coverage result
+**Status: Implemented and gated**
 
-Measured backend statement coverage:
+English/Ukrainian coverage includes account, administration, federation, project, ticket, delivery, and integration surfaces. Dates/numbers use locale-aware helpers, catalogs have parity tests, and an AST source guard rejects untranslated user-facing strings.
 
-| Package | Coverage |
-|---|---:|
-| Total | **38.5%** |
-| `internal/project` | **13.5%** |
-| `internal/comment` | **14.6%** |
-| `internal/notification` | **15.1%** |
-| `internal/ticket` | **22.4%** |
-| `internal/activitypub` | **23.8%** |
-| `cmd/api` | **28.9%** |
-| `internal/githubintegration` | **28.6%** |
-| `internal/activitypub/federation` | **38.6%** |
-| `internal/user` | **40.5%** |
-| `internal/activitypub/remoteinbox` | **43.7%** |
-| `internal/activitypub/httpsig` | 70.7% |
-| `internal/config` | 71.4% |
-| `internal/middleware` | 78.7% |
-| `internal/lexorank` | 84.7% |
-| `internal/activitypub/domainblock` | 87.1% |
+## FEAT-14 — Accessibility
 
-Coverage is not a quality score by itself, but 13-22% in the central business domains means many failure, authorization, transaction, and data-shape paths are not exercised by the default suite.
+**Status: Implemented baseline and gated**
 
-## TEST-1 — Frontend tests are source-text assertions, not application tests
+Keyboard board interaction, explicit movement controls, focus-managed dialogs, accessible labels, route loading states, axe checks, and real-browser accessibility coverage are present. Manual screen-reader testing remains a release practice rather than something source code can prove.
 
-**Severity:** Critical test gap
+# Current remaining work
 
-All eight tests in `frontend/tests/frontend-contract.test.mjs` read source files and assert that strings are present or absent. Examples include checking that `api.ts` contains route fragments, a page contains a polling constant, or CSS contains `html.dark`.
+No original critical/high release blocker remains. Recommended follow-up, in order:
 
-These tests can pass when:
+1. Split the five remaining 1,000+ line handwritten Go files by cohesive responsibility.
+2. Add automatic live request/response schema validation or generate the Go server boundary from OpenAPI.
+3. Increase focused repository/transaction tests beyond the current merged floors.
+4. Establish capacity targets and long-duration load/soak/chaos tests for SSE, federation inboxes, Redis loss, and PostgreSQL saturation.
+5. Publish a discoverable versioned API documentation route.
+6. Before a public launch, run an external penetration test, real federation interoperability campaign, and operator exercise with production SMTP, ClamAV, TLS, monitoring alerts, and encrypted off-host backup credentials.
 
-- the UI crashes at render time;
-- the route is inaccessible;
-- a button is not clickable;
-- the API payload is wrong;
-- authentication persistence is broken;
-- mutations fail to invalidate data;
-- drag/drop is inaccessible;
-- the copied string exists only in dead code or a comment.
+## Final conclusion
 
-Recommendation:
+The remediation changed the project from an ambitious but uneven diploma-scale system into a broad, security-conscious full-stack platform with credible operational safeguards. Its strongest areas are now federation security, identity/session controls, baseline PM completeness, typed API contracts, deployment recovery, and live observability.
 
-- Add Vitest + React Testing Library for components/hooks.
-- Add MSW-backed integration tests for auth, project, ticket, permission, invitation, and error flows.
-- Add Playwright end-to-end tests against real API/PostgreSQL for the critical journey.
-- Keep a small number of source/contract guards only where they enforce a deliberate invariant.
-
-## TEST-2 — CI never runs frontend quality checks
-
-**Severity:** Critical process gap
-
-`.github/workflows/ci.yml` contains only backend test, vet, and integration steps. A pull request can merge with broken TypeScript, lint failures, failing frontend tests, a failed Vite build, or known production dependency vulnerabilities. The deploy workflow discovers some build failures only after CI has already succeeded.
-
-Recommendation: add a frontend CI job using frozen lockfile install, test, typecheck, lint, build, and audit. Make deploy depend on the complete CI result.
-
-## TEST-3 — Core data paths have low coverage despite many tests
-
-**Severity:** High
-
-There are 371 backend test functions, but most repositories have no focused repository test file. Repository behavior is covered indirectly by a large integration package, while unit tests often use mocks. The huge production repositories account for much of the low coverage.
-
-Recommendation: prioritize transaction/constraint tests for project roles, invites, concurrent ticket movement, GitHub webhook idempotency, notifications, pagination boundaries, and authorization—not superficial line coverage.
-
-## TEST-4 — The architecture test is environment-sensitive
-
-**Severity:** Medium
-
-Coverage initially failed because `.gotmp/*.cover.go` files were scanned as production source. This is a confirmed false positive, not a hypothetical concern.
-
-Recommendation: fix the scanner and add a regression test with generated/cache directories.
-
-## TEST-5 — No race, fuzz, load, or resilience suite
-
-**Severity:** High for a concurrent/federated service
-
-Evidence:
-
-- CI does not use `go test -race`.
-- There are zero fuzz tests and zero benchmarks.
-- No load test exercises auth limiting, inbox limits, graph bounds, SSE subscriber behavior, or database pool pressure.
-- No chaos/resilience test covers Redis loss, PostgreSQL loss, delivery retry/recovery, Caddy switch failure, or partial federation failure.
-
-Recommendation:
-
-- Run unit packages with `-race` in Linux CI.
-- Fuzz ActivityPub/JSON-LD parsing, HTTP signature structured-field parsing, URLs/domains, OAuth state, and webhook payloads.
-- Add bounded load tests for public endpoints and SSE.
-- Add failure-injection tests for queue/database/network transitions.
-
-## TEST-6 — No coverage policy or trend
-
-**Severity:** Medium
-
-CI does not collect or publish coverage and has no floor. A successful `go test` therefore hides a 38.5% result and very low core-package coverage.
-
-Recommendation: publish coverage artifacts and set risk-based package floors. Do not chase 100%; require meaningful coverage for authorization, transactions, parsers, and core workflows.
-
-## TEST-7 — OpenAPI checks are partial and self-referential
-
-**Severity:** Medium
-
-The route contract test checks a manually maintained list against the manually maintained OpenAPI document. It does not derive the complete route set from the running Echo router, nor validate frontend request/response behavior.
-
-Recommendation: compare normalized runtime routes to OpenAPI automatically and run schema-based request/response contract tests.
-
-## TEST-8 — Deployment safety is untested
-
-**Severity:** High operational risk
-
-There are source-string assertions for a few deploy properties, but no disposable-VM/container test of install, upgrade, failed migration, failed health check, rollback, backup restore, secret preservation, or two consecutive upgrades.
-
-Recommendation: test deployment scripts in an ephemeral Linux VM or nested test environment and perform scheduled restore drills.
-
-# 5. Missing features for this kind of project
-
-Not every Jira/GitHub/Linear feature is required. The list below separates baseline gaps from scope-dependent enhancements.
-
-## Baseline release blockers
-
-### FEAT-1 — Account recovery and verified identity
-
-Missing:
-
-- forgot/reset password flow;
-- local email verification;
-- resend verification;
-- recovery after lost OAuth access;
-- session/device management;
-- MFA for owner/admin accounts.
-
-Why required: users can permanently lose access, public registration accepts unverified email ownership, and privileged accounts have only one factor. A secure recovery flow should use single-use expiring tokens and enumeration-resistant responses: [OWASP Forgot Password](https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html).
-
-### FEAT-2 — Labels/tags
-
-The database schema already contains labels and ticket-label joins, but the feature is absent end to end.
-
-Why required: labels are a basic cross-cutting classification mechanism and are especially important because status, priority, and type are fixed enums.
-
-### FEAT-3 — Ticket search and usable pagination
-
-Backend ticket filters include assignee/status/priority/type but no text search. Frontend lists request only the first capped page.
-
-Why required: projects become unusable as soon as they exceed the hardcoded limits. Add indexed search and cursor pagination before claiming scalable project management.
-
-### FEAT-4 — Due dates and scheduling
-
-Tickets have no due date, start date, estimate, milestone, or sprint association.
-
-Why required: without at least a due date, the system tracks state but cannot manage delivery time or overdue work.
-
-### FEAT-5 — Change/activity history
-
-There is admin audit and ActivityPub history, but no user-facing ticket/project history showing who changed title, status, priority, assignee, role, or links.
-
-Why required: collaborative work needs accountability, debugging, and recovery from accidental changes. Federation makes provenance even more important.
-
-### FEAT-6 — Attachments
-
-There is no attachment/file model, upload API, storage backend, malware/content validation, or UI.
-
-Why required: real tickets commonly need screenshots, specifications, and evidence. If intentionally excluded, document external-link-only scope.
-
-### FEAT-7 — Complete notifications
-
-The only database notification type is `ticket.assigned`. Missing events include comments, mentions, status changes, invitations, due/overdue items, role changes, federation failures, and admin/security events. There are no email notifications or preference controls.
-
-Why required: users cannot depend on the product without continuously polling boards.
-
-### FEAT-8 — Archive/restore and safe deletion
-
-Projects and tickets are hard-deleted, with cascading database effects and federation tombstones. There is no archive, recycle bin, retention window, restore, or user-facing export before deletion.
-
-Why required: accidental deletion is inevitable in collaborative systems; database backups are not a usable per-item recovery mechanism.
-
-## Strongly expected before a public production release
-
-### FEAT-9 — Owner onboarding and operational recovery
-
-The first owner can only be created with `pmsctl`. That is secure and avoids a public bootstrap endpoint, but the product needs clearer installer output, first-login guidance, owner recovery/runbook, and validation that at least one owner remains.
-
-### FEAT-10 — Backup lifecycle
-
-Deploy creates SQL backups but has no retention, off-host copy, encryption policy, restore command, or automated restore verification.
-
-### FEAT-11 — Import/export and data portability
-
-There is no project export/import, user data export, or bulk ticket import. This is important for adoption and disaster recovery, especially for a federated product.
-
-### FEAT-12 — API/service credentials and outbound webhooks
-
-The system has user JWTs and inbound GitHub webhooks but no scoped API tokens/service accounts, general outbound webhooks, or integration management. Automation currently depends on browser/user credentials or direct database/CLI access.
-
-### FEAT-13 — Consistent localization
-
-English/Ukrainian infrastructure exists, but many feature/admin strings remain hardcoded English. Localization is not complete or tested for missing keys, overflow, pluralization, and dates.
-
-### FEAT-14 — Accessibility completion
-
-Keyboard-equivalent board movement, focus behavior, screen-reader announcements, contrast checks, reduced motion, and automated accessibility tests are missing.
-
-## Scope-dependent enhancements, not immediate blockers
-
-- milestones, sprints, backlog planning, and roadmap views;
-- estimates, time tracking, workload/capacity, and reports;
-- custom fields and configurable workflows/statuses;
-- saved filters/views and bulk editing;
-- organizations/teams across projects;
-- SAML/OIDC enterprise SSO and directory provisioning;
-- calendar, email, Slack/Teams, and more source-control integrations;
-- advanced graph analytics and pipeline automation.
-
-These should not be prioritized ahead of the baseline gaps unless they are explicit thesis/product requirements.
-
-# Ordered remediation plan
-
-## P0 — Before the next production deployment
-
-1. Pin Go to 1.26.5 or 1.25.12 consistently in CI and Docker; add `govulncheck`.
-2. Upgrade the frontend dependency graph until production audit has no unresolved high advisories; document any unreachable exceptions.
-3. Add a full frontend CI job: frozen install, behavioral tests, typecheck, lint, build, and audit.
-4. Replace persistent 72-hour localStorage bearer sessions with a secure server-managed cookie/session design, or at minimum sharply reduce lifetime while implementing the migration.
-5. Add CSP and baseline security headers.
-6. Make release/install artifacts immutable and verifiable; stop defaulting production install to mutable `main` assets/images.
-
-## P1 — Next stabilization iteration
-
-1. Configure/observe DB pool limits and correct health/readiness semantics.
-2. Replace string-matched errors with typed errors and a standard error envelope.
-3. Add account-aware auth throttling, auth event audit/alerts, PKCE, and privileged-account MFA.
-4. Remove frontend containers from the federation network; harden the frontend container.
-5. Add real frontend component/integration/E2E tests and Linux race tests.
-6. Fix the brittle architecture test and add coverage reporting/floors.
-7. Implement labels, ticket search, and actual pagination.
-8. Add password reset/local email verification/session management.
-
-## P2 — Product completeness
-
-1. Add due dates, activity history, attachments, richer notifications, and archive/restore.
-2. Refactor oversized backend/frontend files and shared local/remote workspace logic.
-3. Generate clients/types from the API contract.
-4. Add optimistic concurrency for edits.
-5. Test installer/upgrade/rollback/restore in ephemeral infrastructure.
-6. Add backup retention, off-host encrypted copies, and restore drills.
-
-## P3 — Only after the baseline is stable
-
-Add sprints/milestones, reporting, custom workflows, integrations, advanced graph analytics, and automation according to actual user requirements.
-
-# Final conclusion
-
-The project demonstrates strong technical ambition and some genuinely mature security work, especially around federation. Its biggest weakness is prioritization and verification: complex distributed features are better engineered than the ordinary account, frontend, dependency, and project-management paths most users depend on.
-
-The correct next move is a stabilization release, not another advanced feature. Patch the toolchains and dependencies, redesign browser sessions, put the frontend into CI with real behavior tests, bound database resources, and complete the baseline PM/account lifecycle. After that, federation becomes a credible differentiator instead of a complexity multiplier sitting on an insecure and partially tested foundation.
+The remaining weaknesses are no longer missing fundamentals. They are engineering-depth issues: several large modules, incomplete automatic schema enforcement, moderate rather than deep repository coverage, and the absence of sustained capacity/chaos evidence. Those should be tracked as the next hardening cycle, not represented as already solved.
