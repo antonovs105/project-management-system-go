@@ -98,6 +98,12 @@ func TestAccountSecurityLifecycleAgainstPostgreSQL(t *testing.T) {
 	events, err := service.ListAuthEvents(ctx, created.ID)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(events), 4)
+	var securityAlerts int
+	require.NoError(t, db.Get(&securityAlerts, `
+		SELECT count(*) FROM email_outbox
+		WHERE recipient = $1 AND subject IN ('New sign-in', 'Password changed', 'Multi-factor authentication enabled')
+	`, email))
+	require.GreaterOrEqual(t, securityAlerts, 3)
 }
 
 // integrationTOTP calculates the six-digit code used by the account service.

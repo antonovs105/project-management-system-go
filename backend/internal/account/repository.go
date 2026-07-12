@@ -75,6 +75,15 @@ func (r *Repository) ReplaceToken(ctx context.Context, userID, purpose, tokenHas
 	return tx.Commit()
 }
 
+// QueueEmail durably appends a non-token transactional message.
+func (r *Repository) QueueEmail(ctx context.Context, recipient, subject, body string) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO email_outbox (recipient, subject, text_body)
+		VALUES ($1, $2, $3)
+	`, recipient, subject, body)
+	return err
+}
+
 // ConsumeEmailVerification consumes a valid challenge and marks the email verified.
 func (r *Repository) ConsumeEmailVerification(ctx context.Context, tokenHash string, now time.Time) (string, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)

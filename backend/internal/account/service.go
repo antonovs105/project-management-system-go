@@ -138,11 +138,17 @@ func (s *Service) ResetPassword(ctx context.Context, token, password string, cli
 	if err != nil {
 		return err
 	}
-	_, err = s.repository.ConsumePasswordReset(ctx, hashToken(token), string(hash), time.Now().UTC(), client)
+	userID, err := s.repository.ConsumePasswordReset(ctx, hashToken(token), string(hash), time.Now().UTC(), client)
 	if IsNotFound(err) {
 		return ErrInvalidToken
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	if err := s.queueSecurityAlert(ctx, userID, "Password changed", "Your password was reset and all existing sessions were revoked."); err != nil {
+		log.Printf("queue password reset alert: %v", err)
+	}
+	return nil
 }
 
 // CreateSession persists a server-visible session and returns its identifier.
@@ -150,6 +156,9 @@ func (s *Service) CreateSession(ctx context.Context, userID string, client Clien
 	sessionID := uuid.NewString()
 	if err := s.repository.CreateSession(ctx, sessionID, userID, client, time.Now().UTC().Add(sessionLifetime)); err != nil {
 		return "", err
+	}
+	if err := s.queueSecurityAlert(ctx, userID, "New sign-in", fmt.Sprintf("A new session signed in from %s using %s.", client.IPAddress, client.UserAgent)); err != nil {
+		log.Printf("queue new session alert: %v", err)
 	}
 	return sessionID, nil
 }
@@ -245,6 +254,9 @@ func (s *Service) ConfirmMFA(ctx context.Context, userID, code string, client Cl
 	if err := s.repository.EnableMFA(ctx, userID, hashes, client); err != nil {
 		return MFARecoveryCodes{}, err
 	}
+	if err := s.queueSecurityAlert(ctx, userID, "Multi-factor authentication enabled", "TOTP multi-factor authentication was enabled for your account."); err != nil {
+		log.Printf("queue MFA enabled alert: %v", err)
+	}
 	return MFARecoveryCodes{RecoveryCodes: codes}, nil
 }
 
@@ -282,7 +294,13 @@ func (s *Service) DisableMFA(ctx context.Context, userID, code string, client Cl
 	if IsNotFound(err) {
 		return ErrMFANotConfigured
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	if err := s.queueSecurityAlert(ctx, userID, "Multi-factor authentication disabled", "TOTP multi-factor authentication was disabled for your account."); err != nil {
+		log.Printf("queue MFA disabled alert: %v", err)
+	}
+	return nil
 }
 
 // HasMFA reports whether an account is safe to promote to a privileged role.
@@ -369,6 +387,15 @@ func (s *Service) queueChallenge(ctx context.Context, userID, email, purpose str
 		log.Printf("development account link recipient=%s purpose=%s url=%s", email, purpose, link)
 	}
 	return s.repository.ReplaceToken(ctx, userID, purpose, hashToken(token), email, subject, body, time.Now().UTC().Add(ttl))
+}
+
+// queueSecurityAlert writes a durable email alert for a sensitive account event.
+func (s *Service) queueSecurityAlert(ctx context.Context, userID, subject, body string) error {
+	email, _, err := s.repository.UserEmail(ctx, userID)
+	if err != nil {
+		return err
+	}
+	return s.repository.QueueEmail(ctx, email, subject, body)
 }
 
 // randomToken creates a URL-safe cryptographically random value.
