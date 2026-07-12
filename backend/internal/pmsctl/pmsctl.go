@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/antonovs105/project-management-system-go/internal/account"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteactor"
 	appconfig "github.com/antonovs105/project-management-system-go/internal/config"
@@ -18,6 +19,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Runner executes pmsctl commands with injectable IO and side effects.
@@ -31,6 +33,7 @@ type Runner struct {
 	FileExists          func(path string) (bool, error)
 	GenerateSecret      func(byteCount int) (string, error)
 	CreateOwner         func(ctx context.Context, options OwnerCreateOptions) (*user.User, error)
+	RecoverOwner        func(ctx context.Context, options OwnerRecoverOptions) (*account.OwnerRecoveryResult, error)
 	DiscoverRemoteActor func(ctx context.Context, options FederationDiscoverOptions) (*remoteactor.Actor, error)
 	FollowRemoteActor   func(ctx context.Context, options FederationFollowOptions) (*FederationFollowResult, error)
 	AcceptProjectFollow func(ctx context.Context, options FederationAcceptFollowOptions) (*FederationAcceptFollowResult, error)
@@ -42,6 +45,15 @@ type OwnerCreateOptions struct {
 	Username string
 	Email    string
 	Password string
+}
+
+// OwnerRecoverOptions carries confirmed offline owner-recovery input.
+type OwnerRecoverOptions struct {
+	EnvFile         string
+	Username        string
+	ConfirmUsername string
+	Password        string
+	ResetMFA        bool
 }
 
 // RuntimeConfig is the environment needed for DB-backed maintenance commands.
@@ -131,6 +143,9 @@ func (r *Runner) withDefaults() {
 	if r.CreateOwner == nil {
 		r.CreateOwner = createOwner
 	}
+	if r.RecoverOwner == nil {
+		r.RecoverOwner = recoverOwner
+	}
 	if r.DiscoverRemoteActor == nil {
 		r.DiscoverRemoteActor = discoverRemoteActor
 	}
@@ -214,6 +229,8 @@ func (r *Runner) runOwner(ctx context.Context, args []string) int {
 	switch args[0] {
 	case "create":
 		return r.runOwnerCreate(ctx, args[1:])
+	case "recover":
+		return r.runOwnerRecover(ctx, args[1:])
 	case "help", "-h", "--help":
 		r.printOwnerUsage()
 		return 0
@@ -222,6 +239,80 @@ func (r *Runner) runOwner(ctx context.Context, args []string) int {
 		r.printOwnerUsage()
 		return 2
 	}
+}
+
+// runOwnerRecover parses and executes an explicitly confirmed offline reset.
+func (r *Runner) runOwnerRecover(ctx context.Context, args []string) int {
+	fs := flag.NewFlagSet("pmsctl owner recover", flag.ContinueOnError)
+	fs.SetOutput(r.Stderr)
+	envFile := fs.String("env-file", defaultEnvFile, "environment file to load before connecting")
+	username := fs.String("username", "", "existing owner username")
+	confirmUsername := fs.String("confirm-username", "", "repeat the owner username to confirm the reset")
+	passwordStdin := fs.Bool("password-stdin", false, "read the replacement password from stdin")
+	resetMFA := fs.Bool("reset-mfa", false, "remove the owner's existing MFA credential")
+	fs.Usage = func() {
+		fmt.Fprintln(r.Stderr, "Usage: pmsctl owner recover --username USER --confirm-username USER --password-stdin [--reset-mfa]")
+		fs.PrintDefaults()
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(r.Stderr, "unexpected arguments: %s\n\n", strings.Join(fs.Args(), " "))
+		fs.Usage()
+		return 2
+	}
+	if !*passwordStdin {
+		fmt.Fprintln(r.Stderr, "--password-stdin is required; replacement passwords are never accepted as command-line arguments")
+		return 2
+	}
+	raw, err := io.ReadAll(r.Stdin)
+	if err != nil {
+		fmt.Fprintf(r.Stderr, "failed to read password from stdin: %v\n", err)
+		return 1
+	}
+	options := OwnerRecoverOptions{
+		EnvFile:         strings.TrimSpace(*envFile),
+		Username:        strings.TrimSpace(*username),
+		ConfirmUsername: strings.TrimSpace(*confirmUsername),
+		Password:        strings.TrimRight(string(raw), "\r\n"),
+		ResetMFA:        *resetMFA,
+	}
+	if err := validateOwnerRecoverOptions(options); err != nil {
+		fmt.Fprintf(r.Stderr, "%v\n\n", err)
+		fs.Usage()
+		return 2
+	}
+	if err := r.LoadEnvFile(options.EnvFile); err != nil {
+		fmt.Fprintf(r.Stderr, "failed to load env file: %v\n", err)
+		return 1
+	}
+
+	recovered, err := r.RecoverOwner(ctx, options)
+	if err != nil {
+		if account.IsNotFound(err) {
+			fmt.Fprintln(r.Stderr, "owner not found")
+			return 1
+		}
+		fmt.Fprintf(r.Stderr, "failed to recover owner: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(r.Stdout, "owner_recovered id=%s username=%s sessions_revoked=true mfa_reset=%t\n", recovered.UserID, recovered.Username, recovered.MFAReset)
+	return 0
+}
+
+func validateOwnerRecoverOptions(options OwnerRecoverOptions) error {
+	if options.Username == "" {
+		return errors.New("missing required option: --username")
+	}
+	if options.ConfirmUsername != options.Username {
+		return errors.New("--confirm-username must exactly match --username")
+	}
+	if err := user.ValidatePassword(options.Password); err != nil {
+		return fmt.Errorf("invalid replacement password: %w", err)
+	}
+	return nil
 }
 
 // runOwnerCreate parses input and creates the first owner account.
@@ -356,6 +447,26 @@ func createOwner(ctx context.Context, options OwnerCreateOptions) (*user.User, e
 	return service.BootstrapAdmin(ctx, options.Username, options.Email, options.Password)
 }
 
+func recoverOwner(ctx context.Context, options OwnerRecoverOptions) (*account.OwnerRecoveryResult, error) {
+	cfg, err := LoadRuntimeConfig()
+	if err != nil {
+		return nil, err
+	}
+	db, err := sqlx.Open("postgres", cfg.DBSource)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	if err := db.PingContext(ctx); err != nil {
+		return nil, err
+	}
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(options.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+	return account.NewRepository(db).RecoverOwnerCredentials(ctx, options.Username, string(passwordHash), options.ResetMFA)
+}
+
 // LoadRuntimeConfig reads and validates the environment shared by API and CLI commands.
 func LoadRuntimeConfig() (RuntimeConfig, error) {
 	cfg, err := appconfig.Load()
@@ -380,6 +491,7 @@ func (r *Runner) printRootUsage() {
 	fmt.Fprintln(r.Stderr)
 	fmt.Fprintln(r.Stderr, "Commands:")
 	fmt.Fprintln(r.Stderr, "  owner create    Create the first local owner account")
+	fmt.Fprintln(r.Stderr, "  owner recover   Reset an existing owner's offline credentials")
 	fmt.Fprintln(r.Stderr, "  federation      Discover and send local federation activities")
 	fmt.Fprintln(r.Stderr, "  config init     Create an interactive runtime configuration")
 	fmt.Fprintln(r.Stderr, "  config validate Validate runtime configuration")
@@ -391,6 +503,7 @@ func (r *Runner) printOwnerUsage() {
 	fmt.Fprintln(r.Stderr)
 	fmt.Fprintln(r.Stderr, "Commands:")
 	fmt.Fprintln(r.Stderr, "  create          Create the first local owner account")
+	fmt.Fprintln(r.Stderr, "  recover         Reset an existing owner's password and optionally MFA")
 }
 
 // printConfigUsage writes configuration command help.

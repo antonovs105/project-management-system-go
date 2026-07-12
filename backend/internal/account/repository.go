@@ -16,9 +16,68 @@ type Repository struct {
 	db *sqlx.DB
 }
 
+// OwnerRecoveryResult identifies the owner account changed by offline recovery.
+type OwnerRecoveryResult struct {
+	UserID   string `db:"user_id"`
+	Username string `db:"username"`
+	MFAReset bool   `db:"-"`
+}
+
 // NewRepository returns a PostgreSQL account-security repository.
 func NewRepository(db *sqlx.DB) *Repository {
 	return &Repository{db: db}
+}
+
+// RecoverOwnerCredentials performs an offline break-glass credential reset.
+// It accepts owner accounts only, revokes all sessions and reset challenges,
+// and leaves a durable security event. Callers must already control the
+// database-backed maintenance environment.
+func (r *Repository) RecoverOwnerCredentials(ctx context.Context, username, passwordHash string, resetMFA bool) (*OwnerRecoveryResult, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var result OwnerRecoveryResult
+	err = tx.GetContext(ctx, &result, `
+		SELECT id::text AS user_id, username
+		FROM users
+		WHERE lower(username) = lower($1) AND instance_role = 'owner'
+		FOR UPDATE
+	`, username)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE users
+		SET password_hash = $2, token_version = token_version + 1, updated_at = now()
+		WHERE id = $1
+	`, result.UserID, passwordHash); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE user_sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`, result.UserID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE account_tokens SET consumed_at = now() WHERE user_id = $1 AND consumed_at IS NULL`, result.UserID); err != nil {
+		return nil, err
+	}
+	if resetMFA {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM user_mfa_credentials WHERE user_id = $1`, result.UserID); err != nil {
+			return nil, err
+		}
+		result.MFAReset = true
+	}
+	if err := insertAuthEvent(ctx, tx, result.UserID, "owner.recovered", ClientInfo{UserAgent: "pmsctl"}, map[string]any{
+		"mfa_reset": resetMFA,
+		"source":    "offline_maintenance",
+	}); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 // FindUserByEmail returns recovery-safe identity details for a normalized email.

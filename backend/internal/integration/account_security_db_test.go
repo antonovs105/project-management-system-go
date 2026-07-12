@@ -95,6 +95,33 @@ func TestAccountSecurityLifecycleAgainstPostgreSQL(t *testing.T) {
 	require.NoError(t, bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte("replacement123")))
 	require.ErrorIs(t, service.ResetPassword(ctx, resetToken, "anotherpass123", client), account.ErrInvalidToken)
 
+	_, err = db.Exec(`UPDATE users SET instance_role = $2 WHERE id = $1`, created.ID, user.InstanceRoleOwner)
+	require.NoError(t, err)
+	recoverySessionID, err := service.CreateSession(ctx, created.ID, client)
+	require.NoError(t, err)
+	require.NoError(t, service.RequestPasswordReset(ctx, email, client))
+	var previousTokenVersion int
+	require.NoError(t, db.Get(&previousTokenVersion, `SELECT token_version FROM users WHERE id = $1`, created.ID))
+	recoveryHash, err := bcrypt.GenerateFromPassword([]byte("offline-recovery123"), bcrypt.DefaultCost)
+	require.NoError(t, err)
+	recovered, err := repository.RecoverOwnerCredentials(ctx, username, string(recoveryHash), true)
+	require.NoError(t, err)
+	require.Equal(t, created.ID, recovered.UserID)
+	require.True(t, recovered.MFAReset)
+	require.Error(t, service.ValidateSession(ctx, created.ID, recoverySessionID))
+	require.NoError(t, db.Get(&passwordHash, `SELECT password_hash FROM users WHERE id = $1`, created.ID))
+	require.NoError(t, bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte("offline-recovery123")))
+	var currentTokenVersion int
+	require.NoError(t, db.Get(&currentTokenVersion, `SELECT token_version FROM users WHERE id = $1`, created.ID))
+	require.Equal(t, previousTokenVersion+1, currentTokenVersion)
+	var activeMFA, activeRecoveryTokens, recoveryEvents int
+	require.NoError(t, db.Get(&activeMFA, `SELECT count(*) FROM user_mfa_credentials WHERE user_id = $1`, created.ID))
+	require.NoError(t, db.Get(&activeRecoveryTokens, `SELECT count(*) FROM account_tokens WHERE user_id = $1 AND consumed_at IS NULL`, created.ID))
+	require.NoError(t, db.Get(&recoveryEvents, `SELECT count(*) FROM auth_events WHERE user_id = $1 AND event_type = 'owner.recovered'`, created.ID))
+	require.Zero(t, activeMFA)
+	require.Zero(t, activeRecoveryTokens)
+	require.Equal(t, 1, recoveryEvents)
+
 	events, err := service.ListAuthEvents(ctx, created.ID)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(events), 4)

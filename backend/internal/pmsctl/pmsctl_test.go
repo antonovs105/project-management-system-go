@@ -10,12 +10,78 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/antonovs105/project-management-system-go/internal/account"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteactor"
 	appconfig "github.com/antonovs105/project-management-system-go/internal/config"
 	"github.com/antonovs105/project-management-system-go/internal/user"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
+
+func TestOwnerRecoverRequiresConfirmationAndUsesPasswordStdin(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	var captured OwnerRecoverOptions
+	runner := Runner{
+		Stdin:  strings.NewReader("replacement123\n"),
+		Stdout: &stdout,
+		Stderr: &stderr,
+		LoadEnvFile: func(path string) error {
+			require.Equal(t, "recovery.env", path)
+			return nil
+		},
+		RecoverOwner: func(ctx context.Context, options OwnerRecoverOptions) (*account.OwnerRecoveryResult, error) {
+			captured = options
+			return &account.OwnerRecoveryResult{UserID: "owner-id", Username: "owner", MFAReset: true}, nil
+		},
+	}
+
+	code := runner.Run(context.Background(), []string{
+		"owner", "recover",
+		"--env-file", "recovery.env",
+		"--username", "owner",
+		"--confirm-username", "owner",
+		"--password-stdin",
+		"--reset-mfa",
+	})
+
+	require.Equal(t, 0, code)
+	require.Empty(t, stderr.String())
+	require.Equal(t, OwnerRecoverOptions{
+		EnvFile:         "recovery.env",
+		Username:        "owner",
+		ConfirmUsername: "owner",
+		Password:        "replacement123",
+		ResetMFA:        true,
+	}, captured)
+	require.Contains(t, stdout.String(), "owner_recovered")
+	require.Contains(t, stdout.String(), "sessions_revoked=true")
+	require.Contains(t, stdout.String(), "mfa_reset=true")
+}
+
+func TestOwnerRecoverRejectsConfirmationMismatch(t *testing.T) {
+	var stderr bytes.Buffer
+	called := false
+	runner := Runner{
+		Stdin:  strings.NewReader("replacement123\n"),
+		Stderr: &stderr,
+		RecoverOwner: func(ctx context.Context, options OwnerRecoverOptions) (*account.OwnerRecoveryResult, error) {
+			called = true
+			return nil, nil
+		},
+	}
+
+	code := runner.Run(context.Background(), []string{
+		"owner", "recover",
+		"--username", "owner",
+		"--confirm-username", "different-owner",
+		"--password-stdin",
+	})
+
+	require.Equal(t, 2, code)
+	require.False(t, called)
+	require.Contains(t, stderr.String(), "must exactly match")
+}
 
 func TestOwnerCreateReadsPasswordFromStdin(t *testing.T) {
 	var stdout bytes.Buffer

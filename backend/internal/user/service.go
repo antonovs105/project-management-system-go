@@ -457,10 +457,10 @@ func (s *Service) ChangePassword(ctx context.Context, userID, currentPassword, n
 	if strings.TrimSpace(currentPassword) == "" {
 		return invalidUserInput("current password is required")
 	}
-	if err := validatePassword(currentPassword); err != nil {
+	if err := ValidatePassword(currentPassword); err != nil {
 		return err
 	}
-	if err := validatePassword(newPassword); err != nil {
+	if err := ValidatePassword(newPassword); err != nil {
 		return err
 	}
 
@@ -604,7 +604,7 @@ func validateRegistrationInput(username, email, password string) error {
 	if _, err := mail.ParseAddress(email); err != nil {
 		return invalidUserInput("valid email is required")
 	}
-	return validatePassword(password)
+	return ValidatePassword(password)
 }
 
 // validateOAuthUserInput checks provider-derived fields before local account creation.
@@ -626,8 +626,8 @@ func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
 
-// validatePassword enforces the local password length policy.
-func validatePassword(password string) error {
+// ValidatePassword enforces the local-account password policy.
+func ValidatePassword(password string) error {
 	passwordLength := utf8.RuneCountInString(password)
 	if passwordLength < minPasswordLength {
 		return invalidUserInput(fmt.Sprintf("password must be at least %d characters", minPasswordLength))
