@@ -3,11 +3,11 @@ import { useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { api, errorMessage } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
-import { ticketPriorities, ticketTypes } from "../../lib/constants";
 import { fieldLimits } from "../../lib/limits";
 import type { ID, Label, ProjectMember, Ticket, TicketPriority, TicketType } from "../../types";
 import { Button, ErrorState, Modal, SelectField, TextAreaField, TextField } from "../../components/ui";
 import { MemberAssigneeSelect } from "./MemberAssigneeSelect";
+import { TicketClassificationFields } from "./TicketClassificationFields";
 
 function parentCandidates(type: TicketType, tickets: Ticket[]): Ticket[] {
   if (type === "task") {
@@ -113,26 +113,12 @@ export function TicketFormModal({
           maxLength={fieldLimits.ticketTitleMaxLength}
           required
         />
-        <div className="grid gap-4 sm:grid-cols-2">
-          <SelectField label="Type" value={type} onChange={(event) => setType(event.target.value as TicketType)}>
-            {ticketTypes.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </SelectField>
-          <SelectField
-            label="Priority"
-            value={priority}
-            onChange={(event) => setPriority(event.target.value as TicketPriority)}
-          >
-            {ticketPriorities.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </SelectField>
-        </div>
+        <TicketClassificationFields
+          type={type}
+          priority={priority}
+          onTypeChange={setType}
+          onPriorityChange={setPriority}
+        />
         {type !== "epic" ? (
           <SelectField label="Parent" value={parentId} onChange={(event) => setParentId(event.target.value)}>
             <option value="">None</option>

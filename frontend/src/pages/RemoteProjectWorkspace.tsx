@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2, Clock3, ExternalLink, Flame, ListChecks, LockKeyhole, Plus, RefreshCw, Save, Trash2, X } from "lucide-react";
-import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { ArrowLeft, ExternalLink, LockKeyhole, Plus, RefreshCw, Save, Trash2, X } from "lucide-react";
+import { useMemo, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { StatusBadge } from "../components/StatusBadge";
-import { Badge, Button, ErrorState, IconButton, LoadingState, Modal, Panel, SelectField, TextAreaField, TextField } from "../components/ui";
+import { Badge, Button, ErrorState, IconButton, LoadingState, Modal, Panel, TextAreaField, TextField } from "../components/ui";
 import { TicketBoard } from "../features/tickets/TicketBoard";
+import { TicketClassificationFields } from "../features/tickets/TicketClassificationFields";
+import { ProjectTicketSummary } from "../features/projects/ProjectTicketSummary";
 import { api, errorMessage } from "../lib/api";
-import { ticketPriorities, ticketStatuses, ticketTypes } from "../lib/constants";
 import { relativeDate } from "../lib/format";
 import { useI18n } from "../lib/i18n-context";
 import { fieldLimits } from "../lib/limits";
@@ -49,16 +50,6 @@ const builtInRolePermissions: Record<string, string[]> = {
   developer: ["project.read", ticketCreatePermission, ticketUpdatePermission, "comments.create"],
   viewer: ["project.read"],
 };
-
-function SummaryItem({ icon, label, value }: { icon: ReactNode; label: string; value: number | string }) {
-  return (
-    <div className="inline-flex min-w-32 items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-sm">
-      <span className="text-zinc-400">{icon}</span>
-      <span className="font-semibold text-zinc-950">{value}</span>
-      <span className="text-zinc-500">{label}</span>
-    </div>
-  );
-}
 
 function updateTicketCache(tickets: RemoteTicket[] | undefined, ticket: RemoteTicket): RemoteTicket[] {
   const current = tickets || [];
@@ -144,16 +135,6 @@ export function RemoteProjectWorkspace() {
   const selectedTicket = useMemo(
     () => remoteTickets.find((ticket) => ticket.id === selectedTicketId) || null,
     [remoteTickets, selectedTicketId],
-  );
-
-  const ticketStats = useMemo(
-    () => ({
-      total: remoteTickets.length,
-      active: remoteTickets.filter((ticket) => ticket.status === "in_progress" || ticket.status === "review").length,
-      urgent: remoteTickets.filter((ticket) => ticket.priority === "urgent").length,
-      done: remoteTickets.filter((ticket) => ticket.status === "done").length,
-    }),
-    [remoteTickets],
   );
 
   function cacheTicket(ticket: RemoteTicket) {
@@ -325,10 +306,7 @@ export function RemoteProjectWorkspace() {
           <h1 className="truncate text-2xl font-semibold tracking-tight text-zinc-950">{title}</h1>
           <p className="mt-1 break-all text-sm text-zinc-500">{remoteProject?.project_ap_id || t("remoteWorkspace.subtitle")}</p>
           <div className="mt-4 flex flex-wrap gap-2">
-            <SummaryItem icon={<ListChecks size={15} />} label="tickets" value={ticketStats.total} />
-            <SummaryItem icon={<Clock3 size={15} />} label="active" value={ticketStats.active} />
-            <SummaryItem icon={<Flame size={15} />} label="urgent" value={ticketStats.urgent} />
-            <SummaryItem icon={<CheckCircle2 size={15} />} label="done" value={ticketStats.done} />
+            <ProjectTicketSummary tickets={remoteTickets} />
           </div>
           {remoteProject?.updated_at ? <p className="mt-3 text-xs text-zinc-400">Updated {relativeDate(remoteProject.updated_at)}</p> : null}
         </div>
@@ -451,44 +429,16 @@ export function RemoteProjectWorkspace() {
                 disabled={!canUpdateTickets}
                 required
               />
-              <div className="grid gap-4 md:grid-cols-3">
-                <SelectField
-                  label={t("remoteWorkspace.status")}
-                  value={draft.status}
-                  onChange={(event) => setDraft((current) => ({ ...current, status: event.target.value as TicketStatus }))}
-                  disabled={!canUpdateTickets}
-                >
-                  {ticketStatuses.map((status) => (
-                    <option key={status.id} value={status.id}>
-                      {status.label}
-                    </option>
-                  ))}
-                </SelectField>
-                <SelectField
-                  label={t("remoteWorkspace.priority")}
-                  value={draft.priority}
-                  onChange={(event) => setDraft((current) => ({ ...current, priority: event.target.value as TicketPriority }))}
-                  disabled={!canUpdateTickets}
-                >
-                  {ticketPriorities.map((priority) => (
-                    <option key={priority.id} value={priority.id}>
-                      {priority.label}
-                    </option>
-                  ))}
-                </SelectField>
-                <SelectField
-                  label={t("remoteWorkspace.type")}
-                  value={draft.type}
-                  onChange={(event) => setDraft((current) => ({ ...current, type: event.target.value as TicketType }))}
-                  disabled={!canUpdateTickets}
-                >
-                  {ticketTypes.map((type) => (
-                    <option key={type.id} value={type.id}>
-                      {type.label}
-                    </option>
-                  ))}
-                </SelectField>
-              </div>
+              <TicketClassificationFields
+                status={draft.status}
+                priority={draft.priority}
+                type={draft.type}
+                onStatusChange={(status) => setDraft((current) => ({ ...current, status }))}
+                onPriorityChange={(priority) => setDraft((current) => ({ ...current, priority }))}
+                onTypeChange={(type) => setDraft((current) => ({ ...current, type }))}
+                labels={{ status: t("remoteWorkspace.status"), priority: t("remoteWorkspace.priority"), type: t("remoteWorkspace.type") }}
+                disabled={!canUpdateTickets}
+              />
               <TextAreaField
                 label={t("remoteWorkspace.description")}
                 value={draft.description}
@@ -543,32 +493,14 @@ export function RemoteProjectWorkspace() {
             disabled={createDisabled}
             required
           />
-          <div className="grid gap-4 md:grid-cols-2">
-            <SelectField
-              label={t("remoteWorkspace.priority")}
-              value={createDraft.priority}
-              onChange={(event) => setCreateDraft((current) => ({ ...current, priority: event.target.value as TicketPriority }))}
-              disabled={createDisabled}
-            >
-              {ticketPriorities.map((priority) => (
-                <option key={priority.id} value={priority.id}>
-                  {priority.label}
-                </option>
-              ))}
-            </SelectField>
-            <SelectField
-              label={t("remoteWorkspace.type")}
-              value={createDraft.type}
-              onChange={(event) => setCreateDraft((current) => ({ ...current, type: event.target.value as TicketType }))}
-              disabled={createDisabled}
-            >
-              {ticketTypes.map((type) => (
-                <option key={type.id} value={type.id}>
-                  {type.label}
-                </option>
-              ))}
-            </SelectField>
-          </div>
+          <TicketClassificationFields
+            priority={createDraft.priority}
+            type={createDraft.type}
+            onPriorityChange={(priority) => setCreateDraft((current) => ({ ...current, priority }))}
+            onTypeChange={(type) => setCreateDraft((current) => ({ ...current, type }))}
+            labels={{ status: t("remoteWorkspace.status"), priority: t("remoteWorkspace.priority"), type: t("remoteWorkspace.type") }}
+            disabled={createDisabled}
+          />
           <TextAreaField
             label={t("remoteWorkspace.description")}
             value={createDraft.description}

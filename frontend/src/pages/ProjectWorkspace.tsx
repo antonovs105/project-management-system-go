@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Clock3, Flame, GitFork, ListChecks, Pencil, Plus, RefreshCw, Settings, Trash2, Truck } from "lucide-react";
+import { GitFork, Pencil, Plus, RefreshCw, Settings, Trash2, Truck } from "lucide-react";
 import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ProjectDeliveriesPanel } from "../features/projects/ProjectDeliveriesPanel";
 import { ProjectSettingsPanel } from "../features/projects/ProjectSettingsPanel";
 import { ProjectActivityPanel } from "../features/projects/ProjectActivityPanel";
+import { ProjectTicketSummary } from "../features/projects/ProjectTicketSummary";
 import { projectMemberLabel } from "../features/tickets/memberLabels";
 import { TicketBoard } from "../features/tickets/TicketBoard";
 import { TicketDetailPanel } from "../features/tickets/TicketDetailPanel";
@@ -45,16 +46,6 @@ function tabClass(active: boolean): string {
     "focus-ring inline-flex h-9 items-center gap-2 rounded-full px-4 text-sm font-medium transition",
     active ? "bg-zinc-950 text-white shadow-sm" : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950",
   ].join(" ");
-}
-
-function SummaryItem({ icon, label, value }: { icon: ReactNode; label: string; value: number | string }) {
-  return (
-    <div className="inline-flex min-w-32 items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-sm">
-      <span className="text-zinc-400">{icon}</span>
-      <span className="font-semibold text-zinc-950">{value}</span>
-      <span className="text-zinc-500">{label}</span>
-    </div>
-  );
 }
 
 function moveTicketsOptimistically(
@@ -164,16 +155,6 @@ export function ProjectWorkspace() {
     queryFn: () => api.listProjectLabels(activeProjectId),
     enabled: Boolean(projectId),
   });
-
-  const ticketStats = useMemo(() => {
-    const currentTickets = pageTickets;
-    return {
-      total: currentTickets.length,
-      active: currentTickets.filter((ticket) => ticket.status === "in_progress" || ticket.status === "review").length,
-      urgent: currentTickets.filter((ticket) => ticket.priority === "urgent").length,
-      done: currentTickets.filter((ticket) => ticket.status === "done").length,
-    };
-  }, [pageTickets]);
 
   const visibleTickets = useMemo(() => {
     const currentTickets = pageTickets;
@@ -397,10 +378,7 @@ export function ProjectWorkspace() {
               <h1 className="truncate text-2xl font-semibold tracking-tight text-zinc-950">{project.data.name}</h1>
               <p className="mt-1 max-w-3xl text-sm text-zinc-500">{project.data.description || "No description"}</p>
               <div className="mt-4 flex flex-wrap gap-2">
-                <SummaryItem icon={<ListChecks size={15} />} label="tickets" value={ticketStats.total} />
-                <SummaryItem icon={<Clock3 size={15} />} label="active" value={ticketStats.active} />
-                <SummaryItem icon={<Flame size={15} />} label="urgent" value={ticketStats.urgent} />
-                <SummaryItem icon={<CheckCircle2 size={15} />} label="done" value={ticketStats.done} />
+                <ProjectTicketSummary tickets={pageTickets} />
               </div>
 			  <p className="mt-3 text-xs text-zinc-600 dark:text-zinc-300">Updated {relativeDate(project.data.updated_at)}</p>
             </div>
