@@ -280,8 +280,8 @@ interface InstanceCapabilitiesResponse extends InstanceConfigResponse {
 }
 
 interface ErrorResponse {
-  error?: string;
-  message?: string;
+	error?: string | { code?: string; message?: string; request_id?: string };
+	message?: string;
 }
 
 function asArray<T>(data: T[] | null | undefined): T[] {
@@ -289,8 +289,9 @@ function asArray<T>(data: T[] | null | undefined): T[] {
 }
 
 export function errorMessage(error: unknown, fallback: string): string {
-  if (axios.isAxiosError<ErrorResponse>(error)) {
-    return error.response?.data?.error || error.response?.data?.message || fallback;
+	if (axios.isAxiosError<ErrorResponse>(error)) {
+		const detail = error.response?.data?.error;
+		return (typeof detail === "string" ? detail : detail?.message) || error.response?.data?.message || fallback;
   }
   if (error instanceof Error) {
     return error.message;

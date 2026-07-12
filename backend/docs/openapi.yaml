@@ -3075,7 +3075,15 @@ components:
       required: [error]
       properties:
         error:
-          type: string
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            request_id:
+              type: string
     FederationDomainBlock:
       type: object
       required: [id, domain, reason, created_at, updated_at]

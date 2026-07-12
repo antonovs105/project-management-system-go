@@ -53,7 +53,7 @@ export function OAuthCallbackPage() {
 		navigate(session.mfa_enrollment_required ? "/account" : "/projects", { replace: true });
     },
 		onError: (error) => {
-			if (axios.isAxiosError<{ code?: string }>(error) && error.response?.data?.code === "mfa_required") {
+			if (axios.isAxiosError<{ code?: string; error?: { code?: string } }>(error) && (error.response?.data?.code === "mfa_required" || error.response?.data?.error?.code === "mfa_required")) {
 				setMFARequired(true);
 				setExchangeError(null);
 				return;

@@ -89,6 +89,7 @@ func fileBoundaryViolations(moduleRoot, path string, file *ast.File) []string {
 func isHTTPAdapterFile(relPath string) bool {
 	return relPath == "cmd/api/main.go" ||
 		strings.HasPrefix(relPath, "internal/middleware/") ||
+		strings.HasPrefix(relPath, "internal/apiresponse/") ||
 		strings.HasSuffix(relPath, "/handler.go")
 }
 

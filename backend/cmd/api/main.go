@@ -29,6 +29,7 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteactor"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteinbox"
 	"github.com/antonovs105/project-management-system-go/internal/adminaudit"
+	"github.com/antonovs105/project-management-system-go/internal/apiresponse"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
 	appconfig "github.com/antonovs105/project-management-system-go/internal/config"
 	"github.com/antonovs105/project-management-system-go/internal/githubintegration"
@@ -654,6 +655,8 @@ func main() {
 	}
 
 	e := echo.New()
+	e.JSONSerializer = apiresponse.Serializer{}
+	e.HTTPErrorHandler = apiresponse.HTTPErrorHandler
 	if err := configureIPExtractor(e, cfg.Server.TrustedProxyCIDRs); err != nil {
 		log.Fatal(err)
 	}
