@@ -4087,7 +4087,7 @@ components:
           format: date-time
     Ticket:
       type: object
-      required: [id, ap_id, title, description, status, priority, type, project_id, reporter_id, is_resolved, version, archived_at, created_at, updated_at]
+      required: [id, ap_id, title, description, status, priority, type, rank, parent_id, project_id, reporter_id, assignee_id, is_resolved, due_date, label_ids, version, archived_at, created_at, updated_at]
       properties:
         id:
           type: string
@@ -4105,6 +4105,9 @@ components:
           $ref: "#/components/schemas/TicketPriority"
         type:
           $ref: "#/components/schemas/TicketType"
+        rank:
+          type: string
+          pattern: '^[0-9A-Z]{12}$'
         parent_id:
           type:
             - string

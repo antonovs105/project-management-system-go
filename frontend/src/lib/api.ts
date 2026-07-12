@@ -1,4 +1,5 @@
 import axios from "axios";
+import type * as Contract from "../generated/api-schema";
 import type {
 	AccountSession,
 	ArchivedProject,
@@ -37,11 +38,10 @@ import type {
   ProjectInvite,
   ProjectInviteInspection,
   ProjectMember,
-  ProjectPermission,
   ProjectRole,
-  ProjectRoleKey,
   PublicInstanceConfig,
   RemoteProject,
+  RemoteTicket,
   RemoteActorInspection,
   RemoteProjectInvite,
   RemoteProjectInviteResult,
@@ -54,6 +54,7 @@ import type {
   TicketType,
 } from "../types";
 import { useAuthStore } from "../store/auth";
+import { contractClient, contractData, contractVoid } from "./contractClient";
 
 const apiBaseURL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "" : "http://localhost:8080");
 
@@ -75,84 +76,20 @@ http.interceptors.response.use(
 
 const apiPrefix = "/api/v1";
 
-export interface LoginPayload {
-	email: string;
-	password: string;
-	mfa_code?: string;
-}
+type JSONBody<T extends { content: { "application/json": unknown } }> = T["content"]["application/json"];
 
-export interface RegisterPayload {
-  username: string;
-  email: string;
-  password: string;
-}
-
-export interface CreateProjectPayload {
-  name: string;
-  description: string;
-}
-
-export interface UpdateProjectPayload {
-  name?: string;
-  description?: string;
-}
-
-export interface CreateTicketPayload {
-  title: string;
-  description: string;
-  priority: TicketPriority;
-  type: TicketType;
-  parent_id?: ID | null;
-  assignee_id?: ID | null;
-  due_date?: string;
-  label_ids?: ID[];
-}
-
-export interface UpdateTicketPayload {
-  title?: string;
-  description?: string;
-  status?: TicketStatus;
-  priority?: TicketPriority;
-  type?: TicketType;
-  parent_id?: ID | null;
-  assignee_id?: ID | null;
-  due_date?: string;
-  label_ids?: ID[];
-  is_resolved?: boolean;
-}
-
-export interface MoveTicketPayload {
-  status: TicketStatus;
-  before_ticket_id?: ID | null;
-  after_ticket_id?: ID | null;
-}
-
-export interface RemoteMoveTicketPayload {
-  status: TicketStatus;
-}
-
-export interface ChangePasswordPayload {
-  current_password: string;
-  new_password: string;
-}
-
-export interface AddProjectMemberPayload {
-  user_ref?: string;
-  user_id?: ID;
-  role_id?: ID;
-  role?: ProjectRoleKey;
-}
-
-export interface CreateProjectRolePayload {
-  name: string;
-  description?: string;
-  permissions: ProjectPermission[];
-}
-
-export interface LinkGitHubRepositoryPayload {
-  owner: string;
-  name: string;
-}
+export type LoginPayload = JSONBody<Contract.RequestBodyLoginUser>;
+export type RegisterPayload = JSONBody<Contract.RequestBodyRegisterUser>;
+export type CreateProjectPayload = JSONBody<Contract.RequestBodyCreateProject>;
+export type UpdateProjectPayload = JSONBody<Contract.RequestBodyUpdateProject>;
+export type CreateTicketPayload = JSONBody<Contract.RequestBodyCreateTicket>;
+export type UpdateTicketPayload = JSONBody<Contract.RequestBodyUpdateTicket>;
+export type MoveTicketPayload = Contract.operations["moveTicket"]["requestBody"]["content"]["application/json"];
+export type RemoteMoveTicketPayload = Contract.operations["moveRemoteTicket"]["requestBody"]["content"]["application/json"];
+export type ChangePasswordPayload = JSONBody<Contract.RequestBodyChangePassword>;
+export type AddProjectMemberPayload = JSONBody<Contract.RequestBodyAddProjectMember>;
+export type CreateProjectRolePayload = JSONBody<Contract.RequestBodyCreateProjectRole>;
+export type LinkGitHubRepositoryPayload = JSONBody<Contract.RequestBodyLinkGitHubRepository>;
 
 export interface ListGitHubCommitsFilters {
   repository_id?: ID;
@@ -161,25 +98,10 @@ export interface ListGitHubCommitsFilters {
   limit?: number;
 }
 
-export interface LinkGitHubCommitPayload {
-  commit_id: ID;
-}
-
-export interface UpdateProjectRolePayload {
-  name?: string;
-  description?: string;
-  permissions?: ProjectPermission[];
-}
-
-export interface UpdateProjectMemberRolePayload {
-  role_id?: ID;
-  role?: ProjectRoleKey;
-}
-
-export interface AddTicketLinkPayload {
-  target_id: ID;
-  link_type: string;
-}
+export type LinkGitHubCommitPayload = JSONBody<Contract.RequestBodyLinkGitHubCommit>;
+export type UpdateProjectRolePayload = JSONBody<Contract.RequestBodyUpdateProjectRole>;
+export type UpdateProjectMemberRolePayload = JSONBody<Contract.RequestBodyUpdateProjectMemberRole>;
+export type AddTicketLinkPayload = JSONBody<Contract.RequestBodyAddTicketLink>;
 
 export interface TicketFilters {
   q?: string;
@@ -632,8 +554,8 @@ export const api = {
     return data;
   },
 
-  async listRemoteProjectTickets(projectId: ID, filters: TicketFilters = {}): Promise<Ticket[]> {
-    const { data } = await http.get<Ticket[] | null>(`${apiPrefix}/remote-projects/${projectId}/tickets`, {
+  async listRemoteProjectTickets(projectId: ID, filters: TicketFilters = {}): Promise<RemoteTicket[]> {
+    const { data } = await http.get<RemoteTicket[] | null>(`${apiPrefix}/remote-projects/${projectId}/tickets`, {
       params: { limit: 500, offset: 0, ...filters },
     });
     return asArray(data);
@@ -644,8 +566,8 @@ export const api = {
     return data;
   },
 
-  async getRemoteTicket(projectId: ID, ticketId: ID): Promise<Ticket> {
-    const { data } = await http.get<Ticket>(`${apiPrefix}/remote-projects/${projectId}/tickets/${ticketId}`);
+  async getRemoteTicket(projectId: ID, ticketId: ID): Promise<RemoteTicket> {
+    const { data } = await http.get<RemoteTicket>(`${apiPrefix}/remote-projects/${projectId}/tickets/${ticketId}`);
     return data;
   },
 
@@ -744,32 +666,35 @@ export const api = {
   },
 
   async listNotifications(filters: NotificationFilters = {}): Promise<Notification[]> {
-    const { data } = await http.get<Notification[] | null>(`${apiPrefix}/me/notifications`, {
-      params: { limit: 50, offset: 0, ...filters },
+    const result = await contractClient.GET("/api/v1/me/notifications", {
+      params: { query: { limit: 50, offset: 0, ...filters } },
     });
-    return asArray(data);
+    return asArray(contractData(result));
   },
 
   async markNotificationRead(notificationId: ID): Promise<Notification> {
-    const { data } = await http.patch<Notification>(`${apiPrefix}/me/notifications/${notificationId}/read`);
-    return data;
+    const result = await contractClient.PATCH("/api/v1/me/notifications/{id}/read", {
+      params: { path: { id: notificationId } },
+    });
+    return contractData(result);
   },
 
   async markAllNotificationsRead(): Promise<void> {
-    await http.post(`${apiPrefix}/me/notifications/read-all`);
+    const result = await contractClient.POST("/api/v1/me/notifications/read-all");
+    contractVoid(result);
   },
 
   async listNotificationPreferences(): Promise<NotificationPreference[]> {
-    const { data } = await http.get<NotificationPreference[] | null>(`${apiPrefix}/me/notification-preferences`);
-    return asArray(data);
+    const result = await contractClient.GET("/api/v1/me/notification-preferences");
+    return asArray(contractData(result));
   },
 
   async updateNotificationPreference(preference: NotificationPreference): Promise<NotificationPreference> {
-    const { data } = await http.put<NotificationPreference>(
-      `${apiPrefix}/me/notification-preferences/${preference.type}`,
-      { in_app_enabled: preference.in_app_enabled, email_enabled: preference.email_enabled },
-    );
-    return data;
+    const result = await contractClient.PUT("/api/v1/me/notification-preferences/{type}", {
+      params: { path: { type: preference.type } },
+      body: { in_app_enabled: preference.in_app_enabled, email_enabled: preference.email_enabled },
+    });
+    return contractData(result);
   },
 
   async addTicketLink(ticketId: ID, payload: AddTicketLinkPayload): Promise<void> {

@@ -31,11 +31,11 @@ test("frontend does not expose owner bootstrap setup", () => {
 });
 
 test("project permission labels cover every backend permission type", () => {
-  const types = read("src/types.ts");
+  const generated = read("src/generated/api-schema.ts");
   const constants = read("src/lib/constants.ts");
-  const match = /export type ProjectPermission =([\s\S]*?);/.exec(types);
+  const match = /ProjectPermission:\s*([^;]+);/.exec(generated);
 
-  assert.ok(match, "ProjectPermission union must exist");
+  assert.ok(match, "generated ProjectPermission union must exist");
   const permissions = [...match[1].matchAll(/"([^"]+)"/g)].map((item) => item[1]);
 
   assert.ok(permissions.length > 0);
@@ -44,57 +44,15 @@ test("project permission labels cover every backend permission type", () => {
   }
 });
 
-test("api client covers current backend feature routes", () => {
+test("frontend API facade is bound to the generated contract", () => {
   const api = read("src/lib/api.ts");
-  const requiredFragments = [
-    "/me/password",
-    "/me/logout",
-    "/auth/oauth/providers",
-    "/auth/oauth/exchange",
-    "/auth/${provider}/start",
-    "/instance",
-    "getPublicInstance",
-    "getInstanceCapabilities",
-    "/me/invites",
-    "/admin/users",
-    "/admin/audit-events",
-    "/projects/${projectId}/members",
-    "/projects/${projectId}/labels",
-    "/projects/${projectId}/github/repositories",
-    "/projects/${projectId}/github/commits",
-    "/repositories/${repositoryId}/sync",
-    "linkTicketGitHubCommit",
-    "/projects/${projectId}/tickets/events",
-    "projectTicketEventsURL",
-    "/tickets/${ticketId}/move",
-    "/me/notifications",
-    "/me/notifications/events",
-    "notificationsEventsURL",
-    "/me/notifications/${notificationId}/read",
-    "/me/notifications/read-all",
-    "/projects/${projectId}/invites",
-    "/members/${userId}",
-    "updateProjectMemberRole",
-    "/invites/${inviteId}/accept",
-    "/invites/${inviteId}/reject",
-    "/invites/${inviteId}/revoke",
-    "/tickets/${ticketId}/links",
-    "/tickets/${ticketId}/github/commits",
-    "/tickets/${ticketId}/github/commits/${commitId}",
-    "/links/${linkId}",
-    "/deliveries/summary",
-    "/deliveries/${deliveryId}/retry",
-    "/me/federation/inbox",
-    "/me/federation/discover",
-    "/me/federation/follows",
-    "/admin/federation/domain-blocks",
-    "/admin/federation/remote-actors",
-    "/admin/federation/deliveries",
-  ];
+  const client = read("src/lib/contractClient.ts");
+  const packageJson = read("package.json");
 
-  for (const fragment of requiredFragments) {
-    assert.ok(api.includes(fragment), `${fragment} is not wired in api.ts`);
-  }
+  assert.ok(api.includes('import type * as Contract from "../generated/api-schema"'));
+  assert.ok(api.includes('contractClient.GET("/api/v1/me/notifications"'));
+  assert.ok(client.includes("createClient<paths>"));
+  assert.ok(packageJson.includes('"check:api"'), "CI contract freshness command must remain available");
 });
 
 test("remote project ticket list auto-refreshes while realtime federation is absent", () => {

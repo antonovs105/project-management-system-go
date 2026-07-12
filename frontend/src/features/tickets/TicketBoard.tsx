@@ -23,7 +23,7 @@ import type { ReactNode } from "react";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EmptyState, Panel } from "../../components/ui";
 import { ticketStatuses } from "../../lib/constants";
-import type { ID, Label, ProjectMember, Ticket, TicketStatus } from "../../types";
+import type { BoardTicket, ID, Label, ProjectMember, TicketStatus } from "../../types";
 import { projectMemberLabel } from "./memberLabels";
 
 function columnTitle(status: TicketStatus): string {
@@ -37,7 +37,7 @@ function TicketCard({
   onOpen,
   draggable,
 }: {
-  ticket: Ticket;
+  ticket: BoardTicket;
   members: ProjectMember[];
   labels: Label[];
   onOpen: (ticketId: ID) => void;
@@ -75,7 +75,7 @@ function TicketCard({
             </div>
             {ticket.label_ids?.length ? (
               <div className="mb-2 flex flex-wrap gap-1">
-                {labels.filter((label) => ticket.label_ids.includes(label.id)).map((label) => (
+                {labels.filter((label) => (ticket.label_ids || []).includes(label.id)).map((label) => (
                   <span key={label.id} className="rounded-full px-2 py-0.5 text-[11px] font-medium text-white" style={{ backgroundColor: label.color }}>
                     {label.name}
                   </span>
@@ -116,7 +116,7 @@ function BoardColumn({
   draggable,
 }: {
   status: TicketStatus;
-  tickets: Ticket[];
+  tickets: BoardTicket[];
   members: ProjectMember[];
   labels: Label[];
   onOpen: (ticketId: ID) => void;
@@ -154,7 +154,7 @@ function BoardColumn({
   );
 }
 
-function neighbors(items: Ticket[], ticketId: ID) {
+function neighbors(items: BoardTicket[], ticketId: ID) {
   const index = items.findIndex((item) => item.id === ticketId);
   return {
     beforeTicketId: index >= 0 ? items[index + 1]?.id || null : null,
@@ -174,7 +174,7 @@ export function TicketBoard({
   emptyTitle = "No tickets yet",
   emptyBody = "Create a ticket to start shaping the board.",
 }: {
-  tickets: Ticket[];
+  tickets: BoardTicket[];
   members: ProjectMember[];
   labels?: Label[];
   onOpenTicket: (ticketId: ID) => void;
@@ -185,14 +185,14 @@ export function TicketBoard({
   emptyTitle?: string;
   emptyBody?: string;
 }) {
-  const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
+  const [activeTicket, setActiveTicket] = useState<BoardTicket | null>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
   const grouped = useMemo(() => {
-    const columns = new Map<TicketStatus, Ticket[]>();
+    const columns = new Map<TicketStatus, BoardTicket[]>();
     ticketStatuses.forEach((status) => columns.set(status.id, []));
     tickets.forEach((ticket) => {
       columns.get(ticket.status)?.push(ticket);
@@ -236,7 +236,7 @@ export function TicketBoard({
     }
 
     const targetOriginal = grouped.get(targetStatus) || [];
-    let nextTarget: Ticket[];
+    let nextTarget: BoardTicket[];
     if (targetStatus === ticket.status) {
       const oldIndex = targetOriginal.findIndex((item) => item.id === activeId);
       const newIndex = targetOriginal.findIndex((item) => item.id === overId);

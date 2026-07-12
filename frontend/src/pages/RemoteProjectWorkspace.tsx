@@ -12,7 +12,7 @@ import { relativeDate } from "../lib/format";
 import { useI18n } from "../lib/i18n-context";
 import { fieldLimits } from "../lib/limits";
 import { queryKeys } from "../lib/queryKeys";
-import type { ID, RemoteProject, Ticket, TicketPriority, TicketStatus, TicketType } from "../types";
+import type { ID, RemoteProject, RemoteTicket, TicketPriority, TicketStatus, TicketType } from "../types";
 
 const ticketCreatePermission = "tickets.create";
 const ticketUpdatePermission = "tickets.update";
@@ -60,7 +60,7 @@ function SummaryItem({ icon, label, value }: { icon: ReactNode; label: string; v
   );
 }
 
-function updateTicketCache(tickets: Ticket[] | undefined, ticket: Ticket): Ticket[] {
+function updateTicketCache(tickets: RemoteTicket[] | undefined, ticket: RemoteTicket): RemoteTicket[] {
   const current = tickets || [];
   const exists = current.some((item) => item.id === ticket.id);
   if (!exists) {
@@ -69,7 +69,7 @@ function updateTicketCache(tickets: Ticket[] | undefined, ticket: Ticket): Ticke
   return current.map((item) => (item.id === ticket.id ? ticket : item));
 }
 
-function moveTicketsOptimistically(tickets: Ticket[], ticketId: ID, status: TicketStatus): Ticket[] {
+function moveTicketsOptimistically(tickets: RemoteTicket[], ticketId: ID, status: TicketStatus): RemoteTicket[] {
   return tickets.map((ticket) => (ticket.id === ticketId ? { ...ticket, status, is_resolved: status === "done" } : ticket));
 }
 
@@ -156,8 +156,8 @@ export function RemoteProjectWorkspace() {
     [remoteTickets],
   );
 
-  function cacheTicket(ticket: Ticket) {
-    queryClient.setQueryData<Ticket[]>(queryKeys.remoteTickets(projectId), (current) => updateTicketCache(current, ticket));
+  function cacheTicket(ticket: RemoteTicket) {
+    queryClient.setQueryData<RemoteTicket[]>(queryKeys.remoteTickets(projectId), (current) => updateTicketCache(current, ticket));
   }
 
   function refreshRemoteTicketsSoon() {
@@ -209,8 +209,8 @@ export function RemoteProjectWorkspace() {
   const moveTicket = useMutation({
     mutationFn: ({ ticketId, status }: { ticketId: string; status: TicketStatus }) => api.moveRemoteTicket(projectId, ticketId, { status }),
     onMutate: ({ ticketId, status }) => {
-      const previous = queryClient.getQueryData<Ticket[]>(queryKeys.remoteTickets(projectId));
-      queryClient.setQueryData<Ticket[]>(queryKeys.remoteTickets(projectId), (current = []) =>
+      const previous = queryClient.getQueryData<RemoteTicket[]>(queryKeys.remoteTickets(projectId));
+      queryClient.setQueryData<RemoteTicket[]>(queryKeys.remoteTickets(projectId), (current = []) =>
         moveTicketsOptimistically(current, ticketId, status),
       );
       return { previous };
@@ -233,7 +233,7 @@ export function RemoteProjectWorkspace() {
     mutationFn: () => (selectedTicket ? api.deleteRemoteTicket(projectId, selectedTicket.id) : Promise.reject(new Error("No ticket selected"))),
     onSuccess: () => {
       if (selectedTicket) {
-        queryClient.setQueryData<Ticket[]>(queryKeys.remoteTickets(projectId), (current) =>
+        queryClient.setQueryData<RemoteTicket[]>(queryKeys.remoteTickets(projectId), (current) =>
           (current || []).filter((ticket) => ticket.id !== selectedTicket.id),
         );
       }
