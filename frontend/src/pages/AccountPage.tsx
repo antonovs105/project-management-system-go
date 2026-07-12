@@ -18,9 +18,28 @@ export function AccountPage() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [formError, setFormError] = useState<string | null>(null);
+	const [formError, setFormError] = useState<string | null>(null);
+	const [mfaCode, setMFACode] = useState("");
+	const [mfaSetup, setMFASetup] = useState<{ secret: string; uri: string } | null>(null);
+	const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
 	const sessions = useQuery({ queryKey: queryKeys.accountSessions, queryFn: api.listSessions });
 	const securityEvents = useQuery({ queryKey: queryKeys.securityEvents, queryFn: api.listSecurityEvents });
+	const mfaStatus = useQuery({ queryKey: queryKeys.mfaStatus, queryFn: api.getMFAStatus });
+	const beginMFA = useMutation({
+		mutationFn: api.beginMFA,
+		onSuccess: (setup) => { setMFASetup(setup); setRecoveryCodes([]); },
+		onError: (error) => toast.error(errorMessage(error, "Could not start MFA setup.")),
+	});
+	const confirmMFA = useMutation({
+		mutationFn: api.confirmMFA,
+		onSuccess: (result) => { setRecoveryCodes(result.recovery_codes); setMFASetup(null); setMFACode(""); void queryClient.invalidateQueries({ queryKey: queryKeys.mfaStatus }); },
+		onError: (error) => toast.error(errorMessage(error, "Could not confirm MFA.")),
+	});
+	const disableMFA = useMutation({
+		mutationFn: api.disableMFA,
+		onSuccess: () => { setMFACode(""); void queryClient.invalidateQueries({ queryKey: queryKeys.mfaStatus }); },
+		onError: (error) => toast.error(errorMessage(error, "Could not disable MFA.")),
+	});
 	const revokeSession = useMutation({
 		mutationFn: api.revokeSession,
 		onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.accountSessions }),
@@ -162,6 +181,19 @@ export function AccountPage() {
 				</div>
 			</Panel>
 		) : null}
+
+		<Panel className="p-5 xl:col-span-2">
+			<div className="mb-4 flex items-center gap-2"><Shield size={18} className="text-zinc-500" /><h2 className="font-semibold text-zinc-950">Multi-factor authentication</h2></div>
+			<p className="mb-4 text-sm text-zinc-500">TOTP is required before an account can be promoted to admin or owner. Recovery codes are single-use.</p>
+			{mfaSetup ? <div className="mb-4 grid gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-sm"><div><span className="font-medium">Secret:</span> <code className="break-all">{mfaSetup.secret}</code></div><div className="break-all text-xs text-zinc-500">{mfaSetup.uri}</div></div> : null}
+			{recoveryCodes.length > 0 ? <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3"><div className="text-sm font-semibold text-amber-950">Save these recovery codes now</div><div className="mt-2 grid grid-cols-2 gap-1 font-mono text-sm">{recoveryCodes.map((code) => <span key={code}>{code}</span>)}</div></div> : null}
+			<div className="flex flex-wrap items-end gap-3">
+				{!mfaStatus.data?.enabled && !mfaSetup ? <Button onClick={() => beginMFA.mutate()} disabled={beginMFA.isPending}>Start setup</Button> : null}
+				{mfaSetup || mfaStatus.data?.enabled ? <div className="min-w-64 flex-1"><TextField label={mfaStatus.data?.enabled ? "Authenticator or recovery code" : "Six-digit authenticator code"} value={mfaCode} onChange={(event) => setMFACode(event.target.value)} autoComplete="one-time-code" /></div> : null}
+				{mfaSetup ? <Button tone="primary" onClick={() => confirmMFA.mutate(mfaCode)} disabled={!mfaCode || confirmMFA.isPending}>Enable MFA</Button> : null}
+				{mfaStatus.data?.enabled ? <Button tone="danger" onClick={() => disableMFA.mutate(mfaCode)} disabled={!mfaCode || disableMFA.isPending}>Disable MFA</Button> : null}
+			</div>
+		</Panel>
 
 		<Panel className="p-5 xl:col-span-2">
 			<div className="mb-4 flex items-center gap-2"><MonitorSmartphone size={18} className="text-zinc-500" /><h2 className="font-semibold text-zinc-950">Sessions and devices</h2></div>

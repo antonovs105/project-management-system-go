@@ -71,8 +71,9 @@ http.interceptors.response.use(
 const apiPrefix = "/api/v1";
 
 export interface LoginPayload {
-  email: string;
-  password: string;
+	email: string;
+	password: string;
+	mfa_code?: string;
 }
 
 export interface RegisterPayload {
@@ -254,6 +255,7 @@ export interface LoginResponse {
   instance_role: InstanceRole;
 	email?: string;
 	email_verified: boolean;
+	mfa_enrollment_required?: boolean;
 }
 
 interface ProfileResponse {
@@ -368,8 +370,8 @@ export const api = {
     return asArray(data.providers).filter(isOAuthProvider);
   },
 
-  async exchangeOAuthCode(code: string): Promise<LoginResponse> {
-    const { data } = await http.post<LoginResponse>("/auth/oauth/exchange", { code });
+	async exchangeOAuthCode(code: string, mfaCode?: string): Promise<LoginResponse> {
+		const { data } = await http.post<LoginResponse>("/auth/oauth/exchange", { code, mfa_code: mfaCode || undefined });
     return data;
   },
 
@@ -405,6 +407,25 @@ export const api = {
 	async listSecurityEvents(): Promise<SecurityEvent[]> {
 		const { data } = await http.get<SecurityEvent[] | null>(`${apiPrefix}/me/security-events`);
 		return asArray(data);
+	},
+
+	async getMFAStatus(): Promise<{ enabled: boolean }> {
+		const { data } = await http.get<{ enabled: boolean }>(`${apiPrefix}/me/mfa`);
+		return data;
+	},
+
+	async beginMFA(): Promise<{ secret: string; uri: string }> {
+		const { data } = await http.post<{ secret: string; uri: string }>(`${apiPrefix}/me/mfa/setup`);
+		return data;
+	},
+
+	async confirmMFA(code: string): Promise<{ recovery_codes: string[] }> {
+		const { data } = await http.post<{ recovery_codes: string[] }>(`${apiPrefix}/me/mfa/confirm`, { code });
+		return data;
+	},
+
+	async disableMFA(code: string): Promise<void> {
+		await http.delete(`${apiPrefix}/me/mfa`, { data: { code } });
 	},
 
   async profile(): Promise<ProfileResponse> {

@@ -17,6 +17,8 @@ import (
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/antonovs105/project-management-system-go/internal/secrets"
 )
 
 var (
@@ -24,6 +26,12 @@ var (
 	ErrInvalidToken = errors.New("invalid or expired account token")
 	// ErrInvalidPassword reports a password that does not meet the local policy.
 	ErrInvalidPassword = errors.New("password must contain 8 to 72 bytes")
+	// ErrMFARequired reports that a valid authenticator or recovery code is required.
+	ErrMFARequired = errors.New("multi-factor authentication code is required")
+	// ErrMFAInvalid reports an invalid authenticator or already-used recovery code.
+	ErrMFAInvalid = errors.New("invalid multi-factor authentication code")
+	// ErrMFANotConfigured reports an enrollment lifecycle request in the wrong state.
+	ErrMFANotConfigured = errors.New("multi-factor authentication is not configured")
 )
 
 const (
@@ -42,17 +50,35 @@ type Service struct {
 	productName string
 	mailer      Mailer
 	development bool
+	secretCodec secrets.PrivateKeyCodec
+}
+
+// Option customizes account security dependencies.
+type Option func(*Service)
+
+// WithSecretCodec encrypts MFA secrets before persistence.
+func WithSecretCodec(codec secrets.PrivateKeyCodec) Option {
+	return func(service *Service) {
+		if codec != nil {
+			service.secretCodec = codec
+		}
+	}
 }
 
 // NewService returns an account security service.
-func NewService(repository *Repository, publicURL, productName string, mailer Mailer, development bool) *Service {
-	return &Service{
+func NewService(repository *Repository, publicURL, productName string, mailer Mailer, development bool, options ...Option) *Service {
+	service := &Service{
 		repository:  repository,
 		publicURL:   strings.TrimRight(strings.TrimSpace(publicURL), "/"),
 		productName: strings.TrimSpace(productName),
 		mailer:      mailer,
 		development: development,
+		secretCodec: secrets.NoopPrivateKeyCodec{},
 	}
+	for _, option := range options {
+		option(service)
+	}
+	return service
 }
 
 // SendRegistrationVerification queues an email-ownership challenge for a new local user.
@@ -165,6 +191,119 @@ func (s *Service) RecordAuthEvent(ctx context.Context, userID, eventType string,
 // ListAuthEvents returns recent security events owned by a user.
 func (s *Service) ListAuthEvents(ctx context.Context, userID string) ([]SecurityEvent, error) {
 	return s.repository.ListAuthEvents(ctx, userID)
+}
+
+// MFAStatus reports whether the current user has an active second factor.
+func (s *Service) MFAStatus(ctx context.Context, userID string) (MFAStatus, error) {
+	_, enabled, err := s.repository.MFACredential(ctx, userID)
+	if IsNotFound(err) {
+		return MFAStatus{}, nil
+	}
+	return MFAStatus{Enabled: enabled}, err
+}
+
+// BeginMFA replaces any unconfirmed setup and returns a new authenticator secret.
+func (s *Service) BeginMFA(ctx context.Context, userID string) (MFASetup, error) {
+	email, _, err := s.repository.UserEmail(ctx, userID)
+	if err != nil {
+		return MFASetup{}, err
+	}
+	secret, err := generateTOTPSecret()
+	if err != nil {
+		return MFASetup{}, err
+	}
+	ciphertext, err := s.secretCodec.EncryptPrivateKey(secret)
+	if err != nil {
+		return MFASetup{}, err
+	}
+	if err := s.repository.SaveMFASetup(ctx, userID, ciphertext); err != nil {
+		return MFASetup{}, err
+	}
+	return MFASetup{Secret: secret, URI: totpURI(secret, s.productName, email)}, nil
+}
+
+// ConfirmMFA proves possession and returns recovery codes exactly once.
+func (s *Service) ConfirmMFA(ctx context.Context, userID, code string, client ClientInfo) (MFARecoveryCodes, error) {
+	secret, enabled, err := s.mfaSecret(ctx, userID)
+	if err != nil || enabled {
+		if err == nil {
+			err = ErrMFANotConfigured
+		}
+		return MFARecoveryCodes{}, err
+	}
+	if !validateTOTP(secret, code, time.Now().UTC()) {
+		return MFARecoveryCodes{}, ErrMFAInvalid
+	}
+	codes, err := generateRecoveryCodes(10)
+	if err != nil {
+		return MFARecoveryCodes{}, err
+	}
+	hashes := make([]string, len(codes))
+	for index := range codes {
+		hashes[index] = hashToken(normalizeRecoveryCode(codes[index]))
+	}
+	if err := s.repository.EnableMFA(ctx, userID, hashes, client); err != nil {
+		return MFARecoveryCodes{}, err
+	}
+	return MFARecoveryCodes{RecoveryCodes: codes}, nil
+}
+
+// VerifyMFA accepts a current TOTP or consumes a one-time recovery code.
+func (s *Service) VerifyMFA(ctx context.Context, userID, code string) error {
+	secret, enabled, err := s.mfaSecret(ctx, userID)
+	if IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return nil
+	}
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return ErrMFARequired
+	}
+	if validateTOTP(secret, code, time.Now().UTC()) {
+		return nil
+	}
+	if err := s.repository.ConsumeRecoveryCode(ctx, userID, hashToken(normalizeRecoveryCode(code))); err == nil {
+		return nil
+	}
+	return ErrMFAInvalid
+}
+
+// DisableMFA verifies the existing factor before deleting it.
+func (s *Service) DisableMFA(ctx context.Context, userID, code string, client ClientInfo) error {
+	if err := s.VerifyMFA(ctx, userID, code); err != nil {
+		return err
+	}
+	err := s.repository.DisableMFA(ctx, userID, client)
+	if IsNotFound(err) {
+		return ErrMFANotConfigured
+	}
+	return err
+}
+
+// HasMFA reports whether an account is safe to promote to a privileged role.
+func (s *Service) HasMFA(ctx context.Context, userID string) (bool, error) {
+	status, err := s.MFAStatus(ctx, userID)
+	return status.Enabled, err
+}
+
+// mfaSecret decrypts the stored authenticator secret.
+func (s *Service) mfaSecret(ctx context.Context, userID string) (string, bool, error) {
+	ciphertext, enabled, err := s.repository.MFACredential(ctx, userID)
+	if err != nil {
+		return "", false, err
+	}
+	secret, err := s.secretCodec.DecryptPrivateKey(ciphertext)
+	return secret, enabled, err
+}
+
+// normalizeRecoveryCode removes visual separators before hashing.
+func normalizeRecoveryCode(value string) string {
+	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(value), "-", ""))
 }
 
 // StartEmailDispatcher delivers transactional outbox messages until stopped.

@@ -48,3 +48,19 @@ type EmailMessage struct {
 	TextBody  string `db:"text_body"`
 	Attempts  int    `db:"attempts"`
 }
+
+// MFAStatus reports whether a second factor is active for the current account.
+type MFAStatus struct {
+	Enabled bool `json:"enabled"`
+}
+
+// MFASetup contains the authenticator secret and provisioning URI shown once before confirmation.
+type MFASetup struct {
+	Secret string `json:"secret"`
+	URI    string `json:"uri"`
+}
+
+// MFARecoveryCodes contains one-time codes shown only after successful enrollment.
+type MFARecoveryCodes struct {
+	RecoveryCodes []string `json:"recovery_codes"`
+}

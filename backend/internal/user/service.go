@@ -318,11 +318,26 @@ func (s *Service) ExchangeOAuthSession(ctx context.Context, code string) (*Authe
 
 // ExchangeOAuthSessionWithClient consumes an OAuth code and records its browser session.
 func (s *Service) ExchangeOAuthSessionWithClient(ctx context.Context, code string, client account.ClientInfo) (*AuthenticatedSession, error) {
+	return s.ExchangeOAuthSessionWithFactor(ctx, code, "", client)
+}
+
+// ExchangeOAuthSessionWithFactor verifies MFA before consuming a one-time OAuth code.
+func (s *Service) ExchangeOAuthSessionWithFactor(ctx context.Context, code, mfaCode string, client account.ClientInfo) (*AuthenticatedSession, error) {
 	code = strings.TrimSpace(code)
 	if code == "" {
 		return nil, ErrOAuthInvalidCode
 	}
-	user, err := s.repo.ConsumeOAuthLoginCode(ctx, hashOAuthCode(code), time.Now())
+	codeHash := hashOAuthCode(code)
+	if s.accountSecurity != nil {
+		candidate, err := s.repo.GetOAuthLoginCodeUser(ctx, codeHash, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		if err := s.accountSecurity.VerifyMFA(ctx, candidate.ID, mfaCode); err != nil {
+			return nil, err
+		}
+	}
+	user, err := s.repo.ConsumeOAuthLoginCode(ctx, codeHash, time.Now())
 	if err != nil {
 		return nil, err
 	}
@@ -330,11 +345,15 @@ func (s *Service) ExchangeOAuthSessionWithClient(ctx context.Context, code strin
 	if err != nil {
 		return nil, err
 	}
-	token, err := s.issueToken(user, sessionID)
+	mfaEnrollmentRequired, err := s.mfaEnrollmentRequired(ctx, user)
 	if err != nil {
 		return nil, err
 	}
-	return &AuthenticatedSession{Token: token, User: user, SessionID: sessionID}, nil
+	token, err := s.issueToken(user, sessionID, mfaEnrollmentRequired)
+	if err != nil {
+		return nil, err
+	}
+	return &AuthenticatedSession{Token: token, User: user, SessionID: sessionID, MFAEnrollmentRequired: mfaEnrollmentRequired}, nil
 }
 
 // OAuthFrontendRedirectURL builds the SPA callback URL with a one-time code or safe error code.
@@ -400,6 +419,15 @@ func (s *Service) UpdateInstanceRole(ctx context.Context, adminUserID, targetUse
 	role = strings.ToLower(strings.TrimSpace(role))
 	if !IsValidInstanceRole(role) {
 		return nil, invalidUserInput("invalid instance role")
+	}
+	if s.accountSecurity != nil && (role == InstanceRoleAdmin || role == InstanceRoleOwner) {
+		enabled, err := s.accountSecurity.HasMFA(ctx, targetUserID)
+		if err != nil {
+			return nil, err
+		}
+		if !enabled {
+			return nil, invalidUserInput("target user must enable multi-factor authentication before receiving a privileged role")
+		}
 	}
 	return s.repo.UpdateInstanceRole(ctx, adminUserID, targetUserID, role)
 }
@@ -665,9 +693,10 @@ func invalidUserInput(message string) error {
 
 // AuthenticatedSession contains the server-issued credential and public session identity.
 type AuthenticatedSession struct {
-	Token     string
-	User      *User
-	SessionID string
+	Token                 string
+	User                  *User
+	SessionID             string
+	MFAEnrollmentRequired bool
 }
 
 // Login verifies credentials and returns a JWT bound to the user's token version.
@@ -686,6 +715,11 @@ func (s *Service) LoginSession(ctx context.Context, email, password string) (*Au
 
 // LoginSessionWithClient verifies credentials and records its browser session.
 func (s *Service) LoginSessionWithClient(ctx context.Context, email, password string, client account.ClientInfo) (*AuthenticatedSession, error) {
+	return s.LoginSessionWithFactor(ctx, email, password, "", client)
+}
+
+// LoginSessionWithFactor verifies primary and optional second-factor credentials.
+func (s *Service) LoginSessionWithFactor(ctx context.Context, email, password, mfaCode string, client account.ClientInfo) (*AuthenticatedSession, error) {
 	email = normalizeEmail(email)
 
 	user, err := s.repo.GetUserByEmail(ctx, email)
@@ -706,16 +740,26 @@ func (s *Service) LoginSessionWithClient(ctx context.Context, email, password st
 	if s.accountSecurity != nil && !user.EmailVerified {
 		return nil, ErrEmailNotVerified
 	}
+	if s.accountSecurity != nil {
+		if err := s.accountSecurity.VerifyMFA(ctx, user.ID, mfaCode); err != nil {
+			_ = s.accountSecurity.RecordAuthEvent(ctx, user.ID, "mfa.failed", client)
+			return nil, err
+		}
+	}
 
 	sessionID, err := s.createSession(ctx, user.ID, client)
 	if err != nil {
 		return nil, err
 	}
-	token, err := s.issueToken(user, sessionID)
+	mfaEnrollmentRequired, err := s.mfaEnrollmentRequired(ctx, user)
 	if err != nil {
 		return nil, err
 	}
-	return &AuthenticatedSession{Token: token, User: user, SessionID: sessionID}, nil
+	token, err := s.issueToken(user, sessionID, mfaEnrollmentRequired)
+	if err != nil {
+		return nil, err
+	}
+	return &AuthenticatedSession{Token: token, User: user, SessionID: sessionID, MFAEnrollmentRequired: mfaEnrollmentRequired}, nil
 }
 
 // RevokeSessions invalidates all currently issued sessions for a user.
@@ -727,7 +771,7 @@ func (s *Service) RevokeSessions(ctx context.Context, userID string) error {
 }
 
 // issueToken creates the normal Progo JWT for any authenticated local user.
-func (s *Service) issueToken(user *User, sessionID string) (string, error) {
+func (s *Service) issueToken(user *User, sessionID string, mfaEnrollmentRequired bool) (string, error) {
 	now := time.Now().UTC()
 	claims := jwt.MapClaims{
 		"sub":           user.ID,
@@ -742,6 +786,9 @@ func (s *Service) issueToken(user *User, sessionID string) (string, error) {
 	if sessionID != "" {
 		claims["sid"] = sessionID
 	}
+	if mfaEnrollmentRequired {
+		claims["mfa_enrollment_required"] = true
+	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
@@ -751,6 +798,30 @@ func (s *Service) issueToken(user *User, sessionID string) (string, error) {
 	}
 
 	return tokenString, nil
+}
+
+// mfaEnrollmentRequired restricts privileged accounts until they activate MFA.
+func (s *Service) mfaEnrollmentRequired(ctx context.Context, value *User) (bool, error) {
+	if s.accountSecurity == nil || value == nil || (value.InstanceRole != InstanceRoleAdmin && value.InstanceRole != InstanceRoleOwner) {
+		return false, nil
+	}
+	enabled, err := s.accountSecurity.HasMFA(ctx, value.ID)
+	return !enabled, err
+}
+
+// ValidateMFAEnrollment permits a restricted privileged session after live enrollment completes.
+func (s *Service) ValidateMFAEnrollment(ctx context.Context, userID string) error {
+	if s.accountSecurity == nil {
+		return nil
+	}
+	enabled, err := s.accountSecurity.HasMFA(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return account.ErrMFARequired
+	}
+	return nil
 }
 
 // createSession persists browser-visible session state when account security is enabled.

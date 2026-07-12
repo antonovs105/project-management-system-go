@@ -170,6 +170,8 @@ Public local registration in production requires transactional SMTP configuratio
 
 Account security endpoints support email verification, enumeration-resistant password recovery, per-device session inventory/revocation, and a durable user-visible authentication event history. Resetting a password revokes all active sessions and each challenge can be consumed only once.
 
+Users can enroll RFC 6238 TOTP MFA from the account page. Authenticator secrets are AES-GCM encrypted at rest, ten recovery codes are returned once and stored only as hashes, and each recovery code is atomically consumed. Password and OAuth sessions enforce MFA when enabled; users cannot be promoted to `admin` or `owner` until enrollment is active.
+
 ### Frontend
 
 ```bash

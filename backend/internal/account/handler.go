@@ -31,6 +31,10 @@ func (h *Handler) RegisterAccountRoutes(api *echo.Group) {
 	api.GET("/me/sessions", h.ListSessions)
 	api.DELETE("/me/sessions/:sessionID", h.RevokeSession)
 	api.GET("/me/security-events", h.ListSecurityEvents)
+	api.GET("/me/mfa", h.GetMFAStatus)
+	api.POST("/me/mfa/setup", h.BeginMFA)
+	api.POST("/me/mfa/confirm", h.ConfirmMFA)
+	api.DELETE("/me/mfa", h.DisableMFA)
 }
 
 // ForgotPasswordRequest is the public recovery request payload.
@@ -47,6 +51,11 @@ type ResetPasswordRequest struct {
 // VerifyEmailRequest is the single-use email ownership payload.
 type VerifyEmailRequest struct {
 	Token string `json:"token"`
+}
+
+// MFACodeRequest carries an authenticator or single-use recovery code.
+type MFACodeRequest struct {
+	Code string `json:"code"`
 }
 
 // ForgotPassword accepts every syntactically valid request without revealing account existence.
@@ -125,6 +134,55 @@ func (h *Handler) ListSecurityEvents(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "security event list failed"})
 	}
 	return c.JSON(http.StatusOK, values)
+}
+
+// GetMFAStatus reports whether the account has an active second factor.
+func (h *Handler) GetMFAStatus(c echo.Context) error {
+	status, err := h.service.MFAStatus(c.Request().Context(), currentUserID(c))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "MFA status failed"})
+	}
+	return c.JSON(http.StatusOK, status)
+}
+
+// BeginMFA creates a replacement unconfirmed authenticator secret.
+func (h *Handler) BeginMFA(c echo.Context) error {
+	setup, err := h.service.BeginMFA(c.Request().Context(), currentUserID(c))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "MFA setup failed"})
+	}
+	return c.JSON(http.StatusOK, setup)
+}
+
+// ConfirmMFA activates a setup after a valid authenticator code.
+func (h *Handler) ConfirmMFA(c echo.Context) error {
+	var request MFACodeRequest
+	if err := c.Bind(&request); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	codes, err := h.service.ConfirmMFA(c.Request().Context(), currentUserID(c), request.Code, clientInfo(c))
+	if err != nil {
+		if errors.Is(err, ErrMFAInvalid) || errors.Is(err, ErrMFANotConfigured) {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "MFA confirmation failed"})
+	}
+	return c.JSON(http.StatusOK, codes)
+}
+
+// DisableMFA removes a second factor after proving possession.
+func (h *Handler) DisableMFA(c echo.Context) error {
+	var request MFACodeRequest
+	if err := c.Bind(&request); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	if err := h.service.DisableMFA(c.Request().Context(), currentUserID(c), request.Code, clientInfo(c)); err != nil {
+		if errors.Is(err, ErrMFARequired) || errors.Is(err, ErrMFAInvalid) || errors.Is(err, ErrMFANotConfigured) {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "MFA disable failed"})
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 // currentUserID reads the authenticated local user identifier.

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 )
 
 // Repository persists account-security state in PostgreSQL.
@@ -237,6 +238,103 @@ func (r *Repository) ListAuthEvents(ctx context.Context, userID string) ([]Secur
 		}
 	}
 	return values, nil
+}
+
+// SaveMFASetup stores a disabled encrypted secret until the user proves possession.
+func (r *Repository) SaveMFASetup(ctx context.Context, userID, ciphertext string) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO user_mfa_credentials (user_id, secret_ciphertext, recovery_code_hashes, enabled_at)
+		VALUES ($1, $2, '{}', NULL)
+		ON CONFLICT (user_id) DO UPDATE
+		SET secret_ciphertext = EXCLUDED.secret_ciphertext,
+			recovery_code_hashes = '{}', enabled_at = NULL, updated_at = now()
+	`, userID, ciphertext)
+	return err
+}
+
+// MFACredential returns encrypted factor state for login and enrollment.
+func (r *Repository) MFACredential(ctx context.Context, userID string) (string, bool, error) {
+	var row struct {
+		Ciphertext string     `db:"secret_ciphertext"`
+		EnabledAt  *time.Time `db:"enabled_at"`
+	}
+	err := r.db.GetContext(ctx, &row, `
+		SELECT secret_ciphertext, enabled_at
+		FROM user_mfa_credentials WHERE user_id = $1
+	`, userID)
+	return row.Ciphertext, row.EnabledAt != nil, err
+}
+
+// EnableMFA activates a proven factor and its hashed recovery codes atomically.
+func (r *Repository) EnableMFA(ctx context.Context, userID string, recoveryHashes []string, client ClientInfo) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `
+		UPDATE user_mfa_credentials
+		SET recovery_code_hashes = $2, enabled_at = now(), updated_at = now()
+		WHERE user_id = $1 AND enabled_at IS NULL
+	`, userID, pq.Array(recoveryHashes))
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	if err := insertAuthEvent(ctx, tx, userID, "mfa.enabled", client, nil); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// DisableMFA removes a proven factor and records the security event.
+func (r *Repository) DisableMFA(ctx context.Context, userID string, client ClientInfo) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM user_mfa_credentials WHERE user_id = $1 AND enabled_at IS NOT NULL`, userID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	if err := insertAuthEvent(ctx, tx, userID, "mfa.disabled", client, nil); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ConsumeRecoveryCode atomically removes one matching hashed backup factor.
+func (r *Repository) ConsumeRecoveryCode(ctx context.Context, userID, codeHash string) error {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE user_mfa_credentials
+		SET recovery_code_hashes = array_remove(recovery_code_hashes, $2), updated_at = now()
+		WHERE user_id = $1 AND enabled_at IS NOT NULL AND $2 = ANY(recovery_code_hashes)
+	`, userID, codeHash)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // ClaimEmail atomically leases one deliverable outbox message.

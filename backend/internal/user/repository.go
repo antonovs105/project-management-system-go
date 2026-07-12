@@ -22,6 +22,7 @@ type Repository interface {
 	GetOAuthIdentity(ctx context.Context, provider, subject string) (*OAuthIdentity, error)
 	UpdateOAuthIdentity(ctx context.Context, identity *OAuthIdentity) error
 	CreateOAuthLoginCode(ctx context.Context, userID, codeHash string, expiresAt time.Time) error
+	GetOAuthLoginCodeUser(ctx context.Context, codeHash string, now time.Time) (*User, error)
 	ConsumeOAuthLoginCode(ctx context.Context, codeHash string, now time.Time) (*User, error)
 	UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error
 	RevokeSessions(ctx context.Context, userID string) error
@@ -271,6 +272,21 @@ func (r *PgRepository) CreateOAuthLoginCode(ctx context.Context, userID, codeHas
 		VALUES ($1, $2, $3)
 	`, userID, codeHash, expiresAt)
 	return err
+}
+
+// GetOAuthLoginCodeUser resolves an active exchange code without consuming it so MFA can be verified first.
+func (r *PgRepository) GetOAuthLoginCodeUser(ctx context.Context, codeHash string, now time.Time) (*User, error) {
+	var userID string
+	if err := r.db.GetContext(ctx, &userID, `
+		SELECT user_id::text FROM oauth_login_codes
+		WHERE code_hash = $1 AND used_at IS NULL AND expires_at > $2
+	`, codeHash, now); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrOAuthInvalidCode
+		}
+		return nil, err
+	}
+	return r.GetUserByID(ctx, userID)
 }
 
 // ConsumeOAuthLoginCode marks a one-time code used and returns the linked user.

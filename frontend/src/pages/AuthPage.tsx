@@ -46,7 +46,8 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
   const { t } = useI18n();
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+	const [password, setPassword] = useState("");
+	const [mfaCode, setMFACode] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 
   const publicInstance = useQuery({
@@ -66,8 +67,8 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
   const login = useMutation({
     mutationFn: api.login,
     onSuccess: (session) => {
-      setSession({ userId: session.user_id, instanceRole: session.instance_role, email: session.email, emailVerified: session.email_verified });
-      navigate(destinationFromLocation(location.state), { replace: true });
+		setSession({ userId: session.user_id, instanceRole: session.instance_role, email: session.email, emailVerified: session.email_verified, mfaEnrollmentRequired: session.mfa_enrollment_required });
+		navigate(session.mfa_enrollment_required ? "/account" : destinationFromLocation(location.state), { replace: true });
     },
     onError: (error) => setFormError(errorMessage(error, t("auth.loginFailed"))),
   });
@@ -99,7 +100,7 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
       register.mutate({ username: username.trim(), email: email.trim(), password });
       return;
     }
-    login.mutate({ email: email.trim(), password });
+	login.mutate({ email: email.trim(), password, mfa_code: mfaCode.trim() || undefined });
   }
 
   const pending = login.isPending || register.isPending;
@@ -204,6 +205,15 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
                 autoComplete="email"
                 required
               />
+				{mode === "login" ? (
+					<TextField
+						label="Authenticator or recovery code (if enabled)"
+						value={mfaCode}
+						onChange={(event) => setMFACode(event.target.value)}
+						autoComplete="one-time-code"
+						inputMode="numeric"
+					/>
+				) : null}
               <TextField
                 label={t("auth.password")}
                 type="password"

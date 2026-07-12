@@ -53,6 +53,13 @@ func (m *MockRepository) CreateOAuthLoginCode(ctx context.Context, userID, codeH
 	return args.Error(0)
 }
 
+// GetOAuthLoginCodeUser mocks non-consuming OAuth code lookup.
+func (m *MockRepository) GetOAuthLoginCodeUser(ctx context.Context, codeHash string, now time.Time) (*User, error) {
+	args := m.Called(ctx, codeHash, now)
+	value, _ := args.Get(0).(*User)
+	return value, args.Error(1)
+}
+
 func (m *MockRepository) ConsumeOAuthLoginCode(ctx context.Context, codeHash string, now time.Time) (*User, error) {
 	args := m.Called(ctx, codeHash, now)
 	if args.Get(0) == nil {

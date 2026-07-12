@@ -1,10 +1,11 @@
 import { useMutation } from "@tanstack/react-query";
+import axios from "axios";
 import { ArrowLeft } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import { ThemeToggle } from "../components/ThemeToggle";
-import { ErrorState, LoadingState, Panel } from "../components/ui";
+import { Button, ErrorState, LoadingState, Panel, TextField } from "../components/ui";
 import { api, errorMessage } from "../lib/api";
 import { useI18n } from "../lib/i18n-context";
 import { useAuthStore } from "../store/auth";
@@ -36,7 +37,9 @@ export function OAuthCallbackPage() {
   const setSession = useAuthStore((state) => state.setSession);
   const { t } = useI18n();
   const handledCode = useRef<string | null>(null);
-  const [exchangeError, setExchangeError] = useState<string | null>(null);
+	const [exchangeError, setExchangeError] = useState<string | null>(null);
+	const [mfaRequired, setMFARequired] = useState(false);
+	const [mfaCode, setMFACode] = useState("");
 
   const code = searchParams.get("code")?.trim() ?? "";
   const errorCode = searchParams.get("error")?.trim() ?? "";
@@ -44,12 +47,19 @@ export function OAuthCallbackPage() {
   const pageError = callbackError ?? exchangeError;
 
   const { mutate, isPending } = useMutation({
-    mutationFn: api.exchangeOAuthCode,
+		mutationFn: ({ exchangeCode, factor }: { exchangeCode: string; factor?: string }) => api.exchangeOAuthCode(exchangeCode, factor),
     onSuccess: (session) => {
-      setSession({ userId: session.user_id, instanceRole: session.instance_role, email: session.email, emailVerified: session.email_verified });
-      navigate("/projects", { replace: true });
+		setSession({ userId: session.user_id, instanceRole: session.instance_role, email: session.email, emailVerified: session.email_verified, mfaEnrollmentRequired: session.mfa_enrollment_required });
+		navigate(session.mfa_enrollment_required ? "/account" : "/projects", { replace: true });
     },
-    onError: (error) => setExchangeError(errorMessage(error, t("oauth.exchangeFailed"))),
+		onError: (error) => {
+			if (axios.isAxiosError<{ code?: string }>(error) && error.response?.data?.code === "mfa_required") {
+				setMFARequired(true);
+				setExchangeError(null);
+				return;
+			}
+			setExchangeError(errorMessage(error, t("oauth.exchangeFailed")));
+		},
   });
 
   useEffect(() => {
@@ -60,7 +70,7 @@ export function OAuthCallbackPage() {
       return;
     }
     handledCode.current = code;
-    mutate(code);
+		mutate({ exchangeCode: code });
   }, [callbackError, code, mutate]);
 
   return (
@@ -77,7 +87,7 @@ export function OAuthCallbackPage() {
             <p className="mt-1 text-sm text-zinc-500">{pageError ? t("oauth.failed") : t("oauth.loading")}</p>
           </div>
 
-          {pageError ? (
+			{pageError ? (
             <div className="grid gap-4">
               <ErrorState title={t("common.requestFailed")} body={pageError} />
               <Link
@@ -88,7 +98,12 @@ export function OAuthCallbackPage() {
                 {t("oauth.backToLogin")}
               </Link>
             </div>
-          ) : (
+			) : mfaRequired ? (
+				<form className="grid gap-4" onSubmit={(event) => { event.preventDefault(); mutate({ exchangeCode: code, factor: mfaCode.trim() }); }}>
+					<TextField label="Authenticator or recovery code" value={mfaCode} onChange={(event) => setMFACode(event.target.value)} autoComplete="one-time-code" required />
+					<Button type="submit" tone="primary" disabled={isPending || !mfaCode.trim()}>Complete sign in</Button>
+				</form>
+			) : (
             <LoadingState label={isPending ? t("oauth.loading") : t("common.working")} />
           )}
         </Panel>

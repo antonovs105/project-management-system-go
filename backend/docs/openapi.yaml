@@ -163,6 +163,8 @@ paths:
                     format: email
                   email_verified:
                     type: boolean
+                  mfa_enrollment_required:
+                    type: boolean
         "401":
           $ref: "#/components/responses/Error"
   /auth/oauth/providers:
@@ -251,6 +253,8 @@ paths:
                     type: string
                     format: email
                   email_verified:
+                    type: boolean
+                  mfa_enrollment_required:
                     type: boolean
         "401":
           $ref: "#/components/responses/Error"
@@ -595,6 +599,76 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/SecurityEvent"
+  /api/v1/me/mfa:
+    get:
+      tags: [Auth]
+      operationId: getCurrentUserMFAStatus
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Current MFA enrollment status.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled]
+                properties:
+                  enabled:
+                    type: boolean
+    delete:
+      tags: [Auth]
+      operationId: disableCurrentUserMFA
+      security:
+        - cookieAuth: []
+      requestBody:
+        $ref: "#/components/requestBodies/MFACode"
+      responses:
+        "204":
+          description: MFA disabled after factor verification.
+        "400":
+          $ref: "#/components/responses/Error"
+  /api/v1/me/mfa/setup:
+    post:
+      tags: [Auth]
+      operationId: beginCurrentUserMFASetup
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Unconfirmed TOTP provisioning values.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [secret, uri]
+                properties:
+                  secret:
+                    type: string
+                  uri:
+                    type: string
+                    format: uri
+  /api/v1/me/mfa/confirm:
+    post:
+      tags: [Auth]
+      operationId: confirmCurrentUserMFASetup
+      security:
+        - cookieAuth: []
+      requestBody:
+        $ref: "#/components/requestBodies/MFACode"
+      responses:
+        "200":
+          description: One-time recovery codes returned after enrollment.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recovery_codes]
+                properties:
+                  recovery_codes:
+                    type: array
+                    items:
+                      type: string
   /api/v1/me/logout:
     post:
       tags: [Auth]
@@ -2449,6 +2523,19 @@ components:
               password:
                 type: string
                 format: password
+              mfa_code:
+                type: string
+                description: Current TOTP or unused recovery code when MFA is enabled.
+    MFACode:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [code]
+            properties:
+              code:
+                type: string
     ExchangeOAuthCode:
       required: true
       content:
@@ -2459,6 +2546,9 @@ components:
             properties:
               code:
                 type: string
+              mfa_code:
+                type: string
+                description: Current TOTP or unused recovery code when MFA is enabled.
     RegisterUser:
       required: true
       content:

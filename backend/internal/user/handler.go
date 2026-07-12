@@ -61,15 +61,17 @@ type RegisterRequest struct {
 
 // ExchangeOAuthCodeRequest is the JSON payload for completing OAuth login in the SPA.
 type ExchangeOAuthCodeRequest struct {
-	Code string `json:"code"`
+	Code    string `json:"code"`
+	MFACode string `json:"mfa_code,omitempty"`
 }
 
 // SessionResponse is the non-sensitive identity returned after a session cookie is established.
 type SessionResponse struct {
-	UserID        string `json:"user_id"`
-	InstanceRole  string `json:"instance_role"`
-	Email         string `json:"email,omitempty"`
-	EmailVerified bool   `json:"email_verified"`
+	UserID                string `json:"user_id"`
+	InstanceRole          string `json:"instance_role"`
+	Email                 string `json:"email,omitempty"`
+	EmailVerified         bool   `json:"email_verified"`
+	MFAEnrollmentRequired bool   `json:"mfa_enrollment_required,omitempty"`
 }
 
 // UpdateInstanceRoleRequest is the JSON payload for changing a user's instance role.
@@ -275,18 +277,19 @@ func (h *Handler) ExchangeOAuthCode(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
-	session, err := h.service.ExchangeOAuthSessionWithClient(c.Request().Context(), req.Code, requestClientInfo(c))
+	session, err := h.service.ExchangeOAuthSessionWithFactor(c.Request().Context(), req.Code, req.MFACode, requestClientInfo(c))
 	if err != nil {
 		return writeOAuthExchangeError(c, err)
 	}
 	setSessionCookie(c, session.Token)
-	return c.JSON(http.StatusOK, sessionResponse(session.User))
+	return c.JSON(http.StatusOK, sessionResponse(session))
 }
 
 // LoginRequest is the JSON payload for password login.
 type LoginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	MFACode  string `json:"mfa_code,omitempty"`
 }
 
 // Login verifies credentials and returns a bearer JWT.
@@ -296,16 +299,19 @@ func (h *Handler) Login(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
 
-	session, err := h.service.LoginSessionWithClient(c.Request().Context(), req.Email, req.Password, requestClientInfo(c))
+	session, err := h.service.LoginSessionWithFactor(c.Request().Context(), req.Email, req.Password, req.MFACode, requestClientInfo(c))
 	if err != nil {
 		if errors.Is(err, ErrEmailNotVerified) {
 			return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		}
+		if errors.Is(err, account.ErrMFARequired) || errors.Is(err, account.ErrMFAInvalid) {
+			return c.JSON(http.StatusUnauthorized, map[string]string{"error": err.Error(), "code": "mfa_required"})
 		}
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": err.Error()})
 	}
 	setSessionCookie(c, session.Token)
 
-	return c.JSON(http.StatusOK, sessionResponse(session.User))
+	return c.JSON(http.StatusOK, sessionResponse(session))
 }
 
 // Logout revokes the user's issued sessions and expires the browser cookie.
@@ -332,6 +338,8 @@ func writeOAuthExchangeError(c echo.Context, err error) error {
 	switch {
 	case errors.Is(err, ErrOAuthInvalidCode):
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": ErrOAuthInvalidCode.Error()})
+	case errors.Is(err, account.ErrMFARequired), errors.Is(err, account.ErrMFAInvalid):
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": err.Error(), "code": "mfa_required"})
 	default:
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "oauth exchange failed"})
 	}
@@ -421,11 +429,12 @@ func setSessionCookie(c echo.Context, token string) {
 }
 
 // sessionResponse maps the authenticated user to the browser-safe response.
-func sessionResponse(value *User) SessionResponse {
-	if value == nil {
+func sessionResponse(session *AuthenticatedSession) SessionResponse {
+	if session == nil || session.User == nil {
 		return SessionResponse{}
 	}
-	return SessionResponse{UserID: value.ID, InstanceRole: value.InstanceRole, Email: value.Email, EmailVerified: value.EmailVerified}
+	value := session.User
+	return SessionResponse{UserID: value.ID, InstanceRole: value.InstanceRole, Email: value.Email, EmailVerified: value.EmailVerified, MFAEnrollmentRequired: session.MFAEnrollmentRequired}
 }
 
 // currentSessionID returns the validated browser session claim.

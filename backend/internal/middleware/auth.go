@@ -79,6 +79,8 @@ func JWTMiddleware(secret []byte, validators ...TokenVersionValidator) echo.Midd
 					}
 					c.Set("sessionID", sessionID)
 				}
+				mfaEnrollmentRequired, _ := claims["mfa_enrollment_required"].(bool)
+				c.Set("mfaEnrollmentRequired", mfaEnrollmentRequired)
 
 				return next(c)
 			}

@@ -35,6 +35,7 @@ export interface SessionUser {
 	instanceRole: InstanceRole;
 	email?: string;
 	emailVerified?: boolean;
+	mfaEnrollmentRequired?: boolean;
 }
 
 export interface AccountSession {

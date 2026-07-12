@@ -458,7 +458,7 @@ func main() {
 			log.Fatal(err)
 		}
 	}
-	accountService := account.NewService(accountRepository, publicBaseURL, cfg.Instance.Name, accountMailer, !production)
+	accountService := account.NewService(accountRepository, publicBaseURL, cfg.Instance.Name, accountMailer, !production, account.WithSecretCodec(privateKeyCodec))
 	userService := user.NewService(
 		userRepo,
 		[]byte(jwtSecret),
@@ -971,6 +971,7 @@ func authAccountRateLimitIdentifier(c echo.Context) (string, error) {
 // registerAuthenticatedAPIRoutes mounts stable REST API routes under one prefix.
 func registerAuthenticatedAPIRoutes(api *echo.Group, server *ApiServer, jwtSecret []byte, userService *user.Service) {
 	api.Use(authMiddleware.JWTMiddleware(jwtSecret, userService))
+	api.Use(authMiddleware.MFAEnrollmentMiddleware(userService))
 
 	api.GET("/me", server.getProfile)
 	server.instanceHandler.RegisterAuthenticatedRoutes(api)
