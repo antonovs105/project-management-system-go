@@ -1,6 +1,8 @@
 module github.com/antonovs105/project-management-system-go
 
-go 1.25.0
+go 1.26.0
+
+toolchain go1.26.5
 
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.0
