@@ -47,6 +47,7 @@ import type {
 	RemoteTicketWriteResult,
 	SecurityEvent,
   Ticket,
+  TicketAttachment,
   TicketPriority,
   TicketStatus,
   TicketType,
@@ -275,6 +276,7 @@ interface InstanceConfigResponse {
   registration_enabled?: boolean;
   project_creation_policy?: ProjectCreationPolicy;
   oauth_providers?: OAuthProvider[];
+  attachments_enabled?: boolean;
 }
 
 interface InstanceCapabilitiesResponse extends InstanceConfigResponse {
@@ -329,6 +331,7 @@ function normalizeInstanceConfig(data: InstanceConfigResponse) {
     registration_enabled: data.registration_enabled ?? true,
     project_creation_policy: normalizeProjectCreationPolicy(data.project_creation_policy),
     oauth_providers: normalizeOAuthProviders(data.oauth_providers),
+    attachments_enabled: data.attachments_enabled ?? false,
   };
 }
 
@@ -346,6 +349,10 @@ export function projectTicketEventsURL(projectId: ID): string {
 
 export function notificationsEventsURL(): string {
   return apiURL(`${apiPrefix}/me/notifications/events`);
+}
+
+export function attachmentContentURL(attachmentId: ID): string {
+  return apiURL(`${apiPrefix}/attachments/${attachmentId}/content`);
 }
 
 export const api = {
@@ -704,6 +711,22 @@ export const api = {
   async getTicket(ticketId: ID): Promise<Ticket> {
     const { data } = await http.get<Ticket>(`${apiPrefix}/tickets/${ticketId}`);
     return data;
+  },
+
+  async listTicketAttachments(ticketId: ID): Promise<TicketAttachment[]> {
+    const { data } = await http.get<TicketAttachment[] | null>(`${apiPrefix}/tickets/${ticketId}/attachments`);
+    return asArray(data);
+  },
+
+  async uploadTicketAttachment(ticketId: ID, file: File): Promise<TicketAttachment> {
+    const form = new FormData();
+    form.append("file", file);
+    const { data } = await http.post<TicketAttachment>(`${apiPrefix}/tickets/${ticketId}/attachments`, form);
+    return data;
+  },
+
+  async deleteTicketAttachment(attachmentId: ID): Promise<void> {
+    await http.delete(`${apiPrefix}/attachments/${attachmentId}`);
   },
 
   async updateTicket(ticketId: ID, payload: UpdateTicketPayload, version: number): Promise<void> {

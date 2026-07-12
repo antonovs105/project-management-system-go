@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Github, Link2, MessageSquare, Save, Trash2, Unlink, X } from "lucide-react";
+import { Download, Github, Link2, MessageSquare, Paperclip, Save, Trash2, Unlink, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
-import { api, errorMessage, type UpdateTicketPayload } from "../../lib/api";
+import { api, attachmentContentURL, errorMessage, type UpdateTicketPayload } from "../../lib/api";
 import { ticketLinkTypes, ticketPriorities, ticketStatuses, ticketTypes } from "../../lib/constants";
 import { compactId, relativeDate } from "../../lib/format";
 import { fieldLimits } from "../../lib/limits";
@@ -74,6 +74,28 @@ function TicketEditor({
 	  toast.success("Ticket archived");
       onClose();
     },
+  });
+
+  const capabilities = useQuery({ queryKey: queryKeys.instanceCapabilities, queryFn: api.getInstanceCapabilities });
+  const attachments = useQuery({
+    queryKey: queryKeys.ticketAttachments(ticket.id),
+    queryFn: () => api.listTicketAttachments(ticket.id),
+    enabled: capabilities.data?.attachments_enabled === true,
+  });
+  const uploadAttachment = useMutation({
+    mutationFn: (file: File) => api.uploadTicketAttachment(ticket.id, file),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.ticketAttachments(ticket.id) });
+      toast.success("Attachment uploaded");
+    },
+    onError: (error) => toast.error(errorMessage(error, "Attachment upload failed.")),
+  });
+  const deleteAttachment = useMutation({
+    mutationFn: api.deleteTicketAttachment,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.ticketAttachments(ticket.id) });
+    },
+    onError: (error) => toast.error(errorMessage(error, "Attachment delete failed.")),
   });
 
   function submitTicket(event: FormEvent<HTMLFormElement>) {
@@ -165,6 +187,55 @@ function TicketEditor({
         onChange={(event) => setDescription(event.target.value)}
         maxLength={fieldLimits.ticketDescriptionMaxLength}
       />
+      {capabilities.data?.attachments_enabled ? (
+        <fieldset className="grid gap-2 rounded-xl border border-zinc-200 p-3">
+          <legend className="px-1 text-sm font-medium text-zinc-700">Attachments</legend>
+          <label className="focus-ring inline-flex w-fit cursor-pointer items-center gap-2 rounded-full border border-zinc-200 px-3 py-2 text-sm font-medium">
+            <Paperclip size={15} />
+            {uploadAttachment.isPending ? "Uploading..." : "Add file"}
+            <input
+              className="sr-only"
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,application/json,application/zip,text/plain,text/csv"
+              disabled={uploadAttachment.isPending}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) uploadAttachment.mutate(file);
+                event.currentTarget.value = "";
+              }}
+            />
+          </label>
+          {attachments.isLoading ? <LoadingState label="Loading attachments" /> : null}
+          {attachments.isError ? (
+            <ErrorState
+              title="Could not load attachments"
+              body={errorMessage(attachments.error, "Attachment request failed.")}
+            />
+          ) : null}
+          {(attachments.data || []).map((attachment) => (
+            <div key={attachment.id} className="flex items-center justify-between gap-2 rounded-lg bg-zinc-50 p-2 text-sm">
+              <div className="min-w-0">
+                <div className="truncate font-medium">{attachment.filename}</div>
+                <div className="text-xs text-zinc-500">
+                  {Math.ceil(attachment.size_bytes / 1024)} KiB / {relativeDate(attachment.created_at)}
+                </div>
+              </div>
+              <div className="flex gap-1">
+                <a
+                  className="focus-ring rounded-full p-2 hover:bg-zinc-200"
+                  href={attachmentContentURL(attachment.id)}
+                  aria-label={`Download ${attachment.filename}`}
+                >
+                  <Download size={15} />
+                </a>
+                <IconButton label={`Delete ${attachment.filename}`} onClick={() => deleteAttachment.mutate(attachment.id)}>
+                  <Trash2 size={15} />
+                </IconButton>
+              </div>
+            </div>
+          ))}
+        </fieldset>
+      ) : null}
       <div className="flex justify-between gap-2">
         <Button
           tone="danger"

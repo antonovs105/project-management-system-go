@@ -87,12 +87,24 @@ export interface ArchivedTicket {
 	archived_at: string;
 }
 
+export interface TicketAttachment {
+	id: ID;
+	ticket_id: ID;
+	uploader_id: ID;
+	filename: string;
+	content_type: string;
+	size_bytes: number;
+	sha256: string;
+	created_at: string;
+}
+
 export interface PublicInstanceConfig {
   name: string;
   version: string;
   registration_enabled: boolean;
   project_creation_policy: ProjectCreationPolicy;
   oauth_providers: OAuthProvider[];
+  attachments_enabled: boolean;
 }
 
 export interface InstanceCapabilities extends PublicInstanceConfig {
