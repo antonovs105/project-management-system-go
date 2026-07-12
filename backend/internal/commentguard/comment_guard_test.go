@@ -13,8 +13,8 @@ import (
 	"testing"
 )
 
-// TestProductionDeclarationsHaveGoDoc ensures backend top-level declarations stay documented.
-func TestProductionDeclarationsHaveGoDoc(t *testing.T) {
+// TestExportedProductionDeclarationsHaveGoDoc enforces standard exported API documentation.
+func TestExportedProductionDeclarationsHaveGoDoc(t *testing.T) {
 	moduleRoot := backendModuleRoot(t)
 	var missing []string
 
@@ -48,7 +48,32 @@ func TestProductionDeclarationsHaveGoDoc(t *testing.T) {
 		t.Fatalf("scan backend Go files: %v", err)
 	}
 	if len(missing) > 0 {
-		t.Fatalf("top-level declarations need Go-doc comments:\n%s", strings.Join(missing, "\n"))
+		t.Fatalf("exported declarations need Go-doc comments:\n%s", strings.Join(missing, "\n"))
+	}
+}
+
+// TestUndocumentedDeclarationsIgnoresPrivateHelpers prevents documentation ceremony from returning.
+func TestUndocumentedDeclarationsIgnoresPrivateHelpers(t *testing.T) {
+	fileSet := token.NewFileSet()
+	file, err := parser.ParseFile(fileSet, "example.go", `package example
+func privateHelper() {}
+func ExportedHelper() {}
+var privateValue = true
+var ExportedValue = true
+`, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+	var missing []string
+	for _, decl := range file.Decls {
+		missing = append(missing, undocumentedDeclarations(fileSet, "example.go", decl)...)
+	}
+	joined := strings.Join(missing, "\n")
+	if strings.Contains(joined, "privateHelper") || strings.Contains(joined, "privateValue") {
+		t.Fatalf("private declarations should not require GoDoc:\n%s", joined)
+	}
+	if !strings.Contains(joined, "ExportedHelper") || !strings.Contains(joined, "ExportedValue") {
+		t.Fatalf("exported declarations should require GoDoc:\n%s", joined)
 	}
 }
 
@@ -67,6 +92,9 @@ func backendModuleRoot(t *testing.T) string {
 func undocumentedDeclarations(fileSet *token.FileSet, path string, decl ast.Decl) []string {
 	switch typed := decl.(type) {
 	case *ast.FuncDecl:
+		if !typed.Name.IsExported() {
+			return nil
+		}
 		if hasGoDoc(typed.Name.Name, typed.Doc) {
 			return nil
 		}
@@ -84,11 +112,17 @@ func undocumentedGenDecl(fileSet *token.FileSet, path string, decl *ast.GenDecl)
 	for _, spec := range decl.Specs {
 		switch typed := spec.(type) {
 		case *ast.TypeSpec:
+			if !typed.Name.IsExported() {
+				continue
+			}
 			if !hasGoDoc(typed.Name.Name, firstDoc(typed.Doc, decl.Doc)) {
 				missing = append(missing, formatMissing(fileSet, path, typed.Pos(), typed.Name.Name))
 			}
 		case *ast.ValueSpec:
 			for _, name := range typed.Names {
+				if !name.IsExported() {
+					continue
+				}
 				if !hasGoDoc(name.Name, firstDoc(typed.Doc, decl.Doc)) {
 					missing = append(missing, formatMissing(fileSet, path, name.Pos(), name.Name))
 				}
