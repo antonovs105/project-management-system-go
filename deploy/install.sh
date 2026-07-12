@@ -169,3 +169,12 @@ ENV_FILE="$ENV_FILE" \
 IMAGE_PREFIX="$IMAGE_PREFIX" \
 IMAGE_TAG="$IMAGE_TAG" \
 "$APP_DIR/deploy/bluegreen-deploy.sh"
+
+echo
+echo "deployment is healthy"
+echo "new instance: create the first owner from the active backend container"
+echo "  cd $APP_DIR"
+echo "  read -r -s OWNER_PASSWORD"
+echo "  printf '%s\\n' \"\$OWNER_PASSWORD\" | ./deploy/pmsctl.sh owner create --username owner --email owner@example.test --password-stdin"
+echo "  unset OWNER_PASSWORD"
+echo "existing instance recovery runbook: $APP_DIR/deploy/OWNER_RECOVERY.md"

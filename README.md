@@ -84,10 +84,12 @@ Create the first owner account after the deployment is healthy:
 
 ```bash
 cd /opt/progo/app
-printf 'change-this-password\n' | ./deploy/pmsctl.sh owner create --username owner --email owner@example.test --password-stdin
+read -r -s OWNER_PASSWORD
+printf '%s\n' "$OWNER_PASSWORD" | ./deploy/pmsctl.sh owner create --username owner --email owner@example.test --password-stdin
+unset OWNER_PASSWORD
 ```
 
-This can be run only while no owner account exists.
+This can be run only while no owner account exists. On first sign-in, privileged users are directed to enroll MFA and save one-time recovery codes. Enroll a second trusted owner so recovery does not depend on one person or device. See the [owner bootstrap and recovery runbook](deploy/OWNER_RECOVERY.md) for normal and offline recovery procedures.
 
 ### Backup and restore
 
@@ -162,7 +164,10 @@ PROGO_REF=<full-commit-sha> PROGO_ARCHIVE_SHA256=<published-sha256> IMAGE_TAG=<c
 5. Create the first owner account:
 
    ```powershell
-   "change-this-password" | docker compose run --rm -T backend /app/pmsctl owner create --username owner --email owner@example.test --password-stdin
+   $ownerPassword = Read-Host "Owner password" -AsSecureString
+   $credential = [pscredential]::new("owner", $ownerPassword)
+   $credential.GetNetworkCredential().Password | docker compose run --rm -T backend /app/pmsctl owner create --username owner --email owner@example.test --password-stdin
+   Remove-Variable ownerPassword, credential
    ```
 
    This can be run only while no owner account exists.
@@ -243,6 +248,7 @@ The backend image also builds `/app/pmsctl` for maintenance tasks:
 
 ```bash
 docker compose run --rm backend /app/pmsctl owner create --help
+docker compose run --rm backend /app/pmsctl owner recover --help
 docker compose run --rm backend /app/pmsctl federation discover --help
 docker compose run --rm backend /app/pmsctl federation follow --help
 docker compose run --rm backend /app/pmsctl federation accept-follow --help
@@ -253,6 +259,7 @@ On a blue-green VM install, run the CLI inside the active backend container:
 ```bash
 cd /opt/progo/app
 ./deploy/pmsctl.sh owner create --help
+./deploy/pmsctl.sh owner recover --help
 ./deploy/pmsctl.sh federation discover --help
 ```
 
