@@ -25,7 +25,7 @@ func TestBackendArchitectureBoundaries(t *testing.T) {
 		}
 		if entry.IsDir() {
 			switch entry.Name() {
-			case ".git", ".gocache", "vendor":
+			case ".git", ".cache", ".gocache", ".gotmp", "vendor":
 				return filepath.SkipDir
 			default:
 				return nil

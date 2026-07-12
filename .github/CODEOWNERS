@@ -1,0 +1,4 @@
+/.github/workflows/ @antonovs105
+/deploy/ @antonovs105
+/backend/Dockerfile @antonovs105
+/frontend/Dockerfile @antonovs105

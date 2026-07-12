@@ -1,5 +1,8 @@
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -25,24 +28,71 @@ jobs:
           --health-retries 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version-file: backend/go.mod
+          go-version: 1.26.5
           cache-dependency-path: backend/go.sum
 
       - name: Test backend
         working-directory: backend
-        run: go test -count=1 ./...
+        run: go test -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: Enforce backend coverage floor
+        working-directory: backend
+        shell: bash
+        run: |
+          coverage="$(go tool cover -func=coverage.out | awk '/total:/ {gsub("%", "", $3); print $3}')"
+          echo "backend coverage: ${coverage}%"
+          awk "BEGIN {exit !(${coverage} >= 35)}"
 
       - name: Vet backend
         working-directory: backend
         run: go vet ./...
+
+      - name: Scan reachable Go vulnerabilities
+        working-directory: backend
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
 
       - name: Test backend integration
         working-directory: backend
         env:
           TEST_DB_SOURCE: postgres://postgres:postgres@localhost:5432/pms_test?sslmode=disable
         run: go test -tags=integration -count=1 ./internal/integration
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Enable pinned pnpm
+        run: corepack enable && corepack prepare pnpm@11.1.2 --activate
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Test frontend
+        working-directory: frontend
+        run: pnpm test
+
+      - name: Lint frontend
+        working-directory: frontend
+        run: pnpm lint
+
+      - name: Build frontend
+        working-directory: frontend
+        run: pnpm build
+
+      - name: Audit complete frontend dependency graph
+        working-directory: frontend
+        run: pnpm audit --audit-level high
