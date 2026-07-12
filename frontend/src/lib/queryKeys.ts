@@ -16,6 +16,8 @@ export const queryKeys = {
 	archivedTickets: (projectId: ID) => ["archivedTickets", projectId] as const,
   projectRoles: (projectId: ID) => ["projectRoles", projectId] as const,
   githubRepositories: (projectId: ID) => ["githubRepositories", projectId] as const,
+	projectWebhooks: (projectId: ID) => ["projectWebhooks", projectId] as const,
+	projectWebhookDeliveries: (projectId: ID) => ["projectWebhookDeliveries", projectId] as const,
   projectGitHubCommitsScope: (projectId: ID) => ["projectGitHubCommits", projectId] as const,
   projectGitHubCommits: (projectId: ID, filtersKey = "all") => ["projectGitHubCommits", projectId, filtersKey] as const,
   projectMembers: (projectId: ID) => ["projectMembers", projectId] as const,

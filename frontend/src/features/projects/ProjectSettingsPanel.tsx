@@ -39,6 +39,7 @@ import type {
 } from "../../types";
 import { ProjectLabelsPanel } from "./ProjectLabelsPanel";
 import { MetricPill, ProjectAdminOverview } from "./ProjectAdminOverview";
+import { ProjectWebhooksPanel } from "./ProjectWebhooksPanel";
 import { downloadText, githubCommitsToCSV, githubRepositoriesToCSV, invitesToCSV, membersToCSV, safeFilePart } from "./projectSettingsExports";
 
 function allProjectPermissions(): ProjectPermission[] {
@@ -947,6 +948,7 @@ export function ProjectSettingsPanel({ project, tickets }: { project: Project; t
       </Panel>
 
       <GitHubRepositoryManager projectId={project.id} />
+	  <ProjectWebhooksPanel projectId={project.id} />
       <ProjectLabelsPanel projectId={project.id} />
       <ProjectRoleManager projectId={project.id} />
       <ProjectMemberActions project={project} />

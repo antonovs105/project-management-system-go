@@ -54,6 +54,14 @@ test("a verified user creates a project and ticket without accessibility violati
 	expect(exportResponse.ok()).toBeTruthy();
 	const bundle = await exportResponse.json();
 	bundle.project.name = `${projectName} import`;
+	const webhookResponse = await page.request.post(`${apiURL}/api/v1/projects/${sourceProjectID}/webhooks`, {
+		data: { name: `E2E webhook ${suffix}`, target_url: "https://example.com/progo-e2e", events: ["ticket.created"] },
+	});
+	expect(webhookResponse.status()).toBe(201);
+	const webhook = await webhookResponse.json();
+	expect(webhook.secret).toMatch(/^whsec_/);
+	expect((await page.request.get(`${apiURL}/api/v1/projects/${sourceProjectID}/webhooks`)).status()).toBe(200);
+	expect((await page.request.delete(`${apiURL}/api/v1/projects/${sourceProjectID}/webhooks/${webhook.id}`)).status()).toBe(204);
 
 	await page.goto("/projects");
 	const fileChooserPromise = page.waitForEvent("filechooser");

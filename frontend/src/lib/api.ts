@@ -36,6 +36,9 @@ import type {
   OAuthProvider,
 	Project,
 	ProjectBundle,
+	ProjectWebhook,
+	ProjectWebhookDelivery,
+	CreatedProjectWebhook,
 	ProjectActivityEvent,
   ProjectCreationPolicy,
   ProjectDelivery,
@@ -58,6 +61,7 @@ import type {
   TicketStatus,
   TicketType,
 	UserBundle,
+	WebhookEvent,
 } from "../types";
 import { useAuthStore } from "../store/auth";
 import { contractClient, contractData, contractVoid } from "./contractClient";
@@ -439,6 +443,29 @@ export const api = {
 	async importProjectTickets(projectId: ID, bundle: ProjectBundle): Promise<ImportResult> {
 		const { data } = await http.post<ImportResult>(`${apiPrefix}/projects/${projectId}/tickets/import`, bundle);
 		return data;
+	},
+
+	async listProjectWebhooks(projectId: ID): Promise<ProjectWebhook[]> {
+		const { data } = await http.get<ProjectWebhook[] | null>(`${apiPrefix}/projects/${projectId}/webhooks`);
+		return asArray(data);
+	},
+
+	async createProjectWebhook(projectId: ID, payload: { name: string; target_url: string; events: WebhookEvent[] }): Promise<CreatedProjectWebhook> {
+		const { data } = await http.post<CreatedProjectWebhook>(`${apiPrefix}/projects/${projectId}/webhooks`, payload);
+		return data;
+	},
+
+	async deleteProjectWebhook(projectId: ID, webhookId: ID): Promise<void> {
+		await http.delete(`${apiPrefix}/projects/${projectId}/webhooks/${webhookId}`);
+	},
+
+	async listProjectWebhookDeliveries(projectId: ID): Promise<ProjectWebhookDelivery[]> {
+		const { data } = await http.get<ProjectWebhookDelivery[] | null>(`${apiPrefix}/projects/${projectId}/webhook-deliveries`);
+		return asArray(data);
+	},
+
+	async retryProjectWebhookDelivery(projectId: ID, deliveryId: ID): Promise<void> {
+		await http.post(`${apiPrefix}/projects/${projectId}/webhook-deliveries/${deliveryId}/retry`);
 	},
 
 	async exportCurrentUser(): Promise<UserBundle> {
