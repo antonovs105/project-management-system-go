@@ -3,6 +3,7 @@ package comment
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
@@ -58,6 +59,18 @@ func TestServiceCreateCommentRejectsViewer(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, created)
 	require.Contains(t, err.Error(), "comments.create")
+	require.Empty(t, repo.created)
+}
+
+func TestServiceCreateCommentRejectsOversizedContentBeforeAuthorization(t *testing.T) {
+	repo := &fakeCommentRepository{createResult: &CreateResult{ActivityID: "activity-create"}}
+	tickets := &fakeTicketChecker{ticket: &ticket.Ticket{ID: "ticket-1", ProjectID: "project-1"}}
+	service := NewService(repo, tickets, activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+
+	created, err := service.CreateComment(context.Background(), "ticket-1", "user-1", strings.Repeat("x", maxCommentContentLength+1))
+
+	require.ErrorIs(t, err, ErrInvalidCommentInput)
+	require.Nil(t, created)
 	require.Empty(t, repo.created)
 }
 

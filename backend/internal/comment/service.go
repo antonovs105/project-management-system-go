@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
@@ -22,6 +23,8 @@ const (
 	defaultCommentListLimit = 100
 	// maxCommentListLimit is the largest accepted comment list size.
 	maxCommentListLimit = 500
+	// maxCommentContentLength bounds local notes and imported comment payloads.
+	maxCommentContentLength = 20000
 )
 
 // TicketChecker exposes ticket lookups and project roles needed by comments.
@@ -69,6 +72,9 @@ func (s *Service) CreateComment(ctx context.Context, ticketID, authorID, content
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return nil, invalidCommentInput("content is required")
+	}
+	if utf8.RuneCountInString(content) > maxCommentContentLength {
+		return nil, invalidCommentInput(fmt.Sprintf("content must be at most %d characters", maxCommentContentLength))
 	}
 	ticket, err := s.tickets.GetTicketByID(ctx, ticketID, authorID)
 	if err != nil {
