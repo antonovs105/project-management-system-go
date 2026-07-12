@@ -5,7 +5,6 @@ import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { api, errorMessage } from "../lib/api";
-import { relativeDate } from "../lib/format";
 import { useI18n } from "../lib/i18n-context";
 import { fieldLimits } from "../lib/limits";
 import { queryKeys } from "../lib/queryKeys";
@@ -18,7 +17,7 @@ const projectPageSize = 24;
 export function ProjectsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const { t } = useI18n();
+  const { t, relativeDate } = useI18n();
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -59,23 +58,23 @@ export function ProjectsPage() {
 		mutationFn: api.importProject,
 		onSuccess: async (result) => {
 			await queryClient.invalidateQueries({ queryKey: queryKeys.projects });
-			toast.success(`Imported ${result.tickets_imported} tickets and ${result.comments_imported} comments.`);
+			toast.success(t("projects.imported", { tickets: result.tickets_imported, comments: result.comments_imported }));
 			navigate(`/projects/${result.project_id}`);
 		},
-		onError: (error) => toast.error(errorMessage(error, "Project import failed.")),
+		onError: (error) => toast.error(errorMessage(error, t("projects.importFailed"))),
 	});
 
 	async function selectImport(file: File | undefined) {
 		if (!file) return;
 		if (file.size > 10 * 1024 * 1024) {
-			toast.error("Project bundles must be 10 MiB or smaller.");
+			toast.error(t("projects.bundleTooLarge"));
 			return;
 		}
 		try {
 			const bundle = JSON.parse(await file.text()) as ProjectBundle;
 			importProject.mutate(bundle);
 		} catch {
-			toast.error("Select a valid Progo project JSON bundle.");
+			toast.error(t("projects.bundleInvalid"));
 		} finally {
 			if (importInput.current) importInput.current.value = "";
 		}
@@ -109,7 +108,7 @@ export function ProjectsPage() {
 		  <input ref={importInput} className="sr-only" type="file" accept="application/json,.json" onChange={(event) => void selectImport(event.target.files?.[0])} />
 		  <Button onClick={() => importInput.current?.click()} disabled={importProject.isPending}>
 			<Upload size={16} />
-			Import
+			{t("projects.import")}
 		  </Button>
           <Button onClick={() => projects.refetch()} disabled={projects.isFetching}>
             <RefreshCw size={16} />
@@ -237,8 +236,8 @@ export function ProjectsPage() {
 
 	  {(archivedProjects.data || []).length > 0 ? (
 		<Panel className="overflow-hidden">
-			<div className="border-b border-zinc-100 p-4"><h2 className="font-semibold text-zinc-950">Archived projects</h2><p className="text-sm text-zinc-500">Archived projects are hidden from active work and can be restored safely.</p></div>
-			<div className="divide-y divide-zinc-100">{archivedProjects.data?.map((project) => <div key={project.id} className="flex items-center justify-between gap-3 p-4"><div><div className="font-medium text-zinc-950">{project.name}</div><div className="text-xs text-zinc-500">Archived {relativeDate(project.archived_at)}</div></div><Button onClick={() => restoreProject.mutate({ id: project.id, version: project.version })} disabled={restoreProject.isPending}><RotateCcw size={15} />Restore</Button></div>)}</div>
+\t\t\t<div className="border-b border-zinc-100 p-4"><h2 className="font-semibold text-zinc-950">{t("projects.archivedTitle")}</h2><p className="text-sm text-zinc-500">{t("projects.archivedBody")}</p></div>
+\t\t\t<div className="divide-y divide-zinc-100">{archivedProjects.data?.map((project) => <div key={project.id} className="flex items-center justify-between gap-3 p-4"><div><div className="font-medium text-zinc-950">{project.name}</div><div className="text-xs text-zinc-500">{t("project.archivedAt", { date: relativeDate(project.archived_at) })}</div></div><Button onClick={() => restoreProject.mutate({ id: project.id, version: project.version })} disabled={restoreProject.isPending}><RotateCcw size={15} />{t("actions.restore")}</Button></div>)}</div>
 		</Panel>
 	  ) : null}
 

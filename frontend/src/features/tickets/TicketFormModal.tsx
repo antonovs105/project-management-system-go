@@ -4,6 +4,7 @@ import type { FormEvent } from "react";
 import { api, errorMessage } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { fieldLimits } from "../../lib/limits";
+import { useI18n } from "../../lib/i18n-context";
 import type { ID, Label, ProjectMember, Ticket, TicketPriority, TicketType } from "../../types";
 import { Button, ErrorState, Modal, SelectField, TextAreaField, TextField } from "../../components/ui";
 import { MemberAssigneeSelect } from "./MemberAssigneeSelect";
@@ -34,6 +35,7 @@ export function TicketFormModal({
   open: boolean;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -89,25 +91,25 @@ export function TicketFormModal({
   return (
     <Modal
       open={open}
-      title="Create Ticket"
+      title={t("ticket.createTitle")}
       onClose={onClose}
       formId="create-ticket"
       onSubmit={submit}
       footer={
         <>
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onClose}>{t("actions.cancel")}</Button>
           <Button type="submit" form="create-ticket" tone="primary" disabled={createTicket.isPending || !title.trim()}>
-            Create
+            {t("actions.create")}
           </Button>
         </>
       }
     >
       <div className="grid gap-4">
         {createTicket.isError ? (
-          <ErrorState title="Could not create ticket" body={errorMessage(createTicket.error, "Ticket creation failed.")} />
+          <ErrorState title={t("ticket.createFailed")} body={errorMessage(createTicket.error, t("ticket.creationFailed"))} />
         ) : null}
         <TextField
-          label="Title"
+          label={t("ticket.title")}
           value={title}
           onChange={(event) => setTitle(event.target.value)}
           maxLength={fieldLimits.ticketTitleMaxLength}
@@ -118,10 +120,11 @@ export function TicketFormModal({
           priority={priority}
           onTypeChange={setType}
           onPriorityChange={setPriority}
+          labels={{ status: "", type: t("ticket.type"), priority: t("ticket.priority") }}
         />
         {type !== "epic" ? (
-          <SelectField label="Parent" value={parentId} onChange={(event) => setParentId(event.target.value)}>
-            <option value="">None</option>
+          <SelectField label={t("ticket.parent")} value={parentId} onChange={(event) => setParentId(event.target.value)}>
+            <option value="">{t("ticket.none")}</option>
             {parents.map((ticket) => (
               <option key={ticket.id} value={ticket.id}>
                 {ticket.title}
@@ -130,10 +133,10 @@ export function TicketFormModal({
           </SelectField>
         ) : null}
         <MemberAssigneeSelect members={members} value={assigneeId} onChange={setAssigneeId} />
-        <TextField label="Due date" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
+        <TextField label={t("ticket.dueDate")} type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
         {labels.length > 0 ? (
           <fieldset className="grid gap-2">
-            <legend className="text-sm font-medium text-zinc-700">Labels</legend>
+            <legend className="text-sm font-medium text-zinc-700">{t("ticket.labels")}</legend>
             <div className="flex flex-wrap gap-2">
               {labels.map((label) => (
                 <label key={label.id} className="flex cursor-pointer items-center gap-2 rounded-full border border-zinc-200 px-3 py-1.5 text-sm">
@@ -150,11 +153,11 @@ export function TicketFormModal({
           </fieldset>
         ) : null}
         <TextAreaField
-          label="Description"
+          label={t("ticket.description")}
           value={description}
           onChange={(event) => setDescription(event.target.value)}
           maxLength={fieldLimits.ticketDescriptionMaxLength}
-          placeholder="What needs to happen?"
+          placeholder={t("ticket.descriptionPlaceholder")}
         />
       </div>
     </Modal>

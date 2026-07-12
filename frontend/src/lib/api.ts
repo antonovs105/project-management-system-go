@@ -531,6 +531,10 @@ export const api = {
 		return asArray(data);
 	},
 
+	async listProjectActivityPage(projectId: ID, pagination: OffsetPagination): Promise<OffsetPage<ProjectActivityEvent>> {
+		return getOffsetPage(`${apiPrefix}/projects/${projectId}/activity`, pagination);
+	},
+
   async updateProject(projectId: ID, payload: UpdateProjectPayload, version: number): Promise<void> {
     await http.patch(`${apiPrefix}/projects/${projectId}`, payload, { headers: { "If-Match": `"${version}"` } });
   },
