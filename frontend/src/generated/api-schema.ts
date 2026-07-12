@@ -698,6 +698,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/me/api-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listCurrentUserAPITokens"];
+        put?: never;
+        post: operations["createCurrentUserAPIToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/api-tokens/{tokenID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tokenID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["revokeCurrentUserAPIToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me/remote-project-invites": {
         parameters: {
             query?: never;
@@ -2430,6 +2464,29 @@ export interface components {
             };
             missing_tables?: string[];
         };
+        /** @enum {string} */
+        APITokenScope: "projects:read" | "projects:write" | "account:read" | "account:write" | "tokens:manage" | "admin";
+        APIToken: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            user_id: string;
+            name: string;
+            prefix: string;
+            scopes: components["schemas"]["APITokenScope"][];
+            /** Format: date-time */
+            expires_at?: string | null;
+            /** Format: date-time */
+            last_used_at?: string | null;
+            /** Format: date-time */
+            revoked_at?: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        CreatedAPIToken: components["schemas"]["APIToken"] & {
+            /** @description Plaintext credential returned only by the create response. */
+            token: string;
+        };
         ProjectBundle: {
             /** @constant */
             schema: "progo.project.v1";
@@ -2996,6 +3053,9 @@ export type ProjectRole = components['schemas']['ProjectRole'];
 export type ProjectRoleKey = components['schemas']['ProjectRoleKey'];
 export type ProjectPermission = components['schemas']['ProjectPermission'];
 export type ReadinessResponse = components['schemas']['ReadinessResponse'];
+export type ApiTokenScope = components['schemas']['APITokenScope'];
+export type ApiToken = components['schemas']['APIToken'];
+export type CreatedApiToken = components['schemas']['CreatedAPIToken'];
 export type ProjectBundle = components['schemas']['ProjectBundle'];
 export type PortableProject = components['schemas']['PortableProject'];
 export type PortableMember = components['schemas']['PortableMember'];
@@ -4124,6 +4184,77 @@ export interface operations {
                 };
             };
             401: components["responses"]["Error"];
+        };
+    };
+    listCurrentUserAPITokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description API credential metadata; plaintext secrets are never listed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIToken"][];
+                };
+            };
+        };
+    };
+    createCurrentUserAPIToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    scopes: components["schemas"]["APITokenScope"][];
+                    /** Format: date-time */
+                    expires_at?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Token secret returned exactly once. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedAPIToken"];
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    revokeCurrentUserAPIToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tokenID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description API token revoked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
         };
     };
     listRemoteProjectInvites: {

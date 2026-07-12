@@ -121,6 +121,40 @@ func TestJWTMiddlewareRejectsStaleTokenVersion(t *testing.T) {
 	assert.JSONEq(t, `{"error":"invalid token"}`, rec.Body.String())
 }
 
+type credentialAuthenticatorStub struct {
+	userID string
+	scopes []string
+	err    error
+}
+
+func (s credentialAuthenticatorStub) AuthenticateCredential(context.Context, string) (string, []string, error) {
+	return s.userID, s.scopes, s.err
+}
+
+func TestAuthenticationMiddlewareEnforcesAPITokenScopes(t *testing.T) {
+	e := echo.New()
+	authenticator := credentialAuthenticatorStub{userID: "11111111-1111-4111-8111-111111111111", scopes: []string{"projects:read"}}
+	authentication := AuthenticationMiddleware([]byte("secret"), nil, authenticator)
+	e.GET("/api/v1/projects", func(c echo.Context) error {
+		require.Equal(t, "api_token", c.Get("authType"))
+		return c.NoContent(http.StatusNoContent)
+	}, authentication)
+	e.POST("/api/v1/projects", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) }, authentication)
+
+	read := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	read.Header.Set(echo.HeaderAuthorization, "Bearer progo_test_credential")
+	readRecorder := httptest.NewRecorder()
+	e.ServeHTTP(readRecorder, read)
+	require.Equal(t, http.StatusNoContent, readRecorder.Code)
+
+	write := httptest.NewRequest(http.MethodPost, "/api/v1/projects", nil)
+	write.Header.Set(echo.HeaderAuthorization, "Bearer progo_test_credential")
+	writeRecorder := httptest.NewRecorder()
+	e.ServeHTTP(writeRecorder, write)
+	require.Equal(t, http.StatusForbidden, writeRecorder.Code)
+	require.Contains(t, writeRecorder.Body.String(), "insufficient_scope")
+}
+
 func runJWTMiddleware(t *testing.T, secret []byte, authorization string) *httptest.ResponseRecorder {
 	return runJWTMiddlewareWithValidator(t, secret, authorization, nil)
 }

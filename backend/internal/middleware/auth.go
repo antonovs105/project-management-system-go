@@ -23,13 +23,25 @@ type SessionValidator interface {
 	ValidateSession(ctx context.Context, userID, sessionID string) error
 }
 
+// CredentialAuthenticator validates a non-JWT bearer credential and returns its owner and scopes.
+type CredentialAuthenticator interface {
+	AuthenticateCredential(ctx context.Context, raw string) (userID string, scopes []string, err error)
+}
+
 // JWTMiddleware authenticates Bearer JWTs and optionally validates token versions.
 func JWTMiddleware(secret []byte, validators ...TokenVersionValidator) echo.MiddlewareFunc {
 	var validator TokenVersionValidator
-	var sessionValidator SessionValidator
 	if len(validators) > 0 {
 		validator = validators[0]
-		sessionValidator, _ = validators[0].(SessionValidator)
+	}
+	return AuthenticationMiddleware(secret, validator, nil)
+}
+
+// AuthenticationMiddleware accepts browser/JWT sessions and scoped API credentials.
+func AuthenticationMiddleware(secret []byte, validator TokenVersionValidator, credentials CredentialAuthenticator) echo.MiddlewareFunc {
+	var sessionValidator SessionValidator
+	if validator != nil {
+		sessionValidator, _ = validator.(SessionValidator)
 	}
 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -38,6 +50,21 @@ func JWTMiddleware(secret []byte, validators ...TokenVersionValidator) echo.Midd
 			tokenString, cookieCredential, err := requestToken(c.Request())
 			if err != nil {
 				return c.JSON(http.StatusUnauthorized, map[string]string{"error": err.Error()})
+			}
+			if credentials != nil && !cookieCredential && strings.HasPrefix(tokenString, "progo_") {
+				userID, scopes, err := credentials.AuthenticateCredential(c.Request().Context(), tokenString)
+				if err != nil {
+					return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid token"})
+				}
+				required := requiredCredentialScope(c.Request().Method, c.Path())
+				if !containsScope(scopes, required) {
+					return c.JSON(http.StatusForbidden, map[string]string{"error": "api token is missing required scope", "code": "insufficient_scope"})
+				}
+				c.Set("userID", userID)
+				c.Set("authType", "api_token")
+				c.Set("authScopes", scopes)
+				c.Set("mfaEnrollmentRequired", false)
+				return next(c)
 			}
 			token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 				if token.Method == nil || token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
@@ -81,6 +108,7 @@ func JWTMiddleware(secret []byte, validators ...TokenVersionValidator) echo.Midd
 				}
 				mfaEnrollmentRequired, _ := claims["mfa_enrollment_required"].(bool)
 				c.Set("mfaEnrollmentRequired", mfaEnrollmentRequired)
+				c.Set("authType", "jwt")
 
 				return next(c)
 			}
@@ -88,6 +116,35 @@ func JWTMiddleware(secret []byte, validators ...TokenVersionValidator) echo.Midd
 			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid token claims"})
 		}
 	}
+}
+
+func requiredCredentialScope(method, path string) string {
+	if strings.HasPrefix(path, "/api/v1/admin") {
+		return "admin"
+	}
+	if strings.HasPrefix(path, "/api/v1/me/api-tokens") {
+		return "tokens:manage"
+	}
+	readOnly := method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions
+	if strings.HasPrefix(path, "/api/v1/me") {
+		if readOnly {
+			return "account:read"
+		}
+		return "account:write"
+	}
+	if readOnly {
+		return "projects:read"
+	}
+	return "projects:write"
+}
+
+func containsScope(scopes []string, expected string) bool {
+	for _, scope := range scopes {
+		if scope == expected {
+			return true
+		}
+	}
+	return false
 }
 
 // requestToken prefers an explicit bearer credential and otherwise accepts the

@@ -25,6 +25,7 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteactor"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteinbox"
 	"github.com/antonovs105/project-management-system-go/internal/adminaudit"
+	"github.com/antonovs105/project-management-system-go/internal/apitoken"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
 	"github.com/antonovs105/project-management-system-go/internal/label"
 	authmiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
@@ -172,6 +173,43 @@ func TestProjectPortabilityRoundTrip(t *testing.T) {
 	require.Equal(t, portability.UserSchema, userBundle.Schema)
 	require.Equal(t, owner.Email, userBundle.Account.Email)
 	require.Len(t, userBundle.Projects, 2)
+}
+
+func TestScopedAPITokenLifecycle(t *testing.T) {
+	db := openIntegrationDB(t)
+	resetIntegrationDB(t, db)
+
+	ctx := context.Background()
+	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+	userService := user.NewService(user.NewRepository(db, cfg), []byte("integration-secret"), cfg)
+	owner, err := userService.BootstrapAdmin(ctx, "token-owner", "token-owner@example.test", "password123")
+	require.NoError(t, err)
+	regular, err := userService.RegisterUser(ctx, "token-user", "token-user@example.test", "password123")
+	require.NoError(t, err)
+	service := apitoken.NewService(apitoken.NewRepository(db), userService)
+
+	created, err := service.Create(ctx, owner.ID, apitoken.CreateRequest{Name: "read automation", Scopes: []string{apitoken.ScopeProjectsRead}})
+	require.NoError(t, err)
+	require.NotEmpty(t, created.Secret)
+	require.Equal(t, created.Secret[:14], created.Prefix)
+	userID, scopes, err := service.AuthenticateCredential(ctx, created.Secret)
+	require.NoError(t, err)
+	require.Equal(t, owner.ID, userID)
+	require.Equal(t, []string{apitoken.ScopeProjectsRead}, scopes)
+
+	var plaintextHashes int
+	require.NoError(t, db.Get(&plaintextHashes, `SELECT count(*) FROM api_tokens WHERE token_hash = convert_to($1, 'UTF8')`, created.Secret))
+	require.Zero(t, plaintextHashes)
+	listed, err := service.List(ctx, owner.ID)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	require.Equal(t, created.Prefix, listed[0].Prefix)
+
+	_, err = service.Create(ctx, regular.ID, apitoken.CreateRequest{Name: "forbidden admin", Scopes: []string{apitoken.ScopeAdmin}})
+	require.ErrorIs(t, err, apitoken.ErrInvalidInput)
+	require.NoError(t, service.Revoke(ctx, owner.ID, created.ID))
+	_, _, err = service.AuthenticateCredential(ctx, created.Secret)
+	require.ErrorIs(t, err, apitoken.ErrNotFound)
 }
 
 func TestConcurrentOwnerDemotionKeepsOneOwner(t *testing.T) {

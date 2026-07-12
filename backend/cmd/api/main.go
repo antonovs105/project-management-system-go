@@ -31,6 +31,7 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/remoteinbox"
 	"github.com/antonovs105/project-management-system-go/internal/adminaudit"
 	"github.com/antonovs105/project-management-system-go/internal/apiresponse"
+	"github.com/antonovs105/project-management-system-go/internal/apitoken"
 	"github.com/antonovs105/project-management-system-go/internal/attachment"
 	"github.com/antonovs105/project-management-system-go/internal/comment"
 	appconfig "github.com/antonovs105/project-management-system-go/internal/config"
@@ -140,6 +141,7 @@ var requiredDatabaseTables = []string{
 	"github_commit_ticket_links",
 	"notifications",
 	"notification_preferences",
+	"api_tokens",
 }
 
 // appRole selects which server responsibilities this process owns.
@@ -153,6 +155,8 @@ type ApiServer struct {
 	metricsToken        string
 	userHandler         *user.Handler
 	accountHandler      *account.Handler
+	apiTokenHandler     *apitoken.Handler
+	apiTokenService     *apitoken.Service
 	activityHandler     *activityhistory.Handler
 	attachmentHandler   *attachment.Handler
 	instanceHandler     *instance.Handler
@@ -490,6 +494,8 @@ func main() {
 		}),
 	)
 	userHandler := user.NewHandler(userService)
+	apiTokenService := apitoken.NewService(apitoken.NewRepository(db), userService)
+	apiTokenHandler := apitoken.NewHandler(apiTokenService)
 	accountHandler := account.NewHandler(accountService)
 	instanceHandler := instance.NewHandler(cfg, userService, userService)
 
@@ -681,6 +687,8 @@ func main() {
 		metricsToken:        metricsToken,
 		userHandler:         userHandler,
 		accountHandler:      accountHandler,
+		apiTokenHandler:     apiTokenHandler,
+		apiTokenService:     apiTokenService,
 		activityHandler:     activityHandler,
 		attachmentHandler:   attachmentHandler,
 		instanceHandler:     instanceHandler,
@@ -1027,7 +1035,7 @@ func authAccountRateLimitIdentifier(c echo.Context) (string, error) {
 
 // registerAuthenticatedAPIRoutes mounts stable REST API routes under one prefix.
 func registerAuthenticatedAPIRoutes(api *echo.Group, server *ApiServer, jwtSecret []byte, userService *user.Service) {
-	api.Use(authMiddleware.JWTMiddleware(jwtSecret, userService))
+	api.Use(authMiddleware.AuthenticationMiddleware(jwtSecret, userService, server.apiTokenService))
 	api.Use(authMiddleware.MFAEnrollmentMiddleware(userService))
 
 	api.GET("/me", server.getProfile)
@@ -1036,6 +1044,7 @@ func registerAuthenticatedAPIRoutes(api *echo.Group, server *ApiServer, jwtSecre
 	if server.accountHandler != nil {
 		server.accountHandler.RegisterAccountRoutes(api)
 	}
+	server.apiTokenHandler.RegisterRoutes(api)
 	server.userHandler.RegisterAdminRoutes(api)
 	server.federationHandler.RegisterRoutes(api)
 	server.projectHandler.RegisterRoutes(api)
