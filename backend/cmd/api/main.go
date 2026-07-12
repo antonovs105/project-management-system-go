@@ -41,6 +41,7 @@ import (
 	authMiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
 	"github.com/antonovs105/project-management-system-go/internal/notification"
 	"github.com/antonovs105/project-management-system-go/internal/observability"
+	"github.com/antonovs105/project-management-system-go/internal/outboundwebhook"
 	"github.com/antonovs105/project-management-system-go/internal/portability"
 	"github.com/antonovs105/project-management-system-go/internal/project"
 	appratelimit "github.com/antonovs105/project-management-system-go/internal/ratelimit"
@@ -142,6 +143,8 @@ var requiredDatabaseTables = []string{
 	"notifications",
 	"notification_preferences",
 	"api_tokens",
+	"project_webhooks",
+	"project_webhook_deliveries",
 }
 
 // appRole selects which server responsibilities this process owns.
@@ -166,6 +169,7 @@ type ApiServer struct {
 	commentHandler      *comment.Handler
 	notificationHandler *notification.Handler
 	portabilityHandler  *portability.Handler
+	webhookHandler      *outboundwebhook.Handler
 	githubHandler       *githubintegration.Handler
 	apHandler           *activitypub.Handler
 	c2sHandler          *c2s.Handler
@@ -501,6 +505,21 @@ func main() {
 
 	projectRepo := project.NewRepository(db, apConfig, privateKeyCodec)
 	projectService := project.NewService(projectRepo, apConfig)
+	outboundWebhookRepository := outboundwebhook.NewRepository(db)
+	outboundWebhookService := outboundwebhook.NewService(
+		outboundWebhookRepository,
+		projectService,
+		privateKeyCodec,
+		outboundwebhook.WithRequireHTTPS(requireHTTPSFederation),
+		outboundwebhook.WithAllowPrivateNetworks(allowPrivateFederationNetworks),
+	)
+	outboundWebhookHandler := outboundwebhook.NewHandler(outboundWebhookService)
+	outboundWebhookDispatcher := outboundwebhook.NewDispatcher(
+		outboundWebhookRepository,
+		privateKeyCodec,
+		outboundwebhook.WithDispatcherRequireHTTPS(requireHTTPSFederation),
+		outboundwebhook.WithDispatcherAllowPrivateNetworks(allowPrivateFederationNetworks),
+	)
 	activityHandler := activityhistory.NewHandler(activityhistory.NewService(activityhistory.NewRepository(db), projectRepo))
 	var attachmentHandler *attachment.Handler
 	var attachmentService *attachment.Service
@@ -658,6 +677,14 @@ func main() {
 	wfService := webfinger.NewService(wfRepo, apConfig)
 	wfHandler := webfinger.NewHandler(wfService)
 	if role.runsWorker() {
+		stopOutboundWebhooks := outboundWebhookDispatcher.StartLoop(context.Background(), 5*time.Second, func(processed int, err error) {
+			if err != nil {
+				log.Printf("Outbound webhook dispatch failed: %v", err)
+			} else if processed > 0 {
+				log.Printf("Outbound webhook dispatch processed %d deliveries", processed)
+			}
+		})
+		defer stopOutboundWebhooks()
 		stopEmailDispatcher := accountService.StartEmailDispatcher(context.Background(), 5*time.Second)
 		defer stopEmailDispatcher()
 		stopDueNotifications := notificationService.StartDueNotificationLoop(context.Background(), 15*time.Minute, func(processed int, err error) {
@@ -698,6 +725,7 @@ func main() {
 		commentHandler:      commentHandler,
 		notificationHandler: notificationHandler,
 		portabilityHandler:  portabilityHandler,
+		webhookHandler:      outboundWebhookHandler,
 		githubHandler:       githubHandler,
 		apHandler:           apHandler,
 		c2sHandler:          c2sHandler,
@@ -1059,6 +1087,7 @@ func registerAuthenticatedAPIRoutes(api *echo.Group, server *ApiServer, jwtSecre
 	server.commentHandler.RegisterRoutes(api)
 	server.notificationHandler.RegisterRoutes(api)
 	server.portabilityHandler.RegisterRoutes(api)
+	server.webhookHandler.RegisterRoutes(api)
 	server.githubHandler.RegisterRoutes(api)
 	server.deliveryHandler.RegisterRoutes(api)
 	server.moderationHandler.RegisterRoutes(api)

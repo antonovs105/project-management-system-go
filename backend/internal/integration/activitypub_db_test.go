@@ -29,8 +29,10 @@ import (
 	"github.com/antonovs105/project-management-system-go/internal/comment"
 	"github.com/antonovs105/project-management-system-go/internal/label"
 	authmiddleware "github.com/antonovs105/project-management-system-go/internal/middleware"
+	"github.com/antonovs105/project-management-system-go/internal/outboundwebhook"
 	"github.com/antonovs105/project-management-system-go/internal/portability"
 	"github.com/antonovs105/project-management-system-go/internal/project"
+	"github.com/antonovs105/project-management-system-go/internal/secrets"
 	"github.com/antonovs105/project-management-system-go/internal/ticket"
 	"github.com/antonovs105/project-management-system-go/internal/user"
 	"github.com/jmoiron/sqlx"
@@ -210,6 +212,57 @@ func TestScopedAPITokenLifecycle(t *testing.T) {
 	require.NoError(t, service.Revoke(ctx, owner.ID, created.ID))
 	_, _, err = service.AuthenticateCredential(ctx, created.Secret)
 	require.ErrorIs(t, err, apitoken.ErrNotFound)
+}
+
+func TestOutboundWebhookDeliveryLifecycle(t *testing.T) {
+	db := openIntegrationDB(t)
+	resetIntegrationDB(t, db)
+
+	ctx := context.Background()
+	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+	userService := user.NewService(user.NewRepository(db, cfg), []byte("integration-secret"), cfg)
+	owner, err := userService.BootstrapAdmin(ctx, "webhook-owner", "webhook-owner@example.test", "password123")
+	require.NoError(t, err)
+	projectService := project.NewService(project.NewRepository(db, cfg), cfg)
+	ticketService := ticket.NewService(ticket.NewRepository(db, cfg), projectService, cfg)
+
+	received := make(chan map[string]any, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "ticket.created", request.Header.Get("X-Progo-Event"))
+		require.NotEmpty(t, request.Header.Get("X-Progo-Signature-256"))
+		var payload map[string]any
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
+		received <- payload
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	projectValue, err := projectService.CreateProject(ctx, "Webhook project", "", owner.ID)
+	require.NoError(t, err)
+	repository := outboundwebhook.NewRepository(db)
+	service := outboundwebhook.NewService(repository, projectService, secrets.NoopPrivateKeyCodec{}, outboundwebhook.WithAllowPrivateNetworks(true))
+	created, err := service.Create(ctx, projectValue.ID, owner.ID, "automation", server.URL, []string{"ticket.created"})
+	require.NoError(t, err)
+	require.NotEmpty(t, created.Secret)
+	_, err = ticketService.CreateTicket(ctx, ticket.CreateTicketRequest{Title: "Trigger callback", Type: "task", Priority: "medium"}, projectValue.ID, owner.ID)
+	require.NoError(t, err)
+
+	dispatcher := outboundwebhook.NewDispatcher(repository, secrets.NoopPrivateKeyCodec{}, outboundwebhook.WithHTTPClient(server.Client()))
+	processed, err := dispatcher.DispatchOnce(ctx, 10)
+	require.NoError(t, err)
+	require.Equal(t, 1, processed)
+	payload := <-received
+	require.Equal(t, "ticket.created", payload["event"])
+	require.Equal(t, projectValue.ID, payload["project_id"])
+
+	deliveries, err := service.ListDeliveries(ctx, projectValue.ID, owner.ID)
+	require.NoError(t, err)
+	require.Len(t, deliveries, 1)
+	require.Equal(t, "delivered", deliveries[0].Status)
+	require.Equal(t, 1, deliveries[0].Attempts)
+	enqueued, err := repository.EnqueueActivityEvents(ctx)
+	require.NoError(t, err)
+	require.Zero(t, enqueued, "the same activity event must not enqueue twice")
 }
 
 func TestConcurrentOwnerDemotionKeepsOneOwner(t *testing.T) {

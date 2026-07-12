@@ -1210,6 +1210,80 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        get: operations["listProjectWebhooks"];
+        put?: never;
+        post: operations["createProjectWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/webhooks/{webhookID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+                webhookID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteProjectWebhook"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/webhook-deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        get: operations["listProjectWebhookDeliveries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/webhook-deliveries/{deliveryID}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+                deliveryID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["retryProjectWebhookDelivery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/labels": {
         parameters: {
             query?: never;
@@ -2465,6 +2539,56 @@ export interface components {
             missing_tables?: string[];
         };
         /** @enum {string} */
+        WebhookEvent: "project.created" | "project.updated" | "project.archived" | "project.restored" | "ticket.created" | "ticket.updated" | "ticket.archived" | "ticket.restored";
+        ProjectWebhook: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            project_id: string;
+            /** Format: uuid */
+            created_by: string;
+            name: string;
+            /** Format: uri */
+            target_url: string;
+            events: components["schemas"]["WebhookEvent"][];
+            active: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        CreatedProjectWebhook: components["schemas"]["ProjectWebhook"] & {
+            /** @description HMAC signing secret returned only by the create response. */
+            secret: string;
+        };
+        ProjectWebhookDelivery: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            webhook_id: string;
+            webhook_name: string;
+            /** Format: uri */
+            target_url: string;
+            event_type: components["schemas"]["WebhookEvent"];
+            payload: {
+                [key: string]: unknown;
+            };
+            /** @enum {string} */
+            status: "pending" | "processing" | "delivered" | "failed" | "dead";
+            attempts: number;
+            max_attempts: number;
+            /** Format: date-time */
+            next_attempt_at: string;
+            last_error: string;
+            last_status_code?: number | null;
+            /** Format: date-time */
+            delivered_at?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @enum {string} */
         APITokenScope: "projects:read" | "projects:write" | "account:read" | "account:write" | "tokens:manage" | "admin";
         APIToken: {
             /** Format: uuid */
@@ -3053,6 +3177,10 @@ export type ProjectRole = components['schemas']['ProjectRole'];
 export type ProjectRoleKey = components['schemas']['ProjectRoleKey'];
 export type ProjectPermission = components['schemas']['ProjectPermission'];
 export type ReadinessResponse = components['schemas']['ReadinessResponse'];
+export type WebhookEvent = components['schemas']['WebhookEvent'];
+export type ProjectWebhook = components['schemas']['ProjectWebhook'];
+export type CreatedProjectWebhook = components['schemas']['CreatedProjectWebhook'];
+export type ProjectWebhookDelivery = components['schemas']['ProjectWebhookDelivery'];
 export type ApiTokenScope = components['schemas']['APITokenScope'];
 export type ApiToken = components['schemas']['APIToken'];
 export type CreatedApiToken = components['schemas']['CreatedAPIToken'];
@@ -5195,6 +5323,129 @@ export interface operations {
                 };
             };
             403: components["responses"]["Error"];
+        };
+    };
+    listProjectWebhooks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Project outbound webhook configurations. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectWebhook"][];
+                };
+            };
+            403: components["responses"]["Error"];
+        };
+    };
+    createProjectWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** Format: uri */
+                    target_url: string;
+                    events: components["schemas"]["WebhookEvent"][];
+                };
+            };
+        };
+        responses: {
+            /** @description Webhook signing secret returned exactly once. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedProjectWebhook"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    deleteProjectWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+                webhookID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Webhook deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    listProjectWebhookDeliveries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recent outbound webhook delivery diagnostics. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectWebhookDelivery"][];
+                };
+            };
+            403: components["responses"]["Error"];
+        };
+    };
+    retryProjectWebhookDelivery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+                deliveryID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Failed delivery rescheduled. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
         };
     };
     listProjectLabels: {
