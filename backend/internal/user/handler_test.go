@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	"github.com/antonovs105/project-management-system-go/internal/authsession"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -116,6 +117,55 @@ func TestHandler_ChangePassword(t *testing.T) {
 		rec := doAdminUserRequest(e, http.MethodPatch, "/api/me/password", `{"current_password":"password123","new_password":"newpassword123"}`)
 
 		require.Equal(t, http.StatusUnauthorized, rec.Code)
+		repo.AssertExpectations(t)
+	})
+}
+
+func TestHandler_SessionCookieLifecycle(t *testing.T) {
+	userID := "11111111-1111-4111-8111-111111111111"
+	password := "password123"
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	require.NoError(t, err)
+
+	t.Run("LoginSetsHttpOnlyCookieWithoutReturningToken", func(t *testing.T) {
+		repo := new(MockRepository)
+		repo.On("GetUserByEmail", mock.Anything, "user@example.test").Return(&User{
+			ID:           userID,
+			Email:        "user@example.test",
+			PasswordHash: string(hashedPassword),
+			InstanceRole: InstanceRoleUser,
+			TokenVersion: 1,
+		}, nil).Once()
+		e := echo.New()
+		service := NewService(repo, []byte("session-secret"), activitypub.NewConfig("http://localhost:8080", "localhost:8080"))
+		NewHandler(service).RegisterRoutes(e)
+
+		rec := doAdminUserRequest(e, http.MethodPost, "/login", `{"email":"user@example.test","password":"password123"}`)
+
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		assert.NotContains(t, rec.Body.String(), "token")
+		assert.JSONEq(t, `{"user_id":"11111111-1111-4111-8111-111111111111","instance_role":"user","email":"user@example.test"}`, rec.Body.String())
+		cookies := rec.Result().Cookies()
+		require.Len(t, cookies, 1)
+		assert.Equal(t, authsession.CookieName, cookies[0].Name)
+		assert.True(t, cookies[0].HttpOnly)
+		assert.Equal(t, http.SameSiteStrictMode, cookies[0].SameSite)
+		assert.Greater(t, cookies[0].MaxAge, 0)
+		repo.AssertExpectations(t)
+	})
+
+	t.Run("LogoutRevokesSessionsAndExpiresCookie", func(t *testing.T) {
+		repo := new(MockRepository)
+		repo.On("RevokeSessions", mock.Anything, userID).Return(nil).Once()
+		e := newAccountEcho(repo, userID)
+
+		rec := doAdminUserRequest(e, http.MethodPost, "/api/me/logout", "")
+
+		require.Equal(t, http.StatusNoContent, rec.Code)
+		cookies := rec.Result().Cookies()
+		require.Len(t, cookies, 1)
+		assert.Equal(t, authsession.CookieName, cookies[0].Name)
+		assert.Less(t, cookies[0].MaxAge, 0)
 		repo.AssertExpectations(t)
 	})
 }

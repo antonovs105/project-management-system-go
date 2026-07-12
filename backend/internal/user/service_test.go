@@ -403,6 +403,9 @@ func TestService_OAuthProvidersAndStartURL(t *testing.T) {
 	assert.Equal(t, "google-client", parsed.Query().Get("client_id"))
 	assert.Equal(t, "openid email profile", parsed.Query().Get("scope"))
 	assert.NotEmpty(t, parsed.Query().Get("state"))
+	assert.Equal(t, "S256", parsed.Query().Get("code_challenge_method"))
+	assert.NotEmpty(t, parsed.Query().Get("code_challenge"))
+	assert.NotContains(t, parsed.RawQuery, "code_verifier")
 }
 
 func TestService_OAuthUserForProfile(t *testing.T) {

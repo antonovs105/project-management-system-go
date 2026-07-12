@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/antonovs105/project-management-system-go/internal/authsession"
 	"github.com/labstack/echo/v4"
 )
 
@@ -47,6 +48,7 @@ func (h *Handler) RegisterAdminRoutes(api *echo.Group) {
 // RegisterAccountRoutes registers authenticated self-service account routes.
 func (h *Handler) RegisterAccountRoutes(api *echo.Group) {
 	api.PATCH("/me/password", h.ChangePassword)
+	api.POST("/me/logout", h.Logout)
 }
 
 // RegisterRequest is the JSON payload for local account registration.
@@ -59,6 +61,13 @@ type RegisterRequest struct {
 // ExchangeOAuthCodeRequest is the JSON payload for completing OAuth login in the SPA.
 type ExchangeOAuthCodeRequest struct {
 	Code string `json:"code"`
+}
+
+// SessionResponse is the non-sensitive identity returned after a session cookie is established.
+type SessionResponse struct {
+	UserID       string `json:"user_id"`
+	InstanceRole string `json:"instance_role"`
+	Email        string `json:"email,omitempty"`
 }
 
 // UpdateInstanceRoleRequest is the JSON payload for changing a user's instance role.
@@ -264,11 +273,12 @@ func (h *Handler) ExchangeOAuthCode(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
-	token, err := h.service.ExchangeOAuthLoginCode(c.Request().Context(), req.Code)
+	session, err := h.service.ExchangeOAuthSession(c.Request().Context(), req.Code)
 	if err != nil {
 		return writeOAuthExchangeError(c, err)
 	}
-	return c.JSON(http.StatusOK, map[string]string{"token": token})
+	setSessionCookie(c, session.Token)
+	return c.JSON(http.StatusOK, sessionResponse(session.User))
 }
 
 // LoginRequest is the JSON payload for password login.
@@ -284,14 +294,22 @@ func (h *Handler) Login(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
 
-	token, err := h.service.Login(c.Request().Context(), req.Email, req.Password)
+	session, err := h.service.LoginSession(c.Request().Context(), req.Email, req.Password)
 	if err != nil {
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": err.Error()})
 	}
+	setSessionCookie(c, session.Token)
 
-	return c.JSON(http.StatusOK, map[string]string{
-		"token": token,
-	})
+	return c.JSON(http.StatusOK, sessionResponse(session.User))
+}
+
+// Logout revokes the user's issued sessions and expires the browser cookie.
+func (h *Handler) Logout(c echo.Context) error {
+	if err := h.service.RevokeSessions(c.Request().Context(), currentUserID(c)); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "logout failed"})
+	}
+	c.SetCookie(authsession.ClearCookie(oauthCookieSecure(c)))
+	return c.NoContent(http.StatusNoContent)
 }
 
 // writeOAuthStartError maps OAuth authorization-start failures to public responses.
@@ -390,4 +408,17 @@ func clearOAuthStateCookie(c echo.Context) {
 // oauthCookieSecure detects HTTPS directly or through a reverse proxy.
 func oauthCookieSecure(c echo.Context) bool {
 	return c.IsTLS() || strings.EqualFold(c.Request().Header.Get("X-Forwarded-Proto"), "https")
+}
+
+// setSessionCookie stores the authenticated session outside JavaScript access.
+func setSessionCookie(c echo.Context, token string) {
+	c.SetCookie(authsession.NewCookie(token, oauthCookieSecure(c)))
+}
+
+// sessionResponse maps the authenticated user to the browser-safe response.
+func sessionResponse(value *User) SessionResponse {
+	if value == nil {
+		return SessionResponse{}
+	}
+	return SessionResponse{UserID: value.ID, InstanceRole: value.InstanceRole, Email: value.Email}
 }

@@ -190,8 +190,18 @@ export interface Ticket {
   reporter_id: ID;
   assignee_id: ID | null;
   is_resolved: boolean;
+  due_date: string | null;
+  label_ids: ID[];
   created_at: string;
   updated_at: string;
+}
+
+export interface Label {
+  id: ID;
+  project_id: ID;
+  name: string;
+  color: string;
+  created_at: string;
 }
 
 export type TicketEventType = "ticket.created" | "ticket.updated" | "ticket.deleted" | "ticket.linked" | "ticket.unlinked";

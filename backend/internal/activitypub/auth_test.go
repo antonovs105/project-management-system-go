@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/antonovs105/project-management-system-go/internal/authsession"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -41,6 +42,8 @@ func signedActivityPubToken(t *testing.T, secret []byte, method jwt.SigningMetho
 	token := jwt.NewWithClaims(method, jwt.MapClaims{
 		"sub": "user-1",
 		"exp": 9999999999,
+		"iss": authsession.Issuer,
+		"aud": authsession.Audience,
 	})
 	raw, err := token.SignedString(secret)
 	require.NoError(t, err)

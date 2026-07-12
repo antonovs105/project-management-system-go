@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/antonovs105/project-management-system-go/internal/authsession"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
@@ -23,7 +24,7 @@ func TestJWTMiddlewareStableErrorResponses(t *testing.T) {
 	}{
 		{
 			name:     "missing header",
-			wantBody: `{"error":"missing authorization header"}`,
+			wantBody: `{"error":"missing authentication credential"}`,
 		},
 		{
 			name:          "invalid format",
@@ -61,6 +62,23 @@ func TestJWTMiddlewareSetsUserID(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.JSONEq(t, `{"user_id":"user-1"}`, rec.Body.String())
+}
+
+func TestJWTMiddlewareAcceptsSessionCookie(t *testing.T) {
+	secret := []byte("secret")
+	raw := signedTestToken(t, secret, jwt.MapClaims{"sub": "user-1", "exp": 9999999999})
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.AddCookie(authsession.NewCookie(raw, false))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	handler := JWTMiddleware(secret)(func(c echo.Context) error {
+		return c.JSON(http.StatusOK, map[string]string{"user_id": c.Get("userID").(string)})
+	})
+
+	require.NoError(t, handler(c))
+	require.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestJWTMiddlewareRejectsUnexpectedHMACVariant(t *testing.T) {
@@ -128,6 +146,8 @@ func runJWTMiddlewareWithValidator(t *testing.T, secret []byte, authorization st
 func signedTestToken(t *testing.T, secret []byte, claims jwt.MapClaims) string {
 	t.Helper()
 
+	claims["iss"] = authsession.Issuer
+	claims["aud"] = authsession.Audience
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	raw, err := token.SignedString(secret)
 	require.NoError(t, err)

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/antonovs105/project-management-system-go/internal/authsession"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jmoiron/sqlx"
 )
@@ -148,12 +149,19 @@ func (a *AccessAuthorizer) actorIDFromJWT(ctx context.Context, req *http.Request
 		return "", false, nil
 	}
 	authHeader := strings.TrimSpace(req.Header.Get("Authorization"))
-	if authHeader == "" {
-		return "", false, nil
-	}
-	tokenValue, found := strings.CutPrefix(authHeader, "Bearer ")
-	if !found || strings.TrimSpace(tokenValue) == "" {
-		return "", true, ErrInvalidAuthorization
+	var tokenValue string
+	if authHeader != "" {
+		var found bool
+		tokenValue, found = strings.CutPrefix(authHeader, "Bearer ")
+		if !found || strings.TrimSpace(tokenValue) == "" {
+			return "", true, ErrInvalidAuthorization
+		}
+	} else {
+		var found bool
+		tokenValue, found = authsession.TokenFromRequest(req)
+		if !found {
+			return "", false, nil
+		}
 	}
 
 	token, err := jwt.Parse(strings.TrimSpace(tokenValue), func(token *jwt.Token) (any, error) {
@@ -161,7 +169,7 @@ func (a *AccessAuthorizer) actorIDFromJWT(ctx context.Context, req *http.Request
 			return nil, ErrInvalidAuthorization
 		}
 		return a.jwtSecret, nil
-	})
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithIssuer(authsession.Issuer), jwt.WithAudience(authsession.Audience))
 	if err != nil || !token.Valid {
 		return "", true, ErrInvalidAuthorization
 	}

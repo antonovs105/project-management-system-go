@@ -7,7 +7,6 @@ import { ThemeToggle } from "../components/ThemeToggle";
 import { ErrorState, LoadingState, Panel } from "../components/ui";
 import { api, errorMessage } from "../lib/api";
 import { useI18n } from "../lib/i18n-context";
-import { sessionFromToken } from "../lib/jwt";
 import { useAuthStore } from "../store/auth";
 
 function oauthErrorMessage(errorCode: string, t: ReturnType<typeof useI18n>["t"]): string {
@@ -46,13 +45,8 @@ export function OAuthCallbackPage() {
 
   const { mutate, isPending } = useMutation({
     mutationFn: api.exchangeOAuthCode,
-    onSuccess: ({ token }) => {
-      const user = sessionFromToken(token);
-      if (!user) {
-        setExchangeError(t("auth.invalidToken"));
-        return;
-      }
-      setSession(token, user);
+    onSuccess: (session) => {
+      setSession({ userId: session.user_id, instanceRole: session.instance_role, email: session.email });
       navigate("/projects", { replace: true });
     },
     onError: (error) => setExchangeError(errorMessage(error, t("oauth.exchangeFailed"))),

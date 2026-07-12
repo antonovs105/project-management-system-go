@@ -22,6 +22,7 @@ import type {
   ID,
   InstanceCapabilities,
   InstanceRole,
+  Label,
   Notification,
   OAuthProvider,
   Project,
@@ -52,14 +53,7 @@ const apiBaseURL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "" : 
 const http = axios.create({
   baseURL: apiBaseURL,
   timeout: 20_000,
-});
-
-http.interceptors.request.use((config) => {
-  const token = useAuthStore.getState().token;
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
+  withCredentials: true,
 });
 
 http.interceptors.response.use(
@@ -102,6 +96,8 @@ export interface CreateTicketPayload {
   type: TicketType;
   parent_id?: ID | null;
   assignee_id?: ID | null;
+  due_date?: string;
+  label_ids?: ID[];
 }
 
 export interface UpdateTicketPayload {
@@ -112,6 +108,8 @@ export interface UpdateTicketPayload {
   type?: TicketType;
   parent_id?: ID | null;
   assignee_id?: ID | null;
+  due_date?: string;
+  label_ids?: ID[];
   is_resolved?: boolean;
 }
 
@@ -176,6 +174,7 @@ export interface AddTicketLinkPayload {
 }
 
 export interface TicketFilters {
+  q?: string;
   assignee?: "me" | "unassigned";
   assignee_id?: ID;
   status?: TicketStatus;
@@ -249,7 +248,9 @@ export interface RemoteActorFilters {
 }
 
 export interface LoginResponse {
-  token: string;
+  user_id: ID;
+  instance_role: InstanceRole;
+  email?: string;
 }
 
 interface ProfileResponse {
@@ -380,6 +381,10 @@ export const api = {
 
   async changePassword(payload: ChangePasswordPayload): Promise<void> {
     await http.patch(`${apiPrefix}/me/password`, payload);
+  },
+
+  async logout(): Promise<void> {
+    await http.post(`${apiPrefix}/me/logout`);
   },
 
   async listMyProjectInvites(filters: ProjectInviteFilters = {}): Promise<ProjectInviteInspection[]> {
@@ -586,6 +591,20 @@ export const api = {
       params: { limit: 500, offset: 0, ...filters },
     });
     return asArray(data);
+  },
+
+  async listProjectLabels(projectId: ID): Promise<Label[]> {
+    const { data } = await http.get<Label[] | null>(`${apiPrefix}/projects/${projectId}/labels`);
+    return asArray(data);
+  },
+
+  async createProjectLabel(projectId: ID, payload: { name: string; color: string }): Promise<Label> {
+    const { data } = await http.post<Label>(`${apiPrefix}/projects/${projectId}/labels`, payload);
+    return data;
+  },
+
+  async deleteProjectLabel(projectId: ID, labelId: ID): Promise<void> {
+    await http.delete(`${apiPrefix}/projects/${projectId}/labels/${labelId}`);
   },
 
   async createTicket(projectId: ID, payload: CreateTicketPayload): Promise<Ticket> {

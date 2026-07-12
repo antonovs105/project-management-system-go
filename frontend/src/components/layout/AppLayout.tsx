@@ -39,6 +39,10 @@ export function AppLayout() {
   const { t } = useI18n();
   const canUseAdmin = user?.instanceRole === "owner" || user?.instanceRole === "admin";
 
+  function endSession() {
+    void api.logout().finally(logout);
+  }
+
   const { data: projects = [] } = useQuery({
     queryKey: queryKeys.projects,
     queryFn: api.listProjects,
@@ -137,7 +141,7 @@ export function AppLayout() {
               {user?.instanceRole || t("common.user")}
             </div>
           </div>
-          <IconButton label={t("layout.logout")} onClick={logout}>
+          <IconButton label={t("layout.logout")} onClick={endSession}>
             <LogOut size={18} />
           </IconButton>
         </div>

@@ -24,6 +24,7 @@ type Repository interface {
 	CreateOAuthLoginCode(ctx context.Context, userID, codeHash string, expiresAt time.Time) error
 	ConsumeOAuthLoginCode(ctx context.Context, codeHash string, now time.Time) (*User, error)
 	UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error
+	RevokeSessions(ctx context.Context, userID string) error
 	TokenVersion(ctx context.Context, userID string) (int, error)
 	InstanceRole(ctx context.Context, userID string) (string, error)
 	ListUsers(ctx context.Context, options ListUsersOptions) ([]User, error)
@@ -311,6 +312,26 @@ func (r *PgRepository) UpdatePasswordHash(ctx context.Context, userID, passwordH
 			token_version = token_version + 1
 		WHERE id = $1
 	`, userID, passwordHash)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// RevokeSessions invalidates every JWT previously issued for a user.
+func (r *PgRepository) RevokeSessions(ctx context.Context, userID string) error {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE users
+		SET token_version = token_version + 1
+		WHERE id = $1
+	`, userID)
 	if err != nil {
 		return err
 	}

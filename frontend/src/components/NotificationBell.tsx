@@ -37,13 +37,13 @@ function notificationLink(notification: AppNotification): string {
 
 export function NotificationBell() {
   const [open, setOpen] = useState(false);
-  const token = useAuthStore((state) => state.token);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const queryClient = useQueryClient();
 
   const notifications = useQuery({
     queryKey: queryKeys.notifications,
     queryFn: () => api.listNotifications(),
-    enabled: Boolean(token),
+    enabled: isAuthenticated,
   });
 
   const unreadCount = useMemo(
@@ -66,7 +66,7 @@ export function NotificationBell() {
   });
 
   useEffect(() => {
-    if (!token) {
+    if (!isAuthenticated) {
       return;
     }
 
@@ -108,9 +108,9 @@ export function NotificationBell() {
     async function connect() {
       try {
         const response = await fetch(notificationsEventsURL(), {
+          credentials: "include",
           headers: {
             Accept: "text/event-stream",
-            Authorization: `Bearer ${token}`,
           },
           signal: controller.signal,
         });
@@ -147,7 +147,7 @@ export function NotificationBell() {
         window.clearTimeout(reconnectTimer);
       }
     };
-  }, [queryClient, token]);
+  }, [isAuthenticated, queryClient]);
 
   return (
     <div className="relative">

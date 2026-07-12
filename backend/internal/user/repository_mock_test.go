@@ -74,6 +74,11 @@ func (m *MockRepository) UpdatePasswordHash(ctx context.Context, userID, passwor
 	return args.Error(0)
 }
 
+func (m *MockRepository) RevokeSessions(ctx context.Context, userID string) error {
+	args := m.Called(ctx, userID)
+	return args.Error(0)
+}
+
 func (m *MockRepository) TokenVersion(ctx context.Context, userID string) (int, error) {
 	args := m.Called(ctx, userID)
 	return args.Int(0), args.Error(1)

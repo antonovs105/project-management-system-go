@@ -8,7 +8,6 @@ import { ThemeToggle } from "../components/ThemeToggle";
 import { Button, ErrorState, Panel, TextField } from "../components/ui";
 import { api, errorMessage, oauthStartURL } from "../lib/api";
 import { useI18n } from "../lib/i18n-context";
-import { sessionFromToken } from "../lib/jwt";
 import { fieldLimits } from "../lib/limits";
 import { queryKeys } from "../lib/queryKeys";
 import { useAuthStore } from "../store/auth";
@@ -66,13 +65,8 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
 
   const login = useMutation({
     mutationFn: api.login,
-    onSuccess: ({ token }) => {
-      const user = sessionFromToken(token, email.trim());
-      if (!user) {
-        setFormError(t("auth.invalidToken"));
-        return;
-      }
-      setSession(token, user);
+    onSuccess: (session) => {
+      setSession({ userId: session.user_id, instanceRole: session.instance_role, email: session.email });
       navigate(destinationFromLocation(location.state), { replace: true });
     },
     onError: (error) => setFormError(errorMessage(error, t("auth.loginFailed"))),

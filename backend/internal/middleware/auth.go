@@ -2,11 +2,13 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"log"
 	"math"
 	"net/http"
 	"strings"
 
+	"github.com/antonovs105/project-management-system-go/internal/authsession"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
 )
@@ -26,24 +28,16 @@ func JWTMiddleware(secret []byte, validators ...TokenVersionValidator) echo.Midd
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 
 		return func(c echo.Context) error {
-			authHeader := c.Request().Header.Get("Authorization")
-			if authHeader == "" {
-				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "missing authorization header"})
+			tokenString, err := requestToken(c.Request())
+			if err != nil {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"error": err.Error()})
 			}
-
-			// Expected format "Bearer <token>"
-			headerParts := strings.Split(authHeader, " ")
-			if len(headerParts) != 2 || headerParts[0] != "Bearer" {
-				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid authorization header format"})
-			}
-
-			tokenString := headerParts[1]
 			token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 				if token.Method == nil || token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
 					return nil, echo.NewHTTPError(http.StatusUnauthorized, "Unexpected signing method")
 				}
 				return secret, nil
-			})
+			}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithIssuer(authsession.Issuer), jwt.WithAudience(authsession.Audience))
 
 			if err != nil {
 				log.Printf("Error parsing token: %v", err)
@@ -75,6 +69,23 @@ func JWTMiddleware(secret []byte, validators ...TokenVersionValidator) echo.Midd
 			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid token claims"})
 		}
 	}
+}
+
+// requestToken prefers an explicit bearer credential and otherwise accepts the
+// HttpOnly browser session cookie.
+func requestToken(req *http.Request) (string, error) {
+	authHeader := strings.TrimSpace(req.Header.Get("Authorization"))
+	if authHeader != "" {
+		headerParts := strings.Fields(authHeader)
+		if len(headerParts) != 2 || headerParts[0] != "Bearer" || headerParts[1] == "" {
+			return "", errors.New("invalid authorization header format")
+		}
+		return headerParts[1], nil
+	}
+	if token, ok := authsession.TokenFromRequest(req); ok {
+		return token, nil
+	}
+	return "", errors.New("missing authentication credential")
 }
 
 // tokenVersionFromClaims reads the token_version claim without accepting fractional values.

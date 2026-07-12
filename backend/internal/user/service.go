@@ -21,6 +21,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
+	"github.com/antonovs105/project-management-system-go/internal/authsession"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -222,22 +223,27 @@ func (s *Service) OAuthStartURL(provider string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	codeChallenge := pkceChallenge(s.oauthPKCEVerifier(state))
 	switch provider {
 	case OAuthProviderGoogle:
 		return oauthURL("https://accounts.google.com/o/oauth2/v2/auth", map[string]string{
-			"client_id":     cfg.ClientID,
-			"redirect_uri":  cfg.RedirectURL,
-			"response_type": "code",
-			"scope":         "openid email profile",
-			"state":         state,
-			"prompt":        "select_account",
+			"client_id":             cfg.ClientID,
+			"redirect_uri":          cfg.RedirectURL,
+			"response_type":         "code",
+			"scope":                 "openid email profile",
+			"state":                 state,
+			"prompt":                "select_account",
+			"code_challenge":        codeChallenge,
+			"code_challenge_method": "S256",
 		}), nil
 	case OAuthProviderGitHub:
 		return oauthURL("https://github.com/login/oauth/authorize", map[string]string{
-			"client_id":    cfg.ClientID,
-			"redirect_uri": cfg.RedirectURL,
-			"scope":        "read:user user:email",
-			"state":        state,
+			"client_id":             cfg.ClientID,
+			"redirect_uri":          cfg.RedirectURL,
+			"scope":                 "read:user user:email",
+			"state":                 state,
+			"code_challenge":        codeChallenge,
+			"code_challenge_method": "S256",
 		}), nil
 	default:
 		return "", ErrOAuthProviderUnavailable
@@ -261,7 +267,7 @@ func (s *Service) CompleteOAuthLogin(ctx context.Context, provider, code, signed
 	if code == "" {
 		return "", ErrOAuthProviderFailed
 	}
-	profile, err := s.fetchOAuthProfile(ctx, provider, code)
+	profile, err := s.fetchOAuthProfile(ctx, provider, code, s.oauthPKCEVerifier(signedState))
 	if err != nil {
 		return "", err
 	}
@@ -281,15 +287,28 @@ func (s *Service) CompleteOAuthLogin(ctx context.Context, provider, code, signed
 
 // ExchangeOAuthLoginCode consumes a one-time frontend code and returns a normal JWT.
 func (s *Service) ExchangeOAuthLoginCode(ctx context.Context, code string) (string, error) {
-	code = strings.TrimSpace(code)
-	if code == "" {
-		return "", ErrOAuthInvalidCode
-	}
-	user, err := s.repo.ConsumeOAuthLoginCode(ctx, hashOAuthCode(code), time.Now())
+	session, err := s.ExchangeOAuthSession(ctx, code)
 	if err != nil {
 		return "", err
 	}
-	return s.issueToken(user)
+	return session.Token, nil
+}
+
+// ExchangeOAuthSession consumes a one-time frontend code and returns the authenticated session.
+func (s *Service) ExchangeOAuthSession(ctx context.Context, code string) (*AuthenticatedSession, error) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return nil, ErrOAuthInvalidCode
+	}
+	user, err := s.repo.ConsumeOAuthLoginCode(ctx, hashOAuthCode(code), time.Now())
+	if err != nil {
+		return nil, err
+	}
+	token, err := s.issueToken(user)
+	if err != nil {
+		return nil, err
+	}
+	return &AuthenticatedSession{Token: token, User: user}, nil
 }
 
 // OAuthFrontendRedirectURL builds the SPA callback URL with a one-time code or safe error code.
@@ -615,8 +634,23 @@ func invalidUserInput(message string) error {
 	return fmt.Errorf("%w: %s", ErrInvalidUserInput, message)
 }
 
+// AuthenticatedSession contains the server-issued credential and public session identity.
+type AuthenticatedSession struct {
+	Token string
+	User  *User
+}
+
 // Login verifies credentials and returns a JWT bound to the user's token version.
 func (s *Service) Login(ctx context.Context, email, password string) (string, error) {
+	session, err := s.LoginSession(ctx, email, password)
+	if err != nil {
+		return "", err
+	}
+	return session.Token, nil
+}
+
+// LoginSession verifies credentials and returns the authenticated session.
+func (s *Service) LoginSession(ctx context.Context, email, password string) (*AuthenticatedSession, error) {
 	email = normalizeEmail(email)
 
 	user, err := s.repo.GetUserByEmail(ctx, email)
@@ -624,24 +658,41 @@ func (s *Service) Login(ctx context.Context, email, password string) (string, er
 		if !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, ErrUserNotFound) {
 			log.Printf("login credential lookup failed: %v", err)
 		}
-		return "", ErrInvalidCredentials
+		return nil, ErrInvalidCredentials
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password))
 	if err != nil {
-		return "", ErrInvalidCredentials
+		return nil, ErrInvalidCredentials
 	}
 
-	return s.issueToken(user)
+	token, err := s.issueToken(user)
+	if err != nil {
+		return nil, err
+	}
+	return &AuthenticatedSession{Token: token, User: user}, nil
+}
+
+// RevokeSessions invalidates all currently issued sessions for a user.
+func (s *Service) RevokeSessions(ctx context.Context, userID string) error {
+	if strings.TrimSpace(userID) == "" {
+		return ErrUserNotFound
+	}
+	return s.repo.RevokeSessions(ctx, userID)
 }
 
 // issueToken creates the normal Progo JWT for any authenticated local user.
 func (s *Service) issueToken(user *User) (string, error) {
+	now := time.Now().UTC()
 	claims := jwt.MapClaims{
 		"sub":           user.ID,
 		"instance_role": user.InstanceRole,
 		"token_version": user.TokenVersion,
-		"exp":           time.Now().Add(time.Hour * 72).Unix(),
+		"iss":           authsession.Issuer,
+		"aud":           authsession.Audience,
+		"iat":           now.Unix(),
+		"jti":           uuid.NewString(),
+		"exp":           now.Add(authsession.Lifetime).Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -842,6 +893,21 @@ func (s *Service) verifyOAuthState(raw string) (oauthState, error) {
 	return state, nil
 }
 
+// oauthPKCEVerifier derives a provider-secret verifier from the authenticated state.
+// Keeping it derivable avoids server-side OAuth state storage without exposing it in the redirect URL.
+func (s *Service) oauthPKCEVerifier(signedState string) string {
+	mac := hmac.New(sha256.New, s.jwtSecretKey)
+	mac.Write([]byte("oauth-pkce:"))
+	mac.Write([]byte(signedState))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// pkceChallenge computes the RFC 7636 S256 challenge for a verifier.
+func pkceChallenge(verifier string) string {
+	sum := sha256.Sum256([]byte(verifier))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
 // oauthTokenResponse is the subset of provider token response fields used by login.
 type oauthTokenResponse struct {
 	AccessToken string `json:"access_token"`
@@ -850,19 +916,19 @@ type oauthTokenResponse struct {
 }
 
 // fetchOAuthProfile exchanges a provider code and fetches normalized identity data.
-func (s *Service) fetchOAuthProfile(ctx context.Context, provider, code string) (OAuthProfile, error) {
+func (s *Service) fetchOAuthProfile(ctx context.Context, provider, code, codeVerifier string) (OAuthProfile, error) {
 	switch provider {
 	case OAuthProviderGoogle:
-		return s.fetchGoogleProfile(ctx, code)
+		return s.fetchGoogleProfile(ctx, code, codeVerifier)
 	case OAuthProviderGitHub:
-		return s.fetchGitHubProfile(ctx, code)
+		return s.fetchGitHubProfile(ctx, code, codeVerifier)
 	default:
 		return OAuthProfile{}, ErrOAuthProviderUnavailable
 	}
 }
 
 // fetchGoogleProfile loads identity data from Google's OpenID Connect userinfo endpoint.
-func (s *Service) fetchGoogleProfile(ctx context.Context, code string) (OAuthProfile, error) {
+func (s *Service) fetchGoogleProfile(ctx context.Context, code, codeVerifier string) (OAuthProfile, error) {
 	cfg := s.oauthProviderConfig(OAuthProviderGoogle)
 	token, err := s.exchangeOAuthToken(ctx, "https://oauth2.googleapis.com/token", map[string]string{
 		"client_id":     cfg.ClientID,
@@ -870,6 +936,7 @@ func (s *Service) fetchGoogleProfile(ctx context.Context, code string) (OAuthPro
 		"code":          code,
 		"grant_type":    "authorization_code",
 		"redirect_uri":  cfg.RedirectURL,
+		"code_verifier": codeVerifier,
 	})
 	if err != nil {
 		return OAuthProfile{}, err
@@ -895,13 +962,14 @@ func (s *Service) fetchGoogleProfile(ctx context.Context, code string) (OAuthPro
 }
 
 // fetchGitHubProfile loads identity data from GitHub's user and email APIs.
-func (s *Service) fetchGitHubProfile(ctx context.Context, code string) (OAuthProfile, error) {
+func (s *Service) fetchGitHubProfile(ctx context.Context, code, codeVerifier string) (OAuthProfile, error) {
 	cfg := s.oauthProviderConfig(OAuthProviderGitHub)
 	token, err := s.exchangeOAuthToken(ctx, "https://github.com/login/oauth/access_token", map[string]string{
 		"client_id":     cfg.ClientID,
 		"client_secret": cfg.ClientSecret,
 		"code":          code,
 		"redirect_uri":  cfg.RedirectURL,
+		"code_verifier": codeVerifier,
 	})
 	if err != nil {
 		return OAuthProfile{}, err
