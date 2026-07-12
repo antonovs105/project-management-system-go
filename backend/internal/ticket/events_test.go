@@ -54,10 +54,7 @@ func TestEventHubUnsubscribeIsIdempotent(t *testing.T) {
 }
 
 func TestRedisEventHubSuppressesDuplicateLocalDelivery(t *testing.T) {
-	hub := &RedisEventHub{
-		local: NewEventHub(),
-		seen:  make(map[string]time.Time),
-	}
+	hub := NewRedisEventHub(nil)
 	events, unsubscribe := hub.SubscribeTicketEvents("project-1")
 	defer unsubscribe()
 	event := Event{ID: "event-1", Type: EventTicketUpdated, ProjectID: "project-1", TicketID: "ticket-1", OccurredAt: time.Now().UTC()}

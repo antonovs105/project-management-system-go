@@ -39,10 +39,7 @@ func TestEventHubScopesNotificationsByUser(t *testing.T) {
 }
 
 func TestRedisEventHubSuppressesDuplicateLocalDelivery(t *testing.T) {
-	hub := &RedisEventHub{
-		local: NewEventHub(),
-		seen:  make(map[string]time.Time),
-	}
+	hub := NewRedisEventHub(nil)
 	events, unsubscribe := hub.SubscribeNotifications("user-1")
 	defer unsubscribe()
 	item := Notification{ID: "n-1", UserID: "user-1", Type: TypeTicketAssigned}

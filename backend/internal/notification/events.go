@@ -1,23 +1,12 @@
 package notification
 
 import (
-	"context"
-	"encoding/json"
-	"log"
-	"sync"
-	"time"
-
+	"github.com/antonovs105/project-management-system-go/internal/realtime"
 	"github.com/redis/go-redis/v9"
 )
 
-const (
-	// redisNotificationEventsChannel carries notification events between API replicas.
-	redisNotificationEventsChannel = "progo:events:notifications"
-	// eventSeenTTL bounds duplicate suppression memory for Redis echo messages.
-	eventSeenTTL = 5 * time.Minute
-	// redisSubscribeRetryDelay spaces reconnect attempts after subscription failures.
-	redisSubscribeRetryDelay = 2 * time.Second
-)
+// redisNotificationEventsChannel carries notification events between API replicas.
+const redisNotificationEventsChannel = "progo:events:notifications"
 
 // EventPublisher receives notifications after they are persisted.
 type EventPublisher interface {
@@ -31,201 +20,75 @@ type EventSubscriber interface {
 
 // EventHub is an in-memory fanout for local notification events.
 type EventHub struct {
-	mu          sync.RWMutex
-	subscribers map[string]map[chan Notification]struct{}
+	hub *realtime.LocalHub[Notification]
 }
 
 // NewEventHub creates an in-process notification fanout.
 func NewEventHub() *EventHub {
-	return &EventHub{subscribers: make(map[string]map[chan Notification]struct{})}
+	return &EventHub{hub: realtime.NewLocalHub(notificationEventConfig())}
 }
 
 // PublishNotification fans out one notification to the owning user.
 func (h *EventHub) PublishNotification(item Notification) {
-	if h == nil || item.UserID == "" {
-		return
-	}
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	for subscriber := range h.subscribers[item.UserID] {
-		select {
-		case subscriber <- item:
-		default:
-			select {
-			case <-subscriber:
-			default:
-			}
-			select {
-			case subscriber <- item:
-			default:
-			}
-		}
+	if h != nil && h.hub != nil {
+		h.hub.Publish(item)
 	}
 }
 
 // SubscribeNotifications subscribes to notifications for one user.
 func (h *EventHub) SubscribeNotifications(userID string) (<-chan Notification, func()) {
-	ch := make(chan Notification, 16)
-	if h == nil || userID == "" {
-		var once sync.Once
-		return ch, func() {
-			once.Do(func() {
-				close(ch)
-			})
-		}
+	if h == nil || h.hub == nil {
+		return NewEventHub().SubscribeNotifications(userID)
 	}
-
-	h.mu.Lock()
-	if h.subscribers[userID] == nil {
-		h.subscribers[userID] = make(map[chan Notification]struct{})
-	}
-	h.subscribers[userID][ch] = struct{}{}
-	h.mu.Unlock()
-
-	var once sync.Once
-	unsubscribe := func() {
-		once.Do(func() {
-			h.mu.Lock()
-			defer h.mu.Unlock()
-			if userSubscribers := h.subscribers[userID]; userSubscribers != nil {
-				delete(userSubscribers, ch)
-				if len(userSubscribers) == 0 {
-					delete(h.subscribers, userID)
-				}
-			}
-			close(ch)
-		})
-	}
-	return ch, unsubscribe
+	return h.hub.Subscribe(userID)
 }
 
 // RedisEventHub distributes notification events across API replicas using Redis Pub/Sub.
 type RedisEventHub struct {
-	local  *EventHub
-	client *redis.Client
-
-	ctx    context.Context
-	cancel context.CancelFunc
-	done   chan struct{}
-
-	mu   sync.Mutex
-	seen map[string]time.Time
+	hub *realtime.RedisHub[Notification]
 }
 
 // NewRedisEventHub creates a Redis-backed notification fanout.
 func NewRedisEventHub(client *redis.Client) *RedisEventHub {
-	ctx, cancel := context.WithCancel(context.Background())
-	hub := &RedisEventHub{
-		local:  NewEventHub(),
-		client: client,
-		ctx:    ctx,
-		cancel: cancel,
-		done:   make(chan struct{}),
-		seen:   make(map[string]time.Time),
-	}
-	if client == nil {
-		close(hub.done)
-		return hub
-	}
-	go hub.subscribe()
-	return hub
+	return &RedisEventHub{hub: realtime.NewRedisHub(client, notificationEventConfig())}
 }
 
 // PublishNotification fans out locally and publishes the notification for other API replicas.
 func (h *RedisEventHub) PublishNotification(item Notification) {
-	if h == nil || item.UserID == "" {
-		return
-	}
-	h.publishLocalOnce(item)
-	if h.client == nil {
-		return
-	}
-
-	raw, err := json.Marshal(item)
-	if err != nil {
-		log.Printf("notification_event_marshal_failed notification_id=%s user_id=%s error=%v", item.ID, item.UserID, err)
-		return
-	}
-	ctx, cancel := context.WithTimeout(h.ctx, 500*time.Millisecond)
-	defer cancel()
-	if err := h.client.Publish(ctx, redisNotificationEventsChannel, raw).Err(); err != nil && h.ctx.Err() == nil {
-		log.Printf("notification_event_publish_failed notification_id=%s user_id=%s error=%v", item.ID, item.UserID, err)
+	if h != nil && h.hub != nil {
+		h.hub.Publish(item)
 	}
 }
 
 // SubscribeNotifications subscribes to notifications for one user.
 func (h *RedisEventHub) SubscribeNotifications(userID string) (<-chan Notification, func()) {
-	if h == nil || h.local == nil {
+	if h == nil || h.hub == nil {
 		return NewEventHub().SubscribeNotifications(userID)
 	}
-	return h.local.SubscribeNotifications(userID)
+	return h.hub.Subscribe(userID)
 }
 
 // Close stops the Redis subscription loop.
 func (h *RedisEventHub) Close() error {
-	if h == nil {
+	if h == nil || h.hub == nil {
 		return nil
 	}
-	h.cancel()
-	<-h.done
-	return nil
+	return h.hub.Close()
 }
 
-// subscribe copies Redis notification messages into the local event hub.
-func (h *RedisEventHub) subscribe() {
-	defer close(h.done)
-	for {
-		if h.ctx.Err() != nil {
-			return
-		}
-		pubsub := h.client.Subscribe(h.ctx, redisNotificationEventsChannel)
-		if _, err := pubsub.Receive(h.ctx); err != nil {
-			_ = pubsub.Close()
-			if h.ctx.Err() != nil {
-				return
-			}
-			log.Printf("notification_event_subscribe_failed error=%v", err)
-			select {
-			case <-time.After(redisSubscribeRetryDelay):
-			case <-h.ctx.Done():
-				return
-			}
-			continue
-		}
-
-		for message := range pubsub.Channel() {
-			var item Notification
-			if err := json.Unmarshal([]byte(message.Payload), &item); err != nil {
-				log.Printf("notification_event_unmarshal_failed error=%v", err)
-				continue
-			}
-			if item.UserID == "" {
-				continue
-			}
-			h.publishLocalOnce(item)
-		}
-		_ = pubsub.Close()
-	}
-}
-
-// publishLocalOnce fans out one notification locally while suppressing Redis echoes.
+// publishLocalOnce is retained as a focused duplicate-suppression test seam.
 func (h *RedisEventHub) publishLocalOnce(item Notification) {
-	if item.ID == "" {
-		h.local.PublishNotification(item)
-		return
+	if h != nil && h.hub != nil {
+		h.hub.PublishLocalOnce(item)
 	}
-	now := time.Now().UTC()
-	h.mu.Lock()
-	for id, expiresAt := range h.seen {
-		if !expiresAt.After(now) {
-			delete(h.seen, id)
-		}
+}
+
+// notificationEventConfig defines notification channel routing.
+func notificationEventConfig() realtime.Config[Notification] {
+	return realtime.Config[Notification]{
+		Channel:   redisNotificationEventsChannel,
+		LogPrefix: "notification_event",
+		Key:       func(item Notification) string { return item.UserID },
+		ID:        func(item Notification) string { return item.ID },
 	}
-	if _, ok := h.seen[item.ID]; ok {
-		h.mu.Unlock()
-		return
-	}
-	h.seen[item.ID] = now.Add(eventSeenTTL)
-	h.mu.Unlock()
-	h.local.PublishNotification(item)
 }
