@@ -174,6 +174,8 @@ Users can enroll RFC 6238 TOTP MFA from the account page. Authenticator secrets 
 
 Projects and tickets use monotonic entity versions. Metadata edits, board moves, archive, and restore requests require a strong numeric `If-Match` value and return `412` on stale writes. The UI supplies the version returned with each entity. Archive is reversible and hidden from active lists; permanent deletion remains available only after a 30-day archive retention window. Project activity records actor-attributed before/after snapshots for project and ticket creation, edits, archive, and restore transitions.
 
+Ticket attachments are immutable, permission-checked objects stored outside PostgreSQL in a persistent volume. The API derives MIME type from file content, rejects unsafe formats and files larger than 10 MiB, records a SHA-256 checksum, and forces downloads with `nosniff`. Production deployments that set `ATTACHMENTS_ENABLED=true` must also configure `CLAMAV_ADDR`; startup validation fails closed when malware scanning is unavailable from configuration. Back up the `attachment_data` volume together with PostgreSQL so attachment metadata and objects remain consistent.
+
 ### Frontend
 
 ```bash
