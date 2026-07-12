@@ -2,6 +2,10 @@
 .env
 .env.*
 .gocache
+.cache
+.gotmp
+coverage*.out
+coverage*.html
 api.exe
 *.exe
 *.test

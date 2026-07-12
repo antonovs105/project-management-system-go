@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       sha:
-        description: Commit SHA to deploy. Leave empty to deploy the selected branch.
+        description: Full 40-character commit SHA to deploy. Leave empty to deploy the selected branch.
         required: false
         type: string
 
@@ -31,16 +31,19 @@ jobs:
       sha: ${{ steps.vars.outputs.sha }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ github.event.inputs.sha || github.event.workflow_run.head_sha || github.sha }}
 
       - name: Prepare image variables
         id: vars
         shell: bash
+        env:
+          REQUESTED_SHA: ${{ github.event.inputs.sha || github.event.workflow_run.head_sha || github.sha }}
         run: |
           set -euo pipefail
-          sha="${{ github.event.inputs.sha || github.event.workflow_run.head_sha || github.sha }}"
+          sha="$REQUESTED_SHA"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "Deployment ref must resolve to a full commit SHA" >&2; exit 1; }
           image_tag="${sha::12}"
           image_prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
@@ -48,17 +51,17 @@ jobs:
           echo "image-prefix=$image_prefix" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Build and push backend image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: ./backend
           file: ./backend/Dockerfile
@@ -70,7 +73,7 @@ jobs:
           cache-to: type=gha,scope=backend,mode=max
 
       - name: Build and push frontend image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
@@ -93,9 +96,11 @@ jobs:
       DEPLOY_USER: ${{ secrets.PROGO_DEPLOY_USER }}
       DEPLOY_PORT: ${{ secrets.PROGO_DEPLOY_PORT }}
       DEPLOY_APP_DIR: ${{ secrets.PROGO_DEPLOY_APP_DIR }}
+      DEPLOY_HOST_KEY: ${{ secrets.PROGO_DEPLOY_HOST_KEY }}
+      DEPLOY_SSH_KEY: ${{ secrets.PROGO_DEPLOY_SSH_KEY }}
     steps:
       - name: Checkout deploy assets
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ needs.build.outputs.sha }}
 
@@ -105,11 +110,14 @@ jobs:
           set -euo pipefail
           test -n "$DEPLOY_HOST"
           test -n "$DEPLOY_USER"
+          test -n "$DEPLOY_HOST_KEY"
+          test -n "$DEPLOY_SSH_KEY"
           port="${DEPLOY_PORT:-22}"
           mkdir -p "$HOME/.ssh"
-          printf '%s\n' "${{ secrets.PROGO_DEPLOY_SSH_KEY }}" > "$HOME/.ssh/progo_deploy"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/progo_deploy"
           chmod 600 "$HOME/.ssh/progo_deploy"
-          ssh-keyscan -p "$port" "$DEPLOY_HOST" >> "$HOME/.ssh/known_hosts"
+          printf '%s\n' "$DEPLOY_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
           echo "port=$port" >> "$GITHUB_ENV"
 
       - name: Package deploy assets

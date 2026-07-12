@@ -63,14 +63,18 @@ The installer expects these commands to already exist on the VM:
 
 - `docker` with the `docker compose` plugin
 - `caddy`
-- `curl`, `tar`, `find`, `cp`, `rm`
+- `curl`, `tar`, `find`, `cp`, `rm`, and `sha256sum` (or `shasum`)
 - `sudo` when not running as root
 
-Run the installer from an interactive SSH shell:
+Run a trusted copy of the installer from an interactive SSH shell, pinning an immutable commit and its independently published archive digest:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/antonovs105/project-management-system-go/main/deploy/install.sh | sh
+PROGO_REF=<full-commit-sha> \
+PROGO_ARCHIVE_SHA256=<published-sha256> \
+sh deploy/install.sh
 ```
+
+The installer refuses unverified archives by default. `PROGO_ALLOW_UNVERIFIED_DOWNLOAD=true` exists only for disposable local testing.
 
 The installer downloads deploy assets, creates `/opt/progo/app/progo.yml` interactively when missing, exports `/opt/progo/app/.env`, pulls the configured container images, runs migrations, deploys the inactive blue/green slot, checks health, and reloads Caddy.
 
@@ -88,13 +92,13 @@ This can be run only while no owner account exists.
 Optional installer overrides:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/antonovs105/project-management-system-go/main/deploy/install.sh | PROGO_REF=main IMAGE_TAG=main APP_DIR=/opt/progo/app sh
+PROGO_REF=<full-commit-sha> PROGO_ARCHIVE_SHA256=<published-sha256> IMAGE_TAG=<commit-tag> APP_DIR=/opt/progo/app sh deploy/install.sh
 ```
 
 ### Prerequisites
 
 - Docker and Docker Compose
-- Optional for local development: Go 1.25+, Node.js 22+, and pnpm
+- Optional for local development: Go 1.26.5+, Node.js 22+, and pnpm 11.1.2
 
 ### Local Docker
 

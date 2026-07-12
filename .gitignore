@@ -28,6 +28,8 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+frontend/.pnpm-home/
+
 # OS generated files
 .DS_Store
 .DS_Store?

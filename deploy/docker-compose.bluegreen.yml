@@ -2,7 +2,7 @@ name: app
 
 services:
   db:
-    image: postgres:17-alpine
+    image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
@@ -16,7 +16,7 @@ services:
       retries: 5
 
   migrations:
-    image: migrate/migrate
+    image: migrate/migrate:latest@sha256:cc4ad8e19d66791e3689405d9a028ce6e9614f32032db14acda1469f7201d6e4
     volumes:
       - ${MIGRATIONS_DIR:-../migrations}:/migrations:ro
     command:
@@ -25,7 +25,7 @@ services:
       - up
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     volumes:
       - redis_data:/data
     healthcheck:
@@ -281,16 +281,19 @@ services:
         condition: service_healthy
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:uid=101,gid=101,mode=0755
+      - /var/run:uid=101,gid=101,mode=0755
+      - /tmp:uid=101,gid=101,mode=1777
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 6
       start_period: 5s
-    networks:
-      federation:
-        aliases:
-          - ${INSTANCE_NAME:?INSTANCE_NAME is required}-blue-frontend
 
   frontend-green:
     image: ${FRONTEND_IMAGE:?FRONTEND_IMAGE is required}
@@ -303,16 +306,19 @@ services:
         condition: service_healthy
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:uid=101,gid=101,mode=0755
+      - /var/run:uid=101,gid=101,mode=0755
+      - /tmp:uid=101,gid=101,mode=1777
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 6
       start_period: 5s
-    networks:
-      federation:
-        aliases:
-          - ${INSTANCE_NAME:?INSTANCE_NAME is required}-green-frontend
 
 networks:
   default:

@@ -1,5 +1,10 @@
 node_modules
 dist
+.pnpm-home
+.pnpm-store
+.vite
+.tmp
+.tsbuild
 .git
 .env
 .env.local
