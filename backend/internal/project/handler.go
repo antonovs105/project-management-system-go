@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/antonovs105/project-management-system-go/internal/apiresponse"
 	"github.com/antonovs105/project-management-system-go/internal/apperror"
 	appconfig "github.com/antonovs105/project-management-system-go/internal/config"
 	"github.com/antonovs105/project-management-system-go/internal/user"
@@ -142,7 +143,7 @@ func (h *Handler) Get(c echo.Context) error {
 	if err != nil {
 		return writeProjectError(c, err)
 	}
-
+	apiresponse.SetVersionETag(c, project.Version)
 	return c.JSON(http.StatusOK, project)
 }
 
@@ -188,6 +189,11 @@ func (h *Handler) Update(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
+	version, err := apiresponse.ExpectedVersion(c)
+	if err != nil {
+		return c.JSON(http.StatusPreconditionRequired, map[string]string{"error": err.Error(), "code": "if_match_required"})
+	}
+	req.ExpectedVersion = version
 
 	userID := c.Get("userID").(string)
 
@@ -536,6 +542,8 @@ func writeProjectError(c echo.Context, err error) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	case errors.Is(err, apperror.ErrConflict):
 		return c.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
+	case errors.Is(err, apperror.ErrPrecondition):
+		return c.JSON(http.StatusPreconditionFailed, map[string]string{"error": err.Error(), "code": "version_conflict"})
 	case errors.Is(err, apperror.ErrForbidden):
 		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
 	case errors.Is(err, apperror.ErrNotFound):

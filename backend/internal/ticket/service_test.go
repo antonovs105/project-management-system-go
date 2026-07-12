@@ -202,6 +202,7 @@ func TestService_UpdateTicketValidatesFields(t *testing.T) {
 		Status:      "open",
 		Priority:    "medium",
 		Type:        "task",
+		Version:     3,
 	}
 
 	mockRepo.On("GetByID", ctx, ticketID).Return(storedTicket, nil).Once()
@@ -386,15 +387,16 @@ func TestService_MoveTicket(t *testing.T) {
 		Priority:    "medium",
 		Type:        "task",
 	}
+	storedTicket.Version = 3
 	movedTicket := *storedTicket
 	movedTicket.Status = status
 
 	mockRepo.On("GetByID", ctx, ticketID).Return(storedTicket, nil).Once()
 	mockProject.On("GetProjectByID", ctx, projectID, actorID).Return(&project.Project{ID: projectID}, nil).Once()
 	mockProject.On("HasProjectPermission", ctx, projectID, actorID, project.PermissionTicketsUpdate).Return(true, nil).Once()
-	mockRepo.On("Move", ctx, ticketID, actorID, status, &beforeID, (*string)(nil)).Return(&movedTicket, &ActivityResult{ActivityIDs: []string{"activity-1"}}, nil).Once()
+	mockRepo.On("Move", ctx, ticketID, actorID, status, &beforeID, (*string)(nil), int64(3)).Return(&movedTicket, &ActivityResult{ActivityIDs: []string{"activity-1"}}, nil).Once()
 
-	moved, err := service.MoveTicket(ctx, MoveTicketRequest{Status: status, BeforeTicketID: &beforeID}, ticketID, actorID)
+	moved, err := service.MoveTicket(ctx, MoveTicketRequest{Status: status, BeforeTicketID: &beforeID, ExpectedVersion: 3}, ticketID, actorID)
 
 	require.NoError(t, err)
 	require.NotNil(t, moved)

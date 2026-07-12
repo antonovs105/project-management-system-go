@@ -11,6 +11,7 @@ import (
 
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	apdelivery "github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
+	"github.com/antonovs105/project-management-system-go/internal/apperror"
 	"github.com/antonovs105/project-management-system-go/internal/lexorank"
 	"github.com/jmoiron/sqlx"
 )
@@ -21,7 +22,7 @@ type Repository interface {
 	ListByProjectID(ctx context.Context, projectID string, options TicketListOptions) ([]Ticket, error)
 	GetByID(ctx context.Context, id string) (*Ticket, error)
 	Update(ctx context.Context, ticket *Ticket, actorID string) (*ActivityResult, error)
-	Move(ctx context.Context, ticketID, actorID, status string, beforeTicketID, afterTicketID *string) (*Ticket, *ActivityResult, error)
+	Move(ctx context.Context, ticketID, actorID, status string, beforeTicketID, afterTicketID *string, expectedVersion int64) (*Ticket, *ActivityResult, error)
 	Delete(ctx context.Context, id string, actorID string) (*DeleteResult, error)
 	CreateLink(ctx context.Context, link *TicketLink) error
 	GetLinkByID(ctx context.Context, linkID string) (*TicketLink, error)
@@ -33,6 +34,12 @@ type Repository interface {
 type PgRepository struct {
 	db  *sqlx.DB
 	cfg activitypub.Config
+}
+
+// setTicketMutationActor makes trigger-based user history attributable within one transaction.
+func setTicketMutationActor(ctx context.Context, tx *sqlx.Tx, actorID string) error {
+	_, err := tx.ExecContext(ctx, `SELECT set_config('progo.actor_id', $1, true)`, actorID)
+	return err
 }
 
 // NewRepository creates a PostgreSQL-backed ticket repository.
@@ -47,6 +54,9 @@ func (r *PgRepository) Create(ctx context.Context, ticket *Ticket) (*ActivityRes
 		return nil, err
 	}
 	defer tx.Rollback()
+	if err := setTicketMutationActor(ctx, tx, ticket.ReporterID); err != nil {
+		return nil, err
+	}
 
 	ticket.IsResolved = ticket.Status == "done"
 	rank, err := r.rankAtEnd(ctx, tx, ticket.ProjectID, ticket.Status, "")
@@ -116,7 +126,7 @@ func (r *PgRepository) Create(ctx context.Context, ticket *Ticket) (*ActivityRes
 // ListByProjectID returns tickets for a project.
 func (r *PgRepository) ListByProjectID(ctx context.Context, projectID string, options TicketListOptions) ([]Ticket, error) {
 	tickets := make([]Ticket, 0)
-	conditions := []string{"t.project_id = $1"}
+	conditions := []string{"t.project_id = $1", "t.archived_at IS NULL", "EXISTS (SELECT 1 FROM projects active_project WHERE active_project.id = t.project_id AND active_project.archived_at IS NULL)"}
 	args := []any{projectID}
 	if options.AssigneeID != nil {
 		args = append(args, *options.AssigneeID)
@@ -181,13 +191,17 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket, actorID strin
 		return nil, err
 	}
 	defer tx.Rollback()
+	if err := setTicketMutationActor(ctx, tx, actorID); err != nil {
+		return nil, err
+	}
 
 	var current struct {
 		Status     string `db:"status"`
 		IsResolved bool   `db:"is_resolved"`
+		Version    int64  `db:"version"`
 	}
 	if err := tx.GetContext(ctx, &current, `
-		SELECT status, is_resolved
+		SELECT status, is_resolved, version
 		FROM tickets
 		WHERE id = $1
 		FOR UPDATE
@@ -196,6 +210,9 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket, actorID strin
 			return nil, errors.New("ticket to update not found")
 		}
 		return nil, err
+	}
+	if current.Version != ticket.Version {
+		return nil, apperror.New(apperror.ErrPrecondition, "ticket was changed by another request")
 	}
 
 	existingAssigneeIDs, err := lookupAssigneeActorIDs(ctx, tx, ticket.ID)
@@ -238,7 +255,7 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket, actorID strin
 				WHEN $10 THEN resolved_by_actor_id
 				ELSE NULL
 			END
-		WHERE id = $1
+		WHERE id = $1 AND version = $13
 	`,
 		ticket.ID,
 		ticket.Title,
@@ -252,6 +269,7 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket, actorID strin
 		ticket.IsResolved,
 		current.IsResolved,
 		actorID,
+		ticket.Version,
 	)
 	if err != nil {
 		return nil, err
@@ -261,7 +279,7 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket, actorID strin
 		return nil, err
 	}
 	if rowsAffected == 0 {
-		return nil, errors.New("ticket to update not found")
+		return nil, apperror.New(apperror.ErrPrecondition, "ticket was changed by another request")
 	}
 	if err := syncTicketLabels(ctx, tx, ticket.ID, ticket.ProjectID, ticket.LabelIDs); err != nil {
 		return nil, err
@@ -320,20 +338,24 @@ func (r *PgRepository) Update(ctx context.Context, ticket *Ticket, actorID strin
 }
 
 // Move changes a ticket status and rank using neighbor ticket boundaries.
-func (r *PgRepository) Move(ctx context.Context, ticketID, actorID, status string, beforeTicketID, afterTicketID *string) (*Ticket, *ActivityResult, error) {
+func (r *PgRepository) Move(ctx context.Context, ticketID, actorID, status string, beforeTicketID, afterTicketID *string, expectedVersion int64) (*Ticket, *ActivityResult, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
+	if err := setTicketMutationActor(ctx, tx, actorID); err != nil {
+		return nil, nil, err
+	}
 
 	var current struct {
 		ProjectID  string `db:"project_id"`
 		IsResolved bool   `db:"is_resolved"`
 		ReporterID string `db:"reporter_id"`
+		Version    int64  `db:"version"`
 	}
 	if err := tx.GetContext(ctx, &current, `
-		SELECT project_id::text, is_resolved, reporter_id::text
+		SELECT project_id::text, is_resolved, reporter_id::text, version
 		FROM tickets
 		WHERE id = $1
 		FOR UPDATE
@@ -342,6 +364,9 @@ func (r *PgRepository) Move(ctx context.Context, ticketID, actorID, status strin
 			return nil, nil, errors.New("ticket to move not found")
 		}
 		return nil, nil, err
+	}
+	if current.Version != expectedVersion {
+		return nil, nil, apperror.New(apperror.ErrPrecondition, "ticket was changed by another request")
 	}
 
 	rank, err := r.rankBetween(ctx, tx, current.ProjectID, status, ticketID, beforeTicketID, afterTicketID)
@@ -857,6 +882,8 @@ func ticketSelectBase() string {
 			ta.actor_id::text AS assignee_id,
 			t.is_resolved,
 			t.due_date,
+			t.version,
+			t.archived_at,
 			COALESCE(ARRAY(
 				SELECT assignment.label_id::text
 				FROM ticket_labels assignment

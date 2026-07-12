@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -31,6 +32,8 @@ const (
 	maxProjectRoleNameLength = 80
 	// maxProjectRoleDescriptionLength is the longest accepted project-local role description.
 	maxProjectRoleDescriptionLength = 1000
+	// destructiveRetentionWindow delays permanent deletion after archival.
+	destructiveRetentionWindow = 30 * 24 * time.Hour
 )
 
 // Service contains project board, membership, and invite workflows.
@@ -200,8 +203,9 @@ func (s *Service) ListUserInvites(ctx context.Context, userID string, options Pr
 
 // UpdateProjectRequest contains partial project metadata updates.
 type UpdateProjectRequest struct {
-	Name        *string `json:"name"`
-	Description *string `json:"description"`
+	Name            *string `json:"name"`
+	Description     *string `json:"description"`
+	ExpectedVersion int64   `json:"-"`
 }
 
 // UpdateProject changes project metadata and emits an Update activity.
@@ -209,6 +213,12 @@ func (s *Service) UpdateProject(ctx context.Context, projectID, userID string, r
 	projectToUpdate, err := s.GetProjectByID(ctx, projectID, userID)
 	if err != nil {
 		return err
+	}
+	if req.ExpectedVersion > 0 && projectToUpdate.Version != req.ExpectedVersion {
+		return apperror.New(apperror.ErrPrecondition, "project was changed by another request")
+	}
+	if projectToUpdate.ArchivedAt != nil {
+		return apperror.New(apperror.ErrConflict, "archived projects must be restored before editing")
 	}
 	if err := s.RequireProjectPermission(ctx, projectID, userID, PermissionProjectUpdate, "insufficient permissions: missing project.update"); err != nil {
 		return err
@@ -241,11 +251,15 @@ func (s *Service) UpdateProject(ctx context.Context, projectID, userID string, r
 
 // DeleteProject deletes a project and emits ActivityPub tombstone side effects.
 func (s *Service) DeleteProject(ctx context.Context, projectID, userID string) error {
-	if _, err := s.GetProjectByID(ctx, projectID, userID); err != nil {
+	value, err := s.GetProjectByID(ctx, projectID, userID)
+	if err != nil {
 		return err
 	}
 	if err := s.RequireProjectPermission(ctx, projectID, userID, PermissionProjectDelete, "insufficient permissions: missing project.delete"); err != nil {
 		return err
+	}
+	if value.ArchivedAt == nil || time.Since(*value.ArchivedAt) < destructiveRetentionWindow {
+		return apperror.New(apperror.ErrConflict, "project must remain archived for 30 days before permanent deletion")
 	}
 	deleteResult, err := s.repo.Delete(ctx, projectID, userID)
 	if err != nil {

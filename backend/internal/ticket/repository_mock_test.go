@@ -44,8 +44,8 @@ func (m *MockRepository) Update(ctx context.Context, ticket *Ticket, actorID str
 	return args.Get(0).(*ActivityResult), args.Error(1)
 }
 
-func (m *MockRepository) Move(ctx context.Context, ticketID, actorID, status string, beforeTicketID, afterTicketID *string) (*Ticket, *ActivityResult, error) {
-	args := m.Called(ctx, ticketID, actorID, status, beforeTicketID, afterTicketID)
+func (m *MockRepository) Move(ctx context.Context, ticketID, actorID, status string, beforeTicketID, afterTicketID *string, expectedVersion int64) (*Ticket, *ActivityResult, error) {
+	args := m.Called(ctx, ticketID, actorID, status, beforeTicketID, afterTicketID, expectedVersion)
 	var moved *Ticket
 	if args.Get(0) != nil {
 		moved = args.Get(0).(*Ticket)

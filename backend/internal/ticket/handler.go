@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/antonovs105/project-management-system-go/internal/apiresponse"
 	"github.com/antonovs105/project-management-system-go/internal/apperror"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -208,6 +209,7 @@ func (h *Handler) Get(c echo.Context) error {
 	if err != nil {
 		return writeTicketError(c, err)
 	}
+	apiresponse.SetVersionETag(c, ticket.Version)
 	return c.JSON(http.StatusOK, ticket)
 }
 
@@ -223,20 +225,25 @@ func (h *Handler) Update(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
+	version, err := apiresponse.ExpectedVersion(c)
+	if err != nil {
+		return c.JSON(http.StatusPreconditionRequired, map[string]string{"error": err.Error(), "code": "if_match_required"})
+	}
 	if err := validateUpdateTicketIDs(req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
 	serviceReq := UpdateTicketRequest{
-		Title:       req.Title,
-		Description: req.Description,
-		Status:      req.Status,
-		Priority:    req.Priority,
-		Type:        req.Type,
-		ParentID:    req.ParentID,
-		AssigneeID:  req.AssigneeID,
-		DueDate:     req.DueDate,
-		LabelIDs:    req.LabelIDs,
+		Title:           req.Title,
+		Description:     req.Description,
+		Status:          req.Status,
+		Priority:        req.Priority,
+		Type:            req.Type,
+		ParentID:        req.ParentID,
+		AssigneeID:      req.AssigneeID,
+		DueDate:         req.DueDate,
+		LabelIDs:        req.LabelIDs,
+		ExpectedVersion: version,
 	}
 
 	if err := h.service.UpdateTicket(c.Request().Context(), serviceReq, ticketID, userID); err != nil {
@@ -260,11 +267,16 @@ func (h *Handler) Move(c echo.Context) error {
 	if err := validateMoveTicketIDs(req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
+	version, err := apiresponse.ExpectedVersion(c)
+	if err != nil {
+		return c.JSON(http.StatusPreconditionRequired, map[string]string{"error": err.Error(), "code": "if_match_required"})
+	}
 
 	moved, err := h.service.MoveTicket(c.Request().Context(), MoveTicketRequest{
-		Status:         req.Status,
-		BeforeTicketID: req.BeforeTicketID,
-		AfterTicketID:  req.AfterTicketID,
+		Status:          req.Status,
+		BeforeTicketID:  req.BeforeTicketID,
+		AfterTicketID:   req.AfterTicketID,
+		ExpectedVersion: version,
 	}, ticketID, userID)
 	if err != nil {
 		return writeTicketError(c, err)
@@ -506,8 +518,12 @@ func writeTicketError(c echo.Context, err error) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	case errors.Is(err, apperror.ErrForbidden):
 		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+	case errors.Is(err, apperror.ErrConflict):
+		return c.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
 	case errors.Is(err, apperror.ErrNotFound):
 		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	case errors.Is(err, apperror.ErrPrecondition):
+		return c.JSON(http.StatusPreconditionFailed, map[string]string{"error": err.Error(), "code": "version_conflict"})
 	default:
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "ticket operation failed"})
 	}

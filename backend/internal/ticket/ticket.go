@@ -24,6 +24,8 @@ type Ticket struct {
 	IsResolved  bool           `db:"is_resolved" json:"is_resolved"`
 	DueDate     *time.Time     `db:"due_date" json:"due_date"`
 	LabelIDs    pq.StringArray `db:"label_ids" json:"label_ids"`
+	Version     int64          `db:"version" json:"version"`
+	ArchivedAt  *time.Time     `db:"archived_at" json:"archived_at"`
 	CreatedAt   time.Time      `db:"created_at" json:"created_at"`
 	UpdatedAt   time.Time      `db:"updated_at" json:"updated_at"`
 }

@@ -71,6 +71,9 @@ func (r *PgRepository) Create(ctx context.Context, project *Project) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err := setProjectMutationActor(ctx, tx, project.OwnerID); err != nil {
+		return err
+	}
 
 	actorQuery := `
 		INSERT INTO actors (
@@ -232,6 +235,8 @@ func (r *PgRepository) GetByID(ctx context.Context, id string) (*Project, error)
 			p.description,
 			p.owner_id::text,
 			a.handle,
+			p.version,
+			p.archived_at,
 			p.created_at,
 			p.updated_at
 		FROM projects p
@@ -253,12 +258,14 @@ func (r *PgRepository) ListByOwnerID(ctx context.Context, ownerID string, option
 			p.description,
 			p.owner_id::text,
 			a.handle,
+			p.version,
+			p.archived_at,
 			p.created_at,
 			p.updated_at
 		FROM projects p
 		JOIN actors a ON a.id = p.id
 		JOIN project_members pm ON pm.project_id = p.id
-		WHERE pm.user_id = $1
+		WHERE pm.user_id = $1 AND p.archived_at IS NULL
 		ORDER BY p.created_at DESC
 		LIMIT $2 OFFSET $3
 	`
@@ -910,6 +917,9 @@ func (r *PgRepository) Update(ctx context.Context, project *Project, actorID str
 		return nil, err
 	}
 	defer tx.Rollback()
+	if err := setProjectMutationActor(ctx, tx, actorID); err != nil {
+		return nil, err
+	}
 
 	recipientInboxes, err := remoteProjectFollowerInboxes(ctx, tx, project.ID)
 	if err != nil {
@@ -919,7 +929,7 @@ func (r *PgRepository) Update(ctx context.Context, project *Project, actorID str
 	result, err := tx.NamedExecContext(ctx, `
 		UPDATE projects
 		SET name = :name, description = :description
-		WHERE id = :id
+		WHERE id = :id AND version = :version
 	`, project)
 	if err != nil {
 		return nil, err
@@ -929,7 +939,7 @@ func (r *PgRepository) Update(ctx context.Context, project *Project, actorID str
 		return nil, err
 	}
 	if rowsAffected == 0 {
-		return nil, apperror.New(apperror.ErrNotFound, "no rows affected, project not found")
+		return nil, apperror.New(apperror.ErrPrecondition, "project was changed by another request")
 	}
 
 	if _, err := tx.NamedExecContext(ctx, `
@@ -972,6 +982,12 @@ func (r *PgRepository) Update(ctx context.Context, project *Project, actorID str
 		RecipientInboxes: recipientInboxes,
 		Deliveries:       deliveries,
 	}, nil
+}
+
+// setProjectMutationActor makes trigger-based user history attributable within one transaction.
+func setProjectMutationActor(ctx context.Context, tx *sqlx.Tx, actorID string) error {
+	_, err := tx.ExecContext(ctx, `SELECT set_config('progo.actor_id', $1, true)`, actorID)
+	return err
 }
 
 // Delete removes a project and tombstones its ActivityPub objects.

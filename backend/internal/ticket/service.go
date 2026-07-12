@@ -91,9 +91,10 @@ type CreateTicketRequest struct {
 
 // MoveTicketRequest contains the target board position for a ticket.
 type MoveTicketRequest struct {
-	Status         string
-	BeforeTicketID *string
-	AfterTicketID  *string
+	Status          string
+	BeforeTicketID  *string
+	AfterTicketID   *string
+	ExpectedVersion int64
 }
 
 // ErrInvalidTicketInput reports malformed ticket-management input.
@@ -267,15 +268,16 @@ func (s *Service) GetTicketByID(ctx context.Context, ticketID, userID string) (*
 
 // UpdateTicketRequest contains nullable partial ticket updates.
 type UpdateTicketRequest struct {
-	Title       *string   `json:"title"`
-	Description *string   `json:"description"`
-	Status      *string   `json:"status"`
-	Priority    *string   `json:"priority"`
-	Type        *string   `json:"type"`
-	ParentID    **string  `json:"parent_id"`
-	AssigneeID  **string  `json:"assignee_id"`
-	DueDate     *string   `json:"due_date"`
-	LabelIDs    *[]string `json:"label_ids"`
+	Title           *string   `json:"title"`
+	Description     *string   `json:"description"`
+	Status          *string   `json:"status"`
+	Priority        *string   `json:"priority"`
+	Type            *string   `json:"type"`
+	ParentID        **string  `json:"parent_id"`
+	AssigneeID      **string  `json:"assignee_id"`
+	DueDate         *string   `json:"due_date"`
+	LabelIDs        *[]string `json:"label_ids"`
+	ExpectedVersion int64     `json:"-"`
 }
 
 // UpdateTicket changes ticket fields and emits Update or Add activities as needed.
@@ -283,6 +285,9 @@ func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, tic
 	ticketToUpdate, err := s.GetTicketByID(ctx, ticketID, userID)
 	if err != nil {
 		return err
+	}
+	if req.ExpectedVersion > 0 && ticketToUpdate.Version != req.ExpectedVersion {
+		return apperror.New(apperror.ErrPrecondition, "ticket was changed by another request")
 	}
 	previousAssigneeID := ticketToUpdate.AssigneeID
 	if err := s.requireProjectPermission(ctx, ticketToUpdate.ProjectID, userID, project.PermissionTicketsUpdate, "insufficient permissions: missing tickets.update"); err != nil {
@@ -449,13 +454,16 @@ func (s *Service) MoveTicket(ctx context.Context, req MoveTicketRequest, ticketI
 	if err := s.requireProjectPermission(ctx, ticketToMove.ProjectID, userID, project.PermissionTicketsUpdate, "insufficient permissions: missing tickets.update"); err != nil {
 		return nil, err
 	}
+	if req.ExpectedVersion > 0 && ticketToMove.Version != req.ExpectedVersion {
+		return nil, apperror.New(apperror.ErrPrecondition, "ticket was changed by another request")
+	}
 	if req.Status == "" {
 		req.Status = ticketToMove.Status
 	}
 	if !ticketStatuses[req.Status] {
 		return nil, invalidTicketInput("invalid ticket status")
 	}
-	moved, result, err := s.repo.Move(ctx, ticketID, userID, req.Status, req.BeforeTicketID, req.AfterTicketID)
+	moved, result, err := s.repo.Move(ctx, ticketID, userID, req.Status, req.BeforeTicketID, req.AfterTicketID, req.ExpectedVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -566,6 +574,9 @@ func (s *Service) DeleteTicket(ctx context.Context, ticketID, userID string) err
 	}
 	if err := s.requireProjectPermission(ctx, ticket.ProjectID, userID, project.PermissionTicketsDelete, "insufficient permissions: missing tickets.delete"); err != nil {
 		return err
+	}
+	if ticket.ArchivedAt == nil || time.Since(*ticket.ArchivedAt) < 30*24*time.Hour {
+		return apperror.New(apperror.ErrConflict, "ticket must remain archived for 30 days before permanent deletion")
 	}
 
 	deleteResult, err := s.repo.Delete(ctx, ticketID, userID)

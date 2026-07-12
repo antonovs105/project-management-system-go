@@ -542,6 +542,71 @@ paths:
           $ref: "#/components/responses/Error"
         "401":
           $ref: "#/components/responses/Error"
+  /api/v1/projects/archived:
+    get:
+      tags: [Projects]
+      operationId: listArchivedProjects
+      security: [{cookieAuth: []}]
+      responses:
+        "200":
+          description: Restorable projects for the current user.
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: "#/components/schemas/ArchivedProject"}}
+  /api/v1/projects/{projectID}/activity:
+    get:
+      tags: [Projects]
+      operationId: listProjectActivity
+      security: [{cookieAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+      responses:
+        "200":
+          description: Immutable project and ticket change history.
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: "#/components/schemas/ProjectActivityEvent"}}
+  /api/v1/projects/{projectID}/tickets/archived:
+    get:
+      tags: [Tickets]
+      operationId: listArchivedTickets
+      security: [{cookieAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+      responses:
+        "200":
+          description: Restorable project tickets.
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: "#/components/schemas/ArchivedTicket"}}
+  /api/v1/projects/{projectID}/archive:
+    post:
+      tags: [Projects]
+      operationId: archiveProject
+      security: [{cookieAuth: []}]
+      parameters: [{$ref: "#/components/parameters/ProjectID"}, {$ref: "#/components/parameters/IfMatch"}]
+      responses: {"204": {description: Project archived.}, "412": {$ref: "#/components/responses/Error"}, "428": {$ref: "#/components/responses/Error"}}
+  /api/v1/projects/{projectID}/restore:
+    post:
+      tags: [Projects]
+      operationId: restoreProject
+      security: [{cookieAuth: []}]
+      parameters: [{$ref: "#/components/parameters/ProjectID"}, {$ref: "#/components/parameters/IfMatch"}]
+      responses: {"204": {description: Project restored.}, "412": {$ref: "#/components/responses/Error"}, "428": {$ref: "#/components/responses/Error"}}
+  /api/v1/tickets/{ticketID}/archive:
+    post:
+      tags: [Tickets]
+      operationId: archiveTicket
+      security: [{cookieAuth: []}]
+      parameters: [{$ref: "#/components/parameters/TicketID"}, {$ref: "#/components/parameters/IfMatch"}]
+      responses: {"204": {description: Ticket archived.}, "412": {$ref: "#/components/responses/Error"}, "428": {$ref: "#/components/responses/Error"}}
+  /api/v1/tickets/{ticketID}/restore:
+    post:
+      tags: [Tickets]
+      operationId: restoreTicket
+      security: [{cookieAuth: []}]
+      parameters: [{$ref: "#/components/parameters/TicketID"}, {$ref: "#/components/parameters/IfMatch"}]
+      responses: {"204": {description: Ticket restored.}, "412": {$ref: "#/components/responses/Error"}, "428": {$ref: "#/components/responses/Error"}}
   /api/v1/me/email/verification:
     post:
       tags: [Auth]
@@ -1107,6 +1172,8 @@ paths:
     patch:
       tags: [Projects]
       operationId: updateProject
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
       security:
         - bearerAuth: []
       requestBody:
@@ -1115,6 +1182,10 @@ paths:
         "204":
           description: Project updated.
         "400":
+          $ref: "#/components/responses/Error"
+        "412":
+          $ref: "#/components/responses/Error"
+        "428":
           $ref: "#/components/responses/Error"
     delete:
       tags: [Projects]
@@ -1682,6 +1753,8 @@ paths:
     patch:
       tags: [Tickets]
       operationId: updateTicket
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
       security:
         - bearerAuth: []
       requestBody:
@@ -1690,6 +1763,10 @@ paths:
         "204":
           description: Ticket updated.
         "400":
+          $ref: "#/components/responses/Error"
+        "412":
+          $ref: "#/components/responses/Error"
+        "428":
           $ref: "#/components/responses/Error"
     delete:
       tags: [Tickets]
@@ -1701,6 +1778,29 @@ paths:
           description: Ticket deleted.
         "404":
           $ref: "#/components/responses/Error"
+  /api/v1/tickets/{ticketID}/move:
+    post:
+      tags: [Tickets]
+      operationId: moveTicket
+      security: [{cookieAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/TicketID"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: {$ref: "#/components/schemas/TicketStatus"}
+                before_ticket_id: {type: [string, "null"], format: uuid}
+                after_ticket_id: {type: [string, "null"], format: uuid}
+      responses:
+        "200": {description: Versioned moved ticket., content: {application/json: {schema: {$ref: "#/components/schemas/Ticket"}}}}
+        "412": {$ref: "#/components/responses/Error"}
+        "428": {$ref: "#/components/responses/Error"}
   /api/v1/tickets/{ticketID}/links:
     parameters:
       - $ref: "#/components/parameters/TicketID"
@@ -2261,6 +2361,14 @@ components:
       scheme: bearer
       description: Optional in development; required when METRICS_TOKEN is configured.
   parameters:
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: Strong numeric entity version returned as ETag.
+      schema:
+        type: string
+        pattern: '^"[1-9][0-9]*"$'
     ActivityID:
       name: activityID
       in: path
@@ -3628,7 +3736,7 @@ components:
           type: boolean
     Project:
       type: object
-      required: [id, ap_id, name, description, owner_id, handle, created_at, updated_at]
+      required: [id, ap_id, name, description, owner_id, handle, version, archived_at, created_at, updated_at]
       properties:
         id:
           type: string
@@ -3645,6 +3753,13 @@ components:
           format: uuid
         handle:
           type: string
+        version:
+          type: integer
+          format: int64
+          minimum: 1
+        archived_at:
+          type: [string, "null"]
+          format: date-time
         created_at:
           type: string
           format: date-time
@@ -3838,7 +3953,7 @@ components:
           format: date-time
     Ticket:
       type: object
-      required: [id, ap_id, title, description, status, priority, type, project_id, reporter_id, is_resolved, created_at, updated_at]
+      required: [id, ap_id, title, description, status, priority, type, project_id, reporter_id, is_resolved, version, archived_at, created_at, updated_at]
       properties:
         id:
           type: string
@@ -3884,6 +3999,13 @@ components:
           items:
             type: string
             format: uuid
+        version:
+          type: integer
+          format: int64
+          minimum: 1
+        archived_at:
+          type: [string, "null"]
+          format: date-time
         created_at:
           type: string
           format: date-time
@@ -3918,6 +4040,38 @@ components:
     TicketType:
       type: string
       enum: [epic, task, subtask]
+    ArchivedProject:
+      type: object
+      required: [id, name, description, version, archived_at]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        description: {type: string}
+        version: {type: integer, format: int64, minimum: 1}
+        archived_at: {type: string, format: date-time}
+    ArchivedTicket:
+      type: object
+      required: [id, project_id, title, version, archived_at]
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        title: {type: string}
+        version: {type: integer, format: int64, minimum: 1}
+        archived_at: {type: string, format: date-time}
+    ProjectActivityEvent:
+      type: object
+      required: [id, project_id, entity_type, entity_id, action, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        actor_id: {type: [string, "null"], format: uuid}
+        actor_handle: {type: [string, "null"]}
+        entity_type: {type: string, enum: [project, ticket]}
+        entity_id: {type: string, format: uuid}
+        action: {type: string, enum: [created, updated, archived, restored]}
+        before_state: {type: [object, "null"]}
+        after_state: {type: [object, "null"]}
+        created_at: {type: string, format: date-time}
     AccountSession:
       type: object
       required: [id, user_agent, ip_address, created_at, last_seen_at, expires_at, current]

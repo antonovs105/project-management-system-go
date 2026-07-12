@@ -126,16 +126,18 @@ var DefaultProjectRoles = []ProjectRole{
 
 // Project is a local ActivityPub Group actor used as a project board.
 type Project struct {
-	ID            string    `db:"id" json:"id"`
-	APID          string    `db:"ap_id" json:"ap_id"`
-	Name          string    `db:"name" json:"name"`
-	Description   string    `db:"description" json:"description"`
-	OwnerID       string    `db:"owner_id" json:"owner_id"`
-	Handle        string    `db:"handle" json:"handle"`
-	PublicKeyPEM  string    `db:"public_key_pem" json:"-"`
-	PrivateKeyPEM string    `db:"private_key_pem" json:"-"`
-	CreatedAt     time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt     time.Time `db:"updated_at" json:"updated_at"`
+	ID            string     `db:"id" json:"id"`
+	APID          string     `db:"ap_id" json:"ap_id"`
+	Name          string     `db:"name" json:"name"`
+	Description   string     `db:"description" json:"description"`
+	OwnerID       string     `db:"owner_id" json:"owner_id"`
+	Handle        string     `db:"handle" json:"handle"`
+	PublicKeyPEM  string     `db:"public_key_pem" json:"-"`
+	PrivateKeyPEM string     `db:"private_key_pem" json:"-"`
+	Version       int64      `db:"version" json:"version"`
+	ArchivedAt    *time.Time `db:"archived_at" json:"archived_at"`
+	CreatedAt     time.Time  `db:"created_at" json:"created_at"`
+	UpdatedAt     time.Time  `db:"updated_at" json:"updated_at"`
 }
 
 // ProjectInvite represents an Invite activity awaiting an accept, reject, or revoke response.

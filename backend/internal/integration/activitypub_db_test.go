@@ -346,6 +346,8 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	ticketComment, err := commentService.CreateComment(ctx, createdTicket.ID, owner.ID, "Deleting this with the ticket.")
 	require.NoError(t, err)
 
+	_, err = db.ExecContext(ctx, `UPDATE tickets SET archived_at = now() - interval '31 days' WHERE id = $1`, createdTicket.ID)
+	require.NoError(t, err)
 	require.NoError(t, ticketService.DeleteTicket(ctx, createdTicket.ID, owner.ID))
 	requireObjectDeleted(t, db, createdTicket.APID)
 	requireObjectTombstone(t, db, createdTicket.APID, "forge:Ticket")
@@ -513,6 +515,8 @@ func TestActivityPubFoundationFlow(t *testing.T) {
 	require.Contains(t, err.Error(), "insufficient permissions: missing project.delete")
 	requireActivityCount(t, db, forbiddenDeleteCount)
 
+	_, err = db.ExecContext(ctx, `UPDATE projects SET archived_at = now() - interval '31 days' WHERE id = $1`, project.ID)
+	require.NoError(t, err)
 	require.NoError(t, projectService.DeleteProject(ctx, project.ID, owner.ID))
 	requireObjectDeleted(t, db, project.APID)
 	requireObjectTombstone(t, db, project.APID, "Group")

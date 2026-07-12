@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/antonovs105/project-management-system-go/internal/account"
+	"github.com/antonovs105/project-management-system-go/internal/activityhistory"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/c2s"
 	"github.com/antonovs105/project-management-system-go/internal/activitypub/delivery"
@@ -121,6 +122,7 @@ var requiredDatabaseTables = []string{
 	"tickets",
 	"project_labels",
 	"ticket_labels",
+	"project_activity_events",
 	"ticket_assignees",
 	"comments",
 	"ap_objects",
@@ -147,6 +149,7 @@ type ApiServer struct {
 	metricsToken        string
 	userHandler         *user.Handler
 	accountHandler      *account.Handler
+	activityHandler     *activityhistory.Handler
 	instanceHandler     *instance.Handler
 	projectHandler      *project.Handler
 	labelHandler        *label.Handler
@@ -486,6 +489,7 @@ func main() {
 
 	projectRepo := project.NewRepository(db, apConfig, privateKeyCodec)
 	projectService := project.NewService(projectRepo, apConfig)
+	activityHandler := activityhistory.NewHandler(activityhistory.NewService(activityhistory.NewRepository(db), projectRepo))
 	projectHandler := project.NewHandler(
 		projectService,
 		project.WithInstanceRoleProvider(userService),
@@ -630,6 +634,7 @@ func main() {
 		metricsToken:        metricsToken,
 		userHandler:         userHandler,
 		accountHandler:      accountHandler,
+		activityHandler:     activityHandler,
 		instanceHandler:     instanceHandler,
 		projectHandler:      projectHandler,
 		labelHandler:        labelHandler,
@@ -985,6 +990,9 @@ func registerAuthenticatedAPIRoutes(api *echo.Group, server *ApiServer, jwtSecre
 	server.userHandler.RegisterAdminRoutes(api)
 	server.federationHandler.RegisterRoutes(api)
 	server.projectHandler.RegisterRoutes(api)
+	if server.activityHandler != nil {
+		server.activityHandler.RegisterRoutes(api)
+	}
 	server.labelHandler.RegisterRoutes(api)
 	server.ticketHandler.RegisterRoutes(api)
 	server.commentHandler.RegisterRoutes(api)

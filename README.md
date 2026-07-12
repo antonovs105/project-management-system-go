@@ -172,6 +172,8 @@ Account security endpoints support email verification, enumeration-resistant pas
 
 Users can enroll RFC 6238 TOTP MFA from the account page. Authenticator secrets are AES-GCM encrypted at rest, ten recovery codes are returned once and stored only as hashes, and each recovery code is atomically consumed. Password and OAuth sessions enforce MFA when enabled; users cannot be promoted to `admin` or `owner` until enrollment is active.
 
+Projects and tickets use monotonic entity versions. Metadata edits, board moves, archive, and restore requests require a strong numeric `If-Match` value and return `412` on stale writes. The UI supplies the version returned with each entity. Archive is reversible and hidden from active lists; permanent deletion remains available only after a 30-day archive retention window. Project activity records actor-attributed before/after snapshots for project and ticket creation, edits, archive, and restore transitions.
+
 ### Frontend
 
 ```bash

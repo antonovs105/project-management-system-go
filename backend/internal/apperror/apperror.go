@@ -10,6 +10,8 @@ var (
 	ErrForbidden = errors.New("operation forbidden")
 	// ErrConflict classifies operations rejected by current resource state.
 	ErrConflict = errors.New("resource conflict")
+	// ErrPrecondition classifies optimistic concurrency failures.
+	ErrPrecondition = errors.New("resource precondition failed")
 )
 
 // classified preserves a safe message while exposing a stable error kind.
