@@ -11,6 +11,10 @@ server:
 
 database:
   source: "postgres://postgres:change-me-postgres-password-32-bytes@localhost:5432/pms?sslmode=disable"
+  max_open_connections: 25
+  max_idle_connections: 10
+  conn_max_lifetime_seconds: 1800
+  conn_max_idle_time_seconds: 300
 
 security:
   jwt_secret_key: "change-me-jwt-secret-32-byte-minimum"
@@ -64,3 +68,17 @@ oauth:
 github:
   api_token: ""
   webhook_secret: ""
+
+email:
+  host: ""
+  port: 587
+  username: ""
+  password: ""
+  from_address: ""
+  from_name: "Progo"
+  implicit_tls: false
+
+attachments:
+  enabled: false
+  storage_path: ".data/attachments"
+  clamav_addr: ""
