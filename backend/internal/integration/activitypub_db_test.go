@@ -265,6 +265,41 @@ func TestOutboundWebhookDeliveryLifecycle(t *testing.T) {
 	require.Zero(t, enqueued, "the same activity event must not enqueue twice")
 }
 
+func TestOutboundWebhookReclaimsExpiredDeliveryLease(t *testing.T) {
+	db := openIntegrationDB(t)
+	resetIntegrationDB(t, db)
+
+	ctx := context.Background()
+	cfg := activitypub.NewConfig("http://localhost:8080", "localhost:8080")
+	userService := user.NewService(user.NewRepository(db, cfg), []byte("integration-secret"), cfg)
+	owner, err := userService.BootstrapAdmin(ctx, "lease-owner", "lease-owner@example.test", "password123")
+	require.NoError(t, err)
+	projectService := project.NewService(project.NewRepository(db, cfg), cfg)
+	ticketService := ticket.NewService(ticket.NewRepository(db, cfg), projectService, cfg)
+	projectValue, err := projectService.CreateProject(ctx, "Lease project", "", owner.ID)
+	require.NoError(t, err)
+
+	repository := outboundwebhook.NewRepository(db)
+	service := outboundwebhook.NewService(repository, projectService, secrets.NoopPrivateKeyCodec{}, outboundwebhook.WithAllowPrivateNetworks(true))
+	_, err = service.Create(ctx, projectValue.ID, owner.ID, "lease test", "http://127.0.0.1:8081/hook", []string{"ticket.created"})
+	require.NoError(t, err)
+	_, err = ticketService.CreateTicket(ctx, ticket.CreateTicketRequest{Title: "Lease trigger", Type: "task", Priority: "medium"}, projectValue.ID, owner.ID)
+	require.NoError(t, err)
+	_, err = repository.EnqueueActivityEvents(ctx)
+	require.NoError(t, err)
+
+	claimedAt := time.Now().UTC()
+	firstClaim, err := repository.Claim(ctx, claimedAt)
+	require.NoError(t, err)
+	require.Equal(t, "processing", firstClaim.Status)
+
+	secondClaim, err := repository.Claim(ctx, claimedAt.Add(6*time.Minute))
+	require.NoError(t, err)
+	require.Equal(t, firstClaim.ID, secondClaim.ID)
+	require.Equal(t, 2, secondClaim.Attempts)
+	require.Equal(t, "processing", secondClaim.Status)
+}
+
 func TestConcurrentOwnerDemotionKeepsOneOwner(t *testing.T) {
 	db := openIntegrationDB(t)
 	resetIntegrationDB(t, db)

@@ -16,6 +16,8 @@ var ErrNotFound = errors.New("outbound webhook not found")
 // Repository persists webhook configuration and durable deliveries.
 type Repository struct{ db *sqlx.DB }
 
+const deliveryLeaseTimeout = 5 * time.Minute
+
 // NewRepository creates an outbound webhook repository.
 func NewRepository(db *sqlx.DB) *Repository { return &Repository{db: db} }
 
@@ -120,6 +122,19 @@ func (r *Repository) Claim(ctx context.Context, now time.Time) (*Delivery, error
 		return nil, err
 	}
 	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE project_webhook_deliveries
+		SET status = CASE WHEN attempts >= max_attempts THEN 'dead' ELSE 'failed' END,
+			next_attempt_at = $1,
+			last_error = CASE
+				WHEN last_error = '' THEN 'delivery lease expired before completion'
+				ELSE left(last_error || '; delivery lease expired before completion', 1000)
+			END,
+			updated_at = $1
+		WHERE status = 'processing' AND updated_at <= $2
+	`, now, now.Add(-deliveryLeaseTimeout)); err != nil {
+		return nil, err
+	}
 	var value Delivery
 	err = tx.GetContext(ctx, &value, `
 		SELECT delivery.id::text, delivery.webhook_id::text, webhook.name AS webhook_name,
