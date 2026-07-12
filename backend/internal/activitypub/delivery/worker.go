@@ -65,6 +65,11 @@ type WorkerMetrics interface {
 	ObserveDeliveryAttempt(outcome, failureKind string, statusCode *int, duration time.Duration)
 }
 
+// FailureNotifier receives terminal delivery failures for local user alerts.
+type FailureNotifier interface {
+	NotifyFederationDeliveryFailed(ctx context.Context, delivery Delivery, failureKind string) error
+}
+
 // remoteActorInboxResolver resolves a remote actor from a target inbox URL.
 type remoteActorInboxResolver interface {
 	RemoteActorAPIDByInboxURL(ctx context.Context, inboxURL string) (string, error)
@@ -80,6 +85,7 @@ type Worker struct {
 	requireHTTPS             bool
 	allowPrivateNetworks     bool
 	metrics                  WorkerMetrics
+	failureNotifier          FailureNotifier
 }
 
 // WorkerOption configures a delivery worker.
@@ -129,6 +135,13 @@ func WithTargetActorRefreshMaxAge(maxAge time.Duration) WorkerOption {
 func WithMetrics(metrics WorkerMetrics) WorkerOption {
 	return func(w *Worker) {
 		w.metrics = metrics
+	}
+}
+
+// WithFailureNotifier attaches terminal federation failure notification delivery.
+func WithFailureNotifier(notifier FailureNotifier) WorkerOption {
+	return func(w *Worker) {
+		w.failureNotifier = notifier
 	}
 }
 
@@ -223,6 +236,11 @@ func (w *Worker) HandleDeliveryTask(ctx context.Context, task *asynq.Task) error
 			return markErr
 		}
 		if !retryable {
+			if w.failureNotifier != nil {
+				if notifyErr := w.failureNotifier.NotifyFederationDeliveryFailed(ctx, *delivery, details.Kind); notifyErr != nil {
+					log.Printf("activitypub_delivery_notification_failed delivery_id=%s error=%q", delivery.ID, notifyErr.Error())
+				}
+			}
 			w.observeDeliveryAttempt(DeliveryMetricDead, details.Kind, details.StatusCode, startedAt)
 			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
 		}

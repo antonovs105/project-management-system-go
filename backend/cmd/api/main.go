@@ -138,6 +138,7 @@ var requiredDatabaseTables = []string{
 	"github_commits",
 	"github_commit_ticket_links",
 	"notifications",
+	"notification_preferences",
 }
 
 // appRole selects which server responsibilities this process owns.
@@ -536,12 +537,16 @@ func main() {
 	notificationService := notification.NewService(
 		notification.NewRepository(db),
 		notification.WithEventPublisher(notificationEvents),
+		notification.WithEmailQueue(accountRepository, publicBaseURL),
 	)
+	accountService.SetSecurityNotificationSink(notificationService)
+	projectService.SetNotificationSink(notificationService)
 	ticketService.SetNotificationSink(notificationService)
 	notificationHandler := notification.NewHandler(notificationService, notification.WithEventSubscriber(notificationEvents))
 
 	commentRepo := comment.NewRepository(db, apConfig)
 	commentService := comment.NewService(commentRepo, ticketService, apConfig)
+	commentService.SetNotificationSink(notificationService)
 	commentHandler := comment.NewHandler(commentService)
 
 	githubClient := githubintegration.NewHTTPClient(githubintegration.WithToken(cfg.GitHub.APIToken))
@@ -590,6 +595,7 @@ func main() {
 				nil,
 				delivery.WithRemoteActorRefresher(remoteActorService),
 				delivery.WithMetrics(metrics),
+				delivery.WithFailureNotifier(notificationService),
 				delivery.WithRequireHTTPS(requireHTTPSFederation),
 				delivery.WithAllowPrivateNetworks(allowPrivateFederationNetworks),
 			)
@@ -644,6 +650,14 @@ func main() {
 	if role.runsWorker() {
 		stopEmailDispatcher := accountService.StartEmailDispatcher(context.Background(), 5*time.Second)
 		defer stopEmailDispatcher()
+		stopDueNotifications := notificationService.StartDueNotificationLoop(context.Background(), 15*time.Minute, func(processed int, err error) {
+			if err != nil {
+				log.Printf("Due notification dispatch failed: %v", err)
+			} else if processed > 0 {
+				log.Printf("Due notification dispatch processed %d candidates", processed)
+			}
+		})
+		defer stopDueNotifications()
 		if attachmentService != nil {
 			stopAttachmentCleanup := attachmentService.StartOrphanCleanupLoop(context.Background(), time.Hour, time.Hour, func(deleted int, err error) {
 				if err != nil {

@@ -46,6 +46,10 @@ func (s *testNotificationSink) NotifyTicketAssigned(_ context.Context, assigneeI
 	return nil
 }
 
+func (*testNotificationSink) NotifyTicketStatusChanged(context.Context, []string, string, Ticket, string) error {
+	return nil
+}
+
 func TestService_CreateTicket(t *testing.T) {
 	mockRepo := new(MockRepository)
 	mockProject := new(MockProjectChecker)

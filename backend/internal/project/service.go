@@ -38,14 +38,21 @@ const (
 
 // Service contains project board, membership, and invite workflows.
 type Service struct {
-	repo     Repository
-	apConfig activitypub.Config
-	delivery DeliveryEnqueuer
+	repo          Repository
+	apConfig      activitypub.Config
+	delivery      DeliveryEnqueuer
+	notifications NotificationSink
 }
 
 // DeliveryEnqueuer queues ActivityPub deliveries created by project actions.
 type DeliveryEnqueuer interface {
 	EnqueuePersisted(ctx context.Context, deliveries []apdelivery.QueueCandidate) error
+}
+
+// NotificationSink receives local notifications caused by membership workflows.
+type NotificationSink interface {
+	NotifyProjectInvited(ctx context.Context, inviteeID, actorID, projectID string) error
+	NotifyProjectRoleChanged(ctx context.Context, userID, actorID, projectID, roleName string) error
 }
 
 // NewService creates a project service.
@@ -59,6 +66,11 @@ func NewService(repo Repository, apConfig activitypub.Config) *Service {
 // SetDelivery attaches the delivery queue used for project federation.
 func (s *Service) SetDelivery(delivery DeliveryEnqueuer) {
 	s.delivery = delivery
+}
+
+// SetNotificationSink attaches local membership notification delivery.
+func (s *Service) SetNotificationSink(notifications NotificationSink) {
+	s.notifications = notifications
 }
 
 // CreateProject creates a project actor, owner membership, and Create activity.
@@ -347,7 +359,16 @@ func (s *Service) UpdateProjectMemberRole(ctx context.Context, projectID, actorI
 	if err != nil {
 		return nil, invalidProjectInput("invalid project role")
 	}
-	return s.repo.UpdateMemberRole(ctx, projectID, targetUserID, role.ID)
+	member, err := s.repo.UpdateMemberRole(ctx, projectID, targetUserID, role.ID)
+	if err != nil {
+		return nil, err
+	}
+	if s.notifications != nil && targetUserID != actorID {
+		if err := s.notifications.NotifyProjectRoleChanged(ctx, targetUserID, actorID, projectID, role.Name); err != nil {
+			log.Printf("failed to create role-change notification for project %s member %s: %v", projectID, targetUserID, err)
+		}
+	}
+	return member, nil
 }
 
 // AddMemberToProject creates a pending project invite for a local or remote actor.
@@ -414,6 +435,11 @@ func (s *Service) AddMemberToProject(ctx context.Context, projectID, currentUser
 	}
 	if result != nil {
 		s.enqueueDeliveries(ctx, result.ProjectID, result.Deliveries)
+	}
+	if s.notifications != nil && newUserID != currentUserID {
+		if err := s.notifications.NotifyProjectInvited(ctx, newUserID, currentUserID, projectID); err != nil {
+			log.Printf("failed to create project invite notification for project %s invitee %s: %v", projectID, newUserID, err)
+		}
 	}
 	return invite, nil
 }

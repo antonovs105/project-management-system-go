@@ -32,10 +32,11 @@ type TicketChecker interface {
 
 // Service contains comment workflows and ActivityPub side effects.
 type Service struct {
-	repo     Repository
-	tickets  TicketChecker
-	apConfig activitypub.Config
-	delivery DeliveryEnqueuer
+	repo          Repository
+	tickets       TicketChecker
+	apConfig      activitypub.Config
+	delivery      DeliveryEnqueuer
+	notifications NotificationSink
 }
 
 // NewService creates a comment service.
@@ -48,9 +49,19 @@ type DeliveryEnqueuer interface {
 	EnqueuePersisted(ctx context.Context, deliveries []apdelivery.QueueCandidate) error
 }
 
+// NotificationSink receives local notifications caused by comment workflows.
+type NotificationSink interface {
+	NotifyCommentCreated(ctx context.Context, actorID string, ticket ticket.Ticket, content string) error
+}
+
 // SetDelivery attaches the delivery queue used for comment federation.
 func (s *Service) SetDelivery(delivery DeliveryEnqueuer) {
 	s.delivery = delivery
+}
+
+// SetNotificationSink attaches local comment and mention notifications.
+func (s *Service) SetNotificationSink(notifications NotificationSink) {
+	s.notifications = notifications
 }
 
 // CreateComment creates a Note on a ticket and records its Create activity.
@@ -86,6 +97,11 @@ func (s *Service) CreateComment(ctx context.Context, ticketID, authorID, content
 		return nil, err
 	}
 	s.enqueueDeliveries(ctx, ticket.ProjectID, result.Deliveries)
+	if s.notifications != nil {
+		if err := s.notifications.NotifyCommentCreated(ctx, authorID, *ticket, content); err != nil {
+			log.Printf("failed to create comment notifications for ticket %s: %v", ticket.ID, err)
+		}
+	}
 	return comment, nil
 }
 

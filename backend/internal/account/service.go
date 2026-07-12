@@ -45,12 +45,18 @@ const (
 
 // Service implements account recovery and session lifecycle behavior.
 type Service struct {
-	repository  *Repository
-	publicURL   string
-	productName string
-	mailer      Mailer
-	development bool
-	secretCodec secrets.PrivateKeyCodec
+	repository    *Repository
+	publicURL     string
+	productName   string
+	mailer        Mailer
+	development   bool
+	secretCodec   secrets.PrivateKeyCodec
+	notifications SecurityNotificationSink
+}
+
+// SecurityNotificationSink receives user-visible sensitive account events.
+type SecurityNotificationSink interface {
+	NotifySecurityEvent(ctx context.Context, userID, subject, body string) error
 }
 
 // Option customizes account security dependencies.
@@ -63,6 +69,11 @@ func WithSecretCodec(codec secrets.PrivateKeyCodec) Option {
 			service.secretCodec = codec
 		}
 	}
+}
+
+// SetSecurityNotificationSink routes security alerts through notification preferences.
+func (s *Service) SetSecurityNotificationSink(notifications SecurityNotificationSink) {
+	s.notifications = notifications
 }
 
 // NewService returns an account security service.
@@ -391,6 +402,9 @@ func (s *Service) queueChallenge(ctx context.Context, userID, email, purpose str
 
 // queueSecurityAlert writes a durable email alert for a sensitive account event.
 func (s *Service) queueSecurityAlert(ctx context.Context, userID, subject, body string) error {
+	if s.notifications != nil {
+		return s.notifications.NotifySecurityEvent(ctx, userID, subject, body)
+	}
 	email, _, err := s.repository.UserEmail(ctx, userID)
 	if err != nil {
 		return err

@@ -83,6 +83,17 @@ func (f actorRefresherFunc) RefreshIfStale(ctx context.Context, actorAPID string
 	return f(ctx, actorAPID, maxAge)
 }
 
+type failureNotifier struct {
+	deliveryID string
+	kind       string
+}
+
+func (n *failureNotifier) NotifyFederationDeliveryFailed(_ context.Context, value Delivery, failureKind string) error {
+	n.deliveryID = value.ID
+	n.kind = failureKind
+	return nil
+}
+
 func TestNewWorkerRecordsPrivateNetworkPolicy(t *testing.T) {
 	worker := NewWorker(&workerRepo{}, signerFunc(func(ctx context.Context, actorID string, req *http.Request, body []byte) error {
 		return nil
@@ -332,11 +343,12 @@ func TestWorkerRetriesNetworkFailure(t *testing.T) {
 
 func TestWorkerSkipsRetryForPermanentFailure(t *testing.T) {
 	repo := &workerRepo{delivery: testDelivery(1, 5)}
+	notifier := &failureNotifier{}
 	worker := NewWorker(repo, signerFunc(func(ctx context.Context, actorID string, req *http.Request, body []byte) error {
 		return nil
 	}), httpClientFunc(func(req *http.Request) (*http.Response, error) {
 		return response(http.StatusNotFound, "gone"), nil
-	}))
+	}), WithFailureNotifier(notifier))
 
 	err := worker.HandleDeliveryTask(context.Background(), taskForDelivery(t, "delivery-1"))
 
@@ -347,6 +359,8 @@ func TestWorkerSkipsRetryForPermanentFailure(t *testing.T) {
 	require.NotNil(t, repo.failedDetails.StatusCode)
 	assert.Equal(t, http.StatusNotFound, *repo.failedDetails.StatusCode)
 	assert.Nil(t, repo.nextAttempt)
+	assert.Equal(t, "delivery-1", notifier.deliveryID)
+	assert.Equal(t, FailureKindHTTP, notifier.kind)
 }
 
 func TestWorkerSkipsRetryForUnsupportedInboxScheme(t *testing.T) {

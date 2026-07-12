@@ -41,6 +41,7 @@ type DeliveryEnqueuer interface {
 // NotificationSink receives local user notifications caused by ticket workflows.
 type NotificationSink interface {
 	NotifyTicketAssigned(ctx context.Context, assigneeID, actorID string, ticket Ticket) error
+	NotifyTicketStatusChanged(ctx context.Context, recipientIDs []string, actorID string, ticket Ticket, previousStatus string) error
 }
 
 // NewService creates a ticket service.
@@ -290,6 +291,7 @@ func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, tic
 		return apperror.New(apperror.ErrPrecondition, "ticket was changed by another request")
 	}
 	previousAssigneeID := ticketToUpdate.AssigneeID
+	previousStatus := ticketToUpdate.Status
 	if err := s.requireProjectPermission(ctx, ticketToUpdate.ProjectID, userID, project.PermissionTicketsUpdate, "insufficient permissions: missing tickets.update"); err != nil {
 		return err
 	}
@@ -403,6 +405,9 @@ func (s *Service) UpdateTicket(ctx context.Context, req UpdateTicketRequest, tic
 	s.publishTicketEvent(Event{Type: EventTicketUpdated, ProjectID: ticketToUpdate.ProjectID, TicketID: ticketToUpdate.ID})
 	if assigneeChanged(previousAssigneeID, ticketToUpdate.AssigneeID) {
 		s.notifyTicketAssigned(ctx, userID, ticketToUpdate)
+	}
+	if previousStatus != ticketToUpdate.Status {
+		s.notifyTicketStatusChanged(ctx, userID, ticketToUpdate, previousStatus)
 	}
 	return nil
 }
@@ -831,6 +836,20 @@ func (s *Service) notifyTicketAssigned(ctx context.Context, actorID string, tick
 	}
 	if err := s.notifications.NotifyTicketAssigned(ctx, *ticket.AssigneeID, actorID, *ticket); err != nil {
 		log.Printf("failed to create assignment notification for ticket %s assignee %s: %v", ticket.ID, *ticket.AssigneeID, err)
+	}
+}
+
+// notifyTicketStatusChanged alerts local reporter/assignee participants.
+func (s *Service) notifyTicketStatusChanged(ctx context.Context, actorID string, value *Ticket, previousStatus string) {
+	if s.notifications == nil || value == nil {
+		return
+	}
+	recipients := []string{value.ReporterID}
+	if value.AssigneeID != nil && *value.AssigneeID != "" {
+		recipients = append(recipients, *value.AssigneeID)
+	}
+	if err := s.notifications.NotifyTicketStatusChanged(ctx, recipients, actorID, *value, previousStatus); err != nil {
+		log.Printf("failed to create status notification for ticket %s: %v", value.ID, err)
 	}
 }
 
