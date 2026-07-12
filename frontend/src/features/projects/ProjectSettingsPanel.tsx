@@ -1,53 +1,45 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Activity,
   AlertTriangle,
-  BarChart3,
-  CheckCircle2,
   Clock3,
   Copy,
   Download,
   FileJson,
-  Flame,
   Github,
   GitBranch,
   Link2,
   History,
   RefreshCw,
-  ListChecks,
   Mail,
   Pencil,
   Plus,
   Send,
-  Shield,
   Trash2,
   UserMinus,
   UserPlus,
   Users,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { FormEvent } from "react";
 import { toast } from "sonner";
 import { Button, ErrorState, LoadingState, Modal, Panel, SelectField, TextAreaField, TextField } from "../../components/ui";
 import { api, errorMessage } from "../../lib/api";
-import { projectPermissionGroups, ticketPriorities, ticketStatuses } from "../../lib/constants";
+import { projectPermissionGroups } from "../../lib/constants";
 import { compactId, initials, relativeDate } from "../../lib/format";
 import { fieldLimits } from "../../lib/limits";
 import { queryKeys } from "../../lib/queryKeys";
 import type {
   ID,
-  GitHubCommit,
   GitHubRepository,
   Project,
-  ProjectDeliverySummary,
   ProjectInvite,
-  ProjectInviteInspection,
-  ProjectMember,
   ProjectPermission,
   ProjectRole,
   Ticket,
 } from "../../types";
 import { ProjectLabelsPanel } from "./ProjectLabelsPanel";
+import { MetricPill, ProjectAdminOverview } from "./ProjectAdminOverview";
+import { downloadText, githubCommitsToCSV, githubRepositoriesToCSV, invitesToCSV, membersToCSV, safeFilePart } from "./projectSettingsExports";
 
 function allProjectPermissions(): ProjectPermission[] {
   return projectPermissionGroups.flatMap((group) => group.permissions.map((permission) => permission.id));
@@ -106,183 +98,6 @@ function permissionsSummary(role: ProjectRole): string {
   return `${role.permissions.length} permissions`;
 }
 
-function percent(count: number, total: number): number {
-  if (total === 0) {
-    return 0;
-  }
-  return Math.round((count / total) * 100);
-}
-
-function safeFilePart(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "project";
-}
-
-function csvCell(value: string | number | boolean | null | undefined): string {
-  const raw = value === null || value === undefined ? "" : String(value);
-  return `"${raw.replace(/"/g, '""')}"`;
-}
-
-function downloadText(filename: string, mimeType: string, content: string) {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
-function ticketsToCSV(tickets: Ticket[]): string {
-  const header = [
-    "id",
-    "title",
-    "status",
-    "priority",
-    "type",
-    "is_resolved",
-    "parent_id",
-    "assignee_id",
-    "reporter_id",
-    "created_at",
-    "updated_at",
-  ];
-  const rows = tickets.map((ticket) => [
-    ticket.id,
-    ticket.title,
-    ticket.status,
-    ticket.priority,
-    ticket.type,
-    ticket.is_resolved,
-    ticket.parent_id,
-    ticket.assignee_id,
-    ticket.reporter_id,
-    ticket.created_at,
-    ticket.updated_at,
-  ]);
-  return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
-}
-
-function membersToCSV(members: ProjectMember[]): string {
-  const header = ["user_id", "username", "email", "handle", "name", "is_remote", "role_id", "role", "role_name", "created_at"];
-  const rows = members.map((member) => [
-    member.user_id,
-    member.username,
-    member.email,
-    member.handle,
-    member.name,
-    String(member.is_remote),
-    member.role_id,
-    member.role,
-    member.role_name,
-    member.created_at,
-  ]);
-  return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
-}
-
-function invitesToCSV(invites: ProjectInviteInspection[]): string {
-  const header = [
-    "id",
-    "status",
-    "invitee_actor_id",
-    "invitee_username",
-    "invitee_email",
-    "invitee_handle",
-    "role_id",
-    "role",
-    "role_name",
-    "inviter_actor_id",
-    "inviter_username",
-    "created_at",
-    "updated_at",
-  ];
-  const rows = invites.map((invite) => [
-    invite.id,
-    invite.status,
-    invite.invitee_actor_id,
-    invite.invitee_username,
-    invite.invitee_email,
-    invite.invitee_handle,
-    invite.role_id,
-    invite.role,
-    invite.role_name,
-    invite.inviter_actor_id,
-    invite.inviter_username,
-    invite.created_at,
-    invite.updated_at,
-  ]);
-  return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
-}
-
-function githubRepositoriesToCSV(repositories: GitHubRepository[]): string {
-  const header = [
-    "id",
-    "project_id",
-    "full_name",
-    "html_url",
-    "default_branch",
-    "last_synced_at",
-    "last_webhook_at",
-    "last_sync_error",
-    "commit_count",
-    "linked_commit_count",
-    "manual_link_count",
-    "created_at",
-    "updated_at",
-  ];
-  const rows = repositories.map((repo) => [
-    repo.id,
-    repo.project_id,
-    repo.full_name,
-    repo.html_url,
-    repo.default_branch,
-    repo.last_synced_at,
-    repo.last_webhook_at,
-    repo.last_sync_error,
-    repo.commit_count,
-    repo.linked_commit_count,
-    repo.manual_link_count,
-    repo.created_at,
-    repo.updated_at,
-  ]);
-  return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
-}
-
-function githubCommitsToCSV(commits: GitHubCommit[]): string {
-  const header = [
-    "id",
-    "repository_id",
-    "repository_full_name",
-    "sha",
-    "short_sha",
-    "message",
-    "author_name",
-    "author_email",
-    "authored_at",
-    "html_url",
-    "ticket_ids",
-    "link_source",
-    "created_at",
-    "updated_at",
-  ];
-  const rows = commits.map((commit) => [
-    commit.id,
-    commit.repository_id,
-    commit.repository_full_name,
-    commit.sha,
-    commit.short_sha,
-    commit.message,
-    commit.author_name,
-    commit.author_email,
-    commit.authored_at,
-    commit.html_url,
-    commit.ticket_ids.join(" "),
-    commit.link_source,
-    commit.created_at,
-    commit.updated_at,
-  ]);
-  return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
-}
-
 function actorTitle(name: string, username: string, handle: string): string {
   return name || username || handle || "Unknown actor";
 }
@@ -324,180 +139,6 @@ function PersonMark({ label }: { label: string }) {
     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-zinc-50 text-xs font-semibold text-zinc-700">
       {initials(label)}
     </div>
-  );
-}
-
-function MetricPill({
-  icon,
-  label,
-  value,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: number | string;
-}) {
-  return (
-    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-3">
-      <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-zinc-400">
-        {icon}
-        {label}
-      </div>
-      <div className="mt-2 text-2xl font-semibold text-zinc-950">{value}</div>
-    </div>
-  );
-}
-
-function DistributionList({ title, rows, total }: { title: string; rows: Array<{ id: string; label: string; count: number }>; total: number }) {
-  return (
-    <div className="rounded-2xl border border-zinc-200 p-4">
-      <h3 className="text-sm font-semibold text-zinc-950">{title}</h3>
-      <div className="mt-4 grid gap-3">
-        {rows.map((row) => (
-          <div key={row.id} className="grid gap-1.5">
-            <div className="flex items-center justify-between gap-3 text-sm">
-              <span className="text-zinc-600">{row.label}</span>
-              <span className="font-medium text-zinc-950">{row.count}</span>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-zinc-100">
-              <div className="h-full rounded-full bg-zinc-950" style={{ width: `${percent(row.count, total)}%` }} />
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ProjectAdminOverview({ project, tickets }: { project: Project; tickets: Ticket[] }) {
-  const roles = useQuery({
-    queryKey: queryKeys.projectRoles(project.id),
-    queryFn: () => api.listProjectRoles(project.id),
-  });
-  const deliverySummary = useQuery({
-    queryKey: queryKeys.projectDeliverySummary(project.id),
-    queryFn: () => api.getProjectDeliverySummary(project.id),
-  });
-
-  const statusRows = ticketStatuses.map((status) => ({
-    ...status,
-    count: tickets.filter((ticket) => ticket.status === status.id).length,
-  }));
-  const priorityRows = ticketPriorities.map((priority) => ({
-    ...priority,
-    count: tickets.filter((ticket) => ticket.priority === priority.id).length,
-  }));
-  const activeTickets = tickets.filter((ticket) => ticket.status === "in_progress" || ticket.status === "review").length;
-  const urgentTickets = tickets.filter((ticket) => ticket.priority === "urgent").length;
-  const doneTickets = tickets.filter((ticket) => ticket.status === "done").length;
-  const customRoles = roles.data?.filter((role) => !role.is_system).length || 0;
-  const delivery = deliverySummary.data;
-
-  function exportJSON() {
-    const report: {
-      project: Project;
-      generated_at: string;
-      ticket_summary: Record<string, number>;
-      status_distribution: typeof statusRows;
-      priority_distribution: typeof priorityRows;
-      roles: ProjectRole[];
-      delivery_summary: ProjectDeliverySummary | null;
-      tickets: Ticket[];
-    } = {
-      project,
-      generated_at: new Date().toISOString(),
-      ticket_summary: {
-        total: tickets.length,
-        active: activeTickets,
-        urgent: urgentTickets,
-        done: doneTickets,
-        unresolved: tickets.length - doneTickets,
-      },
-      status_distribution: statusRows,
-      priority_distribution: priorityRows,
-      roles: roles.data || [],
-      delivery_summary: delivery || null,
-      tickets,
-    };
-    downloadText(`${safeFilePart(project.name)}-report.json`, "application/json", `${JSON.stringify(report, null, 2)}\n`);
-  }
-
-  function exportCSV() {
-    downloadText(`${safeFilePart(project.name)}-tickets.csv`, "text/csv", `${ticketsToCSV(tickets)}\n`);
-  }
-
-  return (
-    <Panel className="overflow-hidden">
-      <div className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-start md:justify-between">
-        <div>
-          <h2 className="flex items-center gap-2 text-base font-semibold text-zinc-950">
-            <BarChart3 size={17} />
-            Administration Overview
-          </h2>
-          <p className="mt-1 text-sm text-zinc-500">Operational snapshot and exports for project administrators.</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={exportCSV} disabled={tickets.length === 0}>
-            <Download size={16} />
-            CSV
-          </Button>
-          <Button onClick={exportJSON}>
-            <FileJson size={16} />
-            JSON
-          </Button>
-        </div>
-      </div>
-
-      <div className="grid gap-3 border-t border-zinc-100 p-4 sm:grid-cols-2 xl:grid-cols-5">
-        <MetricPill icon={<ListChecks size={14} />} label="Tickets" value={tickets.length} />
-        <MetricPill icon={<Clock3 size={14} />} label="Active" value={activeTickets} />
-        <MetricPill icon={<Flame size={14} />} label="Urgent" value={urgentTickets} />
-        <MetricPill icon={<CheckCircle2 size={14} />} label="Done" value={doneTickets} />
-        <MetricPill icon={<Shield size={14} />} label="Custom Roles" value={roles.isLoading ? "..." : customRoles} />
-      </div>
-
-      <div className="grid gap-4 border-t border-zinc-100 p-4 xl:grid-cols-[1fr_1fr_0.8fr]">
-        <DistributionList title="Ticket Status" rows={statusRows} total={tickets.length} />
-        <DistributionList title="Priority Mix" rows={priorityRows} total={tickets.length} />
-        <div className="rounded-2xl border border-zinc-200 p-4">
-          <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-950">
-            <Activity size={15} />
-            Delivery Health
-          </h3>
-          {deliverySummary.isLoading ? <div className="mt-4 text-sm text-zinc-500">Loading delivery summary</div> : null}
-          {deliverySummary.isError ? (
-            <div className="mt-4">
-              <ErrorState title="Could not load delivery summary" body={errorMessage(deliverySummary.error, "Delivery summary failed.")} />
-            </div>
-          ) : null}
-          {delivery ? (
-            <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-              <div className="rounded-xl bg-zinc-50 p-3">
-                <div className="text-xs text-zinc-400">Total</div>
-                <div className="mt-1 font-semibold text-zinc-950">{delivery.total}</div>
-              </div>
-              <div className="rounded-xl bg-zinc-50 p-3">
-                <div className="text-xs text-zinc-400">Failed</div>
-                <div className="mt-1 font-semibold text-zinc-950">{delivery.failed + delivery.dead}</div>
-              </div>
-              <div className="rounded-xl bg-zinc-50 p-3">
-                <div className="text-xs text-zinc-400">Retryable</div>
-                <div className="mt-1 font-semibold text-zinc-950">{delivery.retryable}</div>
-              </div>
-              <div className="rounded-xl bg-zinc-50 p-3">
-                <div className="text-xs text-zinc-400">Can Retry</div>
-                <div className="mt-1 font-semibold text-zinc-950">{delivery.can_retry ? "yes" : "no"}</div>
-              </div>
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      {roles.isError ? (
-        <div className="border-t border-zinc-100 p-4">
-          <ErrorState title="Could not load role summary" body={errorMessage(roles.error, "Role summary failed.")} />
-        </div>
-      ) : null}
-    </Panel>
   );
 }
 
